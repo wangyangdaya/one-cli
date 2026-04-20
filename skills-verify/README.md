@@ -24,3 +24,20 @@ uv sync
 cd skills-verify
 uv run python main.py --prompt "Use the auth skill to inspect available auth commands"
 ```
+
+## Model Wiring
+
+Set `SKILLS_VERIFY_MODEL` to an import path in `module:attribute` form before running:
+
+```bash
+export SKILLS_VERIFY_MODEL="your_package.your_module:your_model"
+```
+
+## Verification Prompt
+
+Example:
+
+```bash
+cd skills-verify
+uv run python main.py --prompt "Use the auth skill to inspect available auth commands"
+```
