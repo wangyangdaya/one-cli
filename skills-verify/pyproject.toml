@@ -1,0 +1,13 @@
+[project]
+name = "skills-verify"
+version = "0.1.0"
+description = "Verification harness for generated opencli skills"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "deepagents",
+    "langchain-core",
+]
+
+[tool.uv]
+package = false
