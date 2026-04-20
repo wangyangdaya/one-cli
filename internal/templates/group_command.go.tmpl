@@ -1,0 +1,112 @@
+package {{ .Group.Name }}
+
+import (
+	"fmt"
+
+	"github.com/spf13/cobra"
+)
+
+func NewCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "{{ .Group.Name }}",
+		Short: "{{ .Group.Name }} operations",
+	}
+{{- range .Group.Operations }}
+	cmd.AddCommand(new{{ .CommandName | pascal }}Command())
+{{- end }}
+	return cmd
+}
+
+{{- range .Group.Operations }}
+func new{{ .CommandName | pascal }}Command() *cobra.Command {
+{{- if .BodyMode }}
+	var bodyData string
+	var bodyFile string
+{{- end }}
+{{- range .Parameters }}
+{{- if or (eq .In "path") (eq .In "query") }}
+	var param{{ .Name | pascal }} {{ goType .Type }}
+{{- end }}
+{{- end }}
+{{- range .BodyFields }}
+	var body{{ .Name | pascal }} {{ goType .Type }}
+{{- end }}
+	cmd := &cobra.Command{
+		Use:   "{{ .CommandName }}",
+		Short: "{{ .Method }} {{ .Path }}",
+{{- if eq .BodyMode "simple-json" }}
+		Long:  "{{ .Method }} {{ .Path }}\n\nBody input: {{ bodyFlagHelp .BodyFields }}, --data, or --file",
+{{- else if eq .BodyMode "file-or-data" }}
+		Long:  "{{ .Method }} {{ .Path }}\n\nBody input: --data or --file",
+{{- end }}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			input := {{ .CommandName | pascal }}Input{
+{{- range .Parameters }}
+{{- if or (eq .In "path") (eq .In "query") }}
+				{{ .Name | pascal }}: param{{ .Name | pascal }},
+{{- end }}
+{{- end }}
+{{- if .BodyMode }}
+				BodyData: bodyData,
+				BodyFile: bodyFile,
+{{- end }}
+{{- range .BodyFields }}
+				{{ .Name | pascal }}: body{{ .Name | pascal }},
+{{- end }}
+			}
+			result, err := Invoke{{ .CommandName | pascal }}(input)
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Message)
+			return err
+		},
+	}
+{{- if .BodyMode }}
+	cmd.Flags().StringVar(&bodyData, "data", "", "Raw JSON request body")
+	cmd.Flags().StringVar(&bodyFile, "file", "", "Path to JSON request body file")
+{{- end }}
+{{- range .Parameters }}
+{{- if eq .In "path" }}
+{{- if eq (goType .Type) "string" }}
+	cmd.Flags().StringVar(&param{{ .Name | pascal }}, "{{ .Name }}", "", "Path parameter: {{ .Name }}")
+{{- else if eq (goType .Type) "int" }}
+	cmd.Flags().IntVar(&param{{ .Name | pascal }}, "{{ .Name }}", 0, "Path parameter: {{ .Name }}")
+{{- else if eq (goType .Type) "float64" }}
+	cmd.Flags().Float64Var(&param{{ .Name | pascal }}, "{{ .Name }}", 0, "Path parameter: {{ .Name }}")
+{{- else if eq (goType .Type) "bool" }}
+	cmd.Flags().BoolVar(&param{{ .Name | pascal }}, "{{ .Name }}", false, "Path parameter: {{ .Name }}")
+{{- end }}
+{{- if .Required }}
+	_ = cmd.MarkFlagRequired("{{ .Name }}")
+{{- end }}
+{{- end }}
+{{- if eq .In "query" }}
+{{- if eq (goType .Type) "string" }}
+	cmd.Flags().StringVar(&param{{ .Name | pascal }}, "{{ .Name }}", "", "Query parameter: {{ .Name }}")
+{{- else if eq (goType .Type) "int" }}
+	cmd.Flags().IntVar(&param{{ .Name | pascal }}, "{{ .Name }}", 0, "Query parameter: {{ .Name }}")
+{{- else if eq (goType .Type) "float64" }}
+	cmd.Flags().Float64Var(&param{{ .Name | pascal }}, "{{ .Name }}", 0, "Query parameter: {{ .Name }}")
+{{- else if eq (goType .Type) "bool" }}
+	cmd.Flags().BoolVar(&param{{ .Name | pascal }}, "{{ .Name }}", false, "Query parameter: {{ .Name }}")
+{{- end }}
+{{- if .Required }}
+	_ = cmd.MarkFlagRequired("{{ .Name }}")
+{{- end }}
+{{- end }}
+{{- end }}
+{{- range .BodyFields }}
+{{- if eq (goType .Type) "string" }}
+	cmd.Flags().StringVar(&body{{ .Name | pascal }}, "{{ .Name }}", "", "JSON body field: {{ .Name }}")
+{{- else if eq (goType .Type) "int" }}
+	cmd.Flags().IntVar(&body{{ .Name | pascal }}, "{{ .Name }}", 0, "JSON body field: {{ .Name }}")
+{{- else if eq (goType .Type) "float64" }}
+	cmd.Flags().Float64Var(&body{{ .Name | pascal }}, "{{ .Name }}", 0, "JSON body field: {{ .Name }}")
+{{- else if eq (goType .Type) "bool" }}
+	cmd.Flags().BoolVar(&body{{ .Name | pascal }}, "{{ .Name }}", false, "JSON body field: {{ .Name }}")
+{{- end }}
+{{- end }}
+	return cmd
+}
+{{ end -}}

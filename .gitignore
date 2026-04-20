@@ -1,0 +1,45 @@
+# Build outputs
+bin/
+dist/
+tmp/
+examples/
+docs/
+.tmp/
+
+# Environment and secrets
+.env
+*.env.local
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go coverage
+*.coverprofile
+coverage.txt
+coverage.html
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Dependency directories
+vendor/
+
+# Generated CLI projects (temporary)
+tmp/*/
+
+# OS-specific
+Thumbs.db
+
+.tool-versions
+/AGENTS.md

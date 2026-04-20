@@ -1,0 +1,30 @@
+# {{ .App.Name }} {{ .Group.Name }} Skill
+
+{{- if .Group.Description }}
+{{ .Group.Description }}
+
+{{- end }}
+## Commands
+
+{{- range .Group.Operations }}
+- `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}`: {{ .Method }} {{ .Path }}{{ if .Summary }} - {{ .Summary }}{{ end }}
+{{- end }}
+
+## Usage Notes
+
+{{- range .Group.Operations }}
+### `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}`
+
+- Method: `{{ .Method }}`
+- Path: `{{ .Path }}`
+{{- if .Parameters }}
+- Parameters:
+{{- range .Parameters }}
+  - `{{ .Name }}` (`{{ .In }}`{{ if .Type }}, `{{ .Type }}`{{ end }}){{ if .Required }} required{{ else }} optional{{ end }}
+{{- end }}
+{{- end }}
+{{- if .BodyMode }}
+- Body input: `{{ .BodyMode }}`
+{{- end }}
+
+{{- end }}

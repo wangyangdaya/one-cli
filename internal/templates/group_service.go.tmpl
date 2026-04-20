@@ -1,0 +1,206 @@
+package {{ .Group.Name }}
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+{{- if groupHasBodyInput .Group }}
+	"os"
+{{- end }}
+
+	"{{ .Module }}/internal/config"
+	"{{ .Module }}/internal/httpx"
+)
+
+{{- range .Group.Operations }}
+type {{ .CommandName | pascal }}Input struct {
+{{- range .Parameters }}
+{{- if or (eq .In "path") (eq .In "query") }}
+	{{ .Name | pascal }} {{ goType .Type }}
+{{- end }}
+{{- end }}
+{{- if .BodyMode }}
+	BodyData string
+	BodyFile string
+{{- end }}
+{{- range .BodyFields }}
+	{{ .Name | pascal }} {{ goType .Type }}
+{{- end }}
+}
+
+func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (Result, error) {
+	requestURL, err := build{{ .CommandName | pascal }}URL(input)
+	if err != nil {
+		return Result{}, err
+	}
+
+	body, err := build{{ .CommandName | pascal }}Body(input)
+	if err != nil {
+		return Result{}, err
+	}
+
+	var reader io.Reader
+	if len(body) > 0 {
+		reader = bytes.NewReader(body)
+	}
+
+	req, err := http.NewRequest(http.Method{{ .Method | pascal }}, requestURL, reader)
+	if err != nil {
+		return Result{}, fmt.Errorf("build request: %w", err)
+	}
+	if len(body) > 0 {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := httpx.NewClient().Do(req)
+	if err != nil {
+		return Result{}, fmt.Errorf("request {{ .Method }} {{ .Path }}: %w", err)
+	}
+	defer resp.Body.Close()
+
+	payload, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return Result{}, fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return Result{}, fmt.Errorf("request failed: %s", resp.Status)
+	}
+	if len(bytes.TrimSpace(payload)) == 0 {
+		return Result{Message: "{{ .Method }} {{ .Path }}"}, nil
+	}
+
+	var result Result
+	if err := json.Unmarshal(payload, &result); err == nil && strings.TrimSpace(result.Message) != "" {
+		return result, nil
+	}
+	return Result{Message: strings.TrimSpace(string(payload))}, nil
+}
+
+func build{{ .CommandName | pascal }}URL(input {{ .CommandName | pascal }}Input) (string, error) {
+	baseURL := strings.TrimSpace(config.Lookup("OPENCLI_BASE_URL"))
+	if baseURL == "" {
+		return "", fmt.Errorf("missing OPENCLI_BASE_URL")
+	}
+
+	requestURL, err := url.Parse(strings.TrimRight(baseURL, "/") + "{{ .Path }}")
+	if err != nil {
+		return "", fmt.Errorf("parse request URL: %w", err)
+	}
+{{- range .Parameters }}
+{{- if eq .In "path" }}
+	requestURL.Path = strings.ReplaceAll(requestURL.Path, {{ printf "%q" (printf "{%s}" .Name) }}, url.PathEscape(fmt.Sprint(input.{{ .Name | pascal }})))
+{{- end }}
+{{- end }}
+	query := requestURL.Query()
+{{- range .Parameters }}
+{{- if eq .In "query" }}
+{{- if eq (goType .Type) "string" }}
+	if strings.TrimSpace(input.{{ .Name | pascal }}) != "" {
+		query.Set("{{ .Name }}", input.{{ .Name | pascal }})
+	}
+{{- else if eq (goType .Type) "int" }}
+	if input.{{ .Name | pascal }} != 0 {
+		query.Set("{{ .Name }}", fmt.Sprint(input.{{ .Name | pascal }}))
+	}
+{{- else if eq (goType .Type) "float64" }}
+	if input.{{ .Name | pascal }} != 0 {
+		query.Set("{{ .Name }}", fmt.Sprint(input.{{ .Name | pascal }}))
+	}
+{{- else if eq (goType .Type) "bool" }}
+	if input.{{ .Name | pascal }} {
+		query.Set("{{ .Name }}", fmt.Sprint(input.{{ .Name | pascal }}))
+	}
+{{- end }}
+{{- end }}
+{{- end }}
+	requestURL.RawQuery = query.Encode()
+	return requestURL.String(), nil
+}
+
+func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input) ([]byte, error) {
+{{- if not .BodyMode }}
+	return nil, nil
+{{- else }}
+	hasData := strings.TrimSpace(input.BodyData) != ""
+	hasFile := strings.TrimSpace(input.BodyFile) != ""
+	hasFlagBody := false
+{{- range .BodyFields }}
+{{- if eq (goType .Type) "string" }}
+	hasFlagBody = hasFlagBody || strings.TrimSpace(input.{{ .Name | pascal }}) != ""
+{{- else if eq (goType .Type) "int" }}
+	hasFlagBody = hasFlagBody || input.{{ .Name | pascal }} != 0
+{{- else if eq (goType .Type) "float64" }}
+	hasFlagBody = hasFlagBody || input.{{ .Name | pascal }} != 0
+{{- else if eq (goType .Type) "bool" }}
+	hasFlagBody = hasFlagBody || input.{{ .Name | pascal }}
+{{- end }}
+{{- end }}
+
+	switch {
+	case hasData && hasFile:
+		return nil, fmt.Errorf("--data and --file are mutually exclusive")
+	case hasFlagBody && (hasData || hasFile):
+		return nil, fmt.Errorf("body input flags cannot be combined with --data or --file")
+	case hasData:
+		return []byte(input.BodyData), nil
+	case hasFile:
+		return os.ReadFile(input.BodyFile)
+{{- if eq .BodyMode "simple-json" }}
+	case hasFlagBody:
+{{- range .BodyFields }}
+{{- if .Required }}
+{{- if eq (goType .Type) "string" }}
+		if strings.TrimSpace(input.{{ .Name | pascal }}) == "" {
+			return nil, fmt.Errorf("missing required body field: {{ .Name }}")
+		}
+{{- else if eq (goType .Type) "int" }}
+		if input.{{ .Name | pascal }} == 0 {
+			return nil, fmt.Errorf("missing required body field: {{ .Name }}")
+		}
+{{- else if eq (goType .Type) "float64" }}
+		if input.{{ .Name | pascal }} == 0 {
+			return nil, fmt.Errorf("missing required body field: {{ .Name }}")
+		}
+{{- else if eq (goType .Type) "bool" }}
+		if !input.{{ .Name | pascal }} {
+			return nil, fmt.Errorf("missing required body field: {{ .Name }}")
+		}
+{{- end }}
+{{- end }}
+{{- end }}
+		payload := map[string]any{}
+{{- range .BodyFields }}
+{{- if eq (goType .Type) "string" }}
+		if strings.TrimSpace(input.{{ .Name | pascal }}) != "" {
+			payload["{{ .Name }}"] = input.{{ .Name | pascal }}
+		}
+{{- else if eq (goType .Type) "int" }}
+		if input.{{ .Name | pascal }} != 0 {
+			payload["{{ .Name }}"] = input.{{ .Name | pascal }}
+		}
+{{- else if eq (goType .Type) "float64" }}
+		if input.{{ .Name | pascal }} != 0 {
+			payload["{{ .Name }}"] = input.{{ .Name | pascal }}
+		}
+{{- else if eq (goType .Type) "bool" }}
+		if input.{{ .Name | pascal }} {
+			payload["{{ .Name }}"] = input.{{ .Name | pascal }}
+		}
+{{- end }}
+{{- end }}
+		return json.Marshal(payload)
+{{- end }}
+	default:
+{{- if .BodyRequired }}
+		return nil, fmt.Errorf("request body is required")
+{{- else }}
+		return nil, nil
+{{- end }}
+	}
+{{- end }}
+}
+{{ end -}}
