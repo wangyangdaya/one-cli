@@ -7,6 +7,8 @@ requires-python = ">=3.11"
 dependencies = [
     "deepagents",
     "langchain-core",
+    "langchain-openai",
+    "python-dotenv",
 ]
 
 [tool.uv]

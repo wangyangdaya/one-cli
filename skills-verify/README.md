@@ -16,6 +16,7 @@ CLI backend for the generated `openapi-cli`.
 ```bash
 cd skills-verify
 uv sync
+cp .env.example .env
 ```
 
 ## Run
@@ -25,13 +26,24 @@ cd skills-verify
 uv run python main.py --prompt "Use the auth skill to inspect available auth commands"
 ```
 
-## Model Wiring
+## Environment
 
-Set `SKILLS_VERIFY_MODEL` to an import path in `module:attribute` form before running:
+`main.py` loads environment variables from `skills-verify/.env`.
+
+Start from the template:
 
 ```bash
-export SKILLS_VERIFY_MODEL="your_package.your_module:your_model"
+cp .env.example .env
 ```
+
+Required variables:
+
+- `LLM_BASE_URL`
+- `LLM_API_KEY`
+
+Optional variables:
+
+- `LLM_MODEL_NAME` defaults to `gpt-4o-mini`
 
 ## Verification Prompt
 

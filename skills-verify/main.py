@@ -14,20 +14,48 @@ Only use commands that can be executed through the provided CLI backend.
 Do not invent APIs or shell commands.
 """
 
+DEFAULT_MODEL_NAME = "gpt-4o-mini"
+
 
 def resolve_repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def resolve_model():
-    model_path = os.environ.get("SKILLS_VERIFY_MODEL")
-    if not model_path:
+def load_environment() -> None:
+    try:
+        from dotenv import load_dotenv
+    except ImportError as exc:  # pragma: no cover
         raise SystemExit(
-            "Set SKILLS_VERIFY_MODEL to a Python import path such as package.module:model."
-        )
-    module_name, attr_name = model_path.split(":", 1)
-    module = __import__(module_name, fromlist=[attr_name])
-    return getattr(module, attr_name)
+            "python-dotenv is required. Install dependencies with `uv sync` in skills-verify/."
+        ) from exc
+
+    env_file = Path(__file__).with_name(".env")
+    load_dotenv(env_file)
+
+
+def build_llm():
+    try:
+        from langchain_openai import ChatOpenAI
+    except ImportError as exc:  # pragma: no cover
+        raise SystemExit(
+            "langchain-openai is required. Install dependencies with `uv sync` in skills-verify/."
+        ) from exc
+
+    base_url = os.getenv("LLM_BASE_URL")
+    api_key = os.getenv("LLM_API_KEY")
+    model_name = os.getenv("LLM_MODEL_NAME", DEFAULT_MODEL_NAME)
+    if not base_url:
+        raise SystemExit("Set LLM_BASE_URL in skills-verify/.env.")
+    if not api_key:
+        raise SystemExit("Set LLM_API_KEY in skills-verify/.env.")
+
+    return ChatOpenAI(
+        model=model_name,
+        stream_usage=True,
+        temperature=0.3,
+        base_url=base_url,
+        api_key=api_key,
+    )
 
 
 def build_agent():
@@ -45,7 +73,7 @@ def build_agent():
         raise SystemExit(f"Skills directory not found: {skills_dir}")
 
     return create_deep_agent(
-        model=resolve_model(),
+        model=build_llm(),
         backend=CliBackend(repo_root=repo_root),
         system_prompt=SYSTEM_PROMPT,
         skills=[str(skills_dir)],
@@ -72,6 +100,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    load_environment()
     args = parse_args()
     prompt = args.prompt.strip()
     if not prompt:
