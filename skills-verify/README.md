@@ -26,6 +26,13 @@ cd skills-verify
 uv run python main.py
 ```
 
+Or specify a checkpoint thread id:
+
+```bash
+cd skills-verify
+uv run python main.py --thread-id demo
+```
+
 ## Environment
 
 `main.py` loads environment variables from `skills-verify/.env`.
@@ -40,11 +47,13 @@ Required variables:
 
 - `LLM_BASE_URL`
 - `LLM_API_KEY`
+- `OPENCLI_BASE_URL` for the generated CLI backend
 
 Optional variables:
 
 - `LLM_MODEL_NAME` defaults to `gpt-4o-mini`
 - `LOG_LEVEL` defaults to `INFO`
+- `SKILLS_VERIFY_THREAD_ID` defaults to `skills-verify`
 
 ## Verification Prompt
 

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"one-cli/internal/model"
@@ -39,6 +40,14 @@ func TestRenderProject(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "skills", "leave", "SKILL.md")); err != nil {
 		t.Fatalf("missing generated skill markdown: %v", err)
+	}
+	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "leave", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated skill markdown: %v", err)
+	}
+	skillText := string(skillContent)
+	if !strings.HasPrefix(skillText, "---\nname: leave\ndescription: Commands for the leave group in one\n---\n") {
+		t.Fatalf("generated skill markdown missing YAML frontmatter:\n%s", skillText)
 	}
 
 	cmd := exec.Command("go", "test", "./...")

@@ -5,18 +5,14 @@ import shlex
 import subprocess
 from pathlib import Path
 
+from deepagents.backends.filesystem import FilesystemBackend
+from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
+
 
 SHELL_CONTROL_TOKENS = {";", "&&", "||", "|", ">", ">>", "<", "2>", "2>>", "&"}
 
 
-class ExecuteResponse:
-    def __init__(self, output: str, exit_code: int, truncated: bool = False) -> None:
-        self.output = output
-        self.exit_code = exit_code
-        self.truncated = truncated
-
-
-class CliBackend:
+class CliBackend(FilesystemBackend, SandboxBackendProtocol):
     def __init__(
         self,
         repo_root: str | Path,
@@ -27,6 +23,11 @@ class CliBackend:
         env: dict[str, str] | None = None,
         inherit_env: bool = True,
     ) -> None:
+        super().__init__(
+            root_dir=repo_root,
+            virtual_mode=False,
+            max_file_size_mb=10,
+        )
         self.repo_root = Path(repo_root).resolve()
         self.app_dir = (self.repo_root / app_dir).resolve()
         self.skills_dir = self.app_dir / "skills"
@@ -40,6 +41,10 @@ class CliBackend:
                 self._env.update(env)
         else:
             self._env = dict(env or {})
+
+        opencli_base_url = os.getenv("OPENCLI_BASE_URL")
+        if opencli_base_url:
+            self._env["OPENCLI_BASE_URL"] = opencli_base_url
 
         path_parts = [part for part in self._env.get("PATH", "").split(os.pathsep) if part]
         for candidate in (self.app_dir / "bin", self.app_dir):

@@ -1,3 +1,8 @@
+---
+name: {{ .Group.Name }}
+description: {{- if .Group.Description }} {{ .Group.Description }}{{- else }} Commands for the {{ .Group.Name }} group in {{ .App.Name }}{{- end }}
+---
+
 # {{ .App.Name }} {{ .Group.Name }} Skill
 
 {{- if .Group.Description }}
