@@ -23,7 +23,7 @@ cp .env.example .env
 
 ```bash
 cd skills-verify
-uv run python main.py --prompt "Use the auth skill to inspect available auth commands"
+uv run python main.py
 ```
 
 ## Environment
@@ -44,6 +44,7 @@ Required variables:
 Optional variables:
 
 - `LLM_MODEL_NAME` defaults to `gpt-4o-mini`
+- `LOG_LEVEL` defaults to `INFO`
 
 ## Verification Prompt
 
@@ -51,5 +52,12 @@ Example:
 
 ```bash
 cd skills-verify
-uv run python main.py --prompt "Use the auth skill to inspect available auth commands"
+uv run python main.py
+```
+
+Then interact in the terminal:
+
+```text
+用户: Use the auth skill to inspect available auth commands
+助手: ...
 ```

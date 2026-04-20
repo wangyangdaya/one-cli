@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 from pathlib import Path
 
@@ -15,10 +16,19 @@ Do not invent APIs or shell commands.
 """
 
 DEFAULT_MODEL_NAME = "gpt-4o-mini"
+DEFAULT_LOG_LEVEL = "INFO"
+logger = logging.getLogger("skills_verify")
 
 
 def resolve_repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
+
+
+def setup_logging() -> None:
+    logging.basicConfig(
+        level=getattr(logging, os.getenv("LOG_LEVEL", DEFAULT_LOG_LEVEL).upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
 
 
 def load_environment() -> None:
@@ -81,9 +91,14 @@ def build_agent():
     )
 
 
-async def run_prompt(prompt: str) -> str:
-    agent = build_agent()
-    result = await agent.ainvoke({"messages": [{"role": "user", "content": prompt}]})
+def get_all_skills(skills_dir: Path) -> dict[str, str]:
+    skills_files: dict[str, str] = {}
+    for skill_file in sorted(skills_dir.rglob("SKILL.md")):
+        skills_files[str(skill_file)] = skill_file.read_text(encoding="utf-8")
+    return skills_files
+
+
+def extract_text(result) -> str:
     if isinstance(result, dict):
         messages = result.get("messages", [])
         if messages:
@@ -93,20 +108,60 @@ async def run_prompt(prompt: str) -> str:
     return str(result)
 
 
+async def run_repl() -> int:
+    repo_root = resolve_repo_root()
+    skills_dir = repo_root / "tmp" / "openapi" / "skills"
+    if not skills_dir.exists():
+        raise SystemExit(f"Skills directory not found: {skills_dir}")
+
+    print("正在初始化 openapi skills verifier（请稍候）...", flush=True)
+    print(f"skills 目录: {skills_dir}", flush=True)
+    logger.info("agent.init repo_root=%s skills_dir=%s", repo_root, skills_dir)
+
+    agent = build_agent()
+    skills_files = get_all_skills(skills_dir)
+    print(f"skills 已加载: {len(skills_files)} 个", flush=True)
+    for skill_path in sorted(skills_files):
+        print(f"  - {skill_path}", flush=True)
+    print("已就绪。q / quit / exit / 退出 结束。", flush=True)
+
+    messages: list[dict[str, str]] = []
+    while True:
+        try:
+            user_input = input("\n用户: ").strip()
+        except EOFError:
+            print("\n(EOF)", flush=True)
+            logger.info("repl.eof")
+            break
+
+        if not user_input:
+            continue
+        if user_input.lower() in ("退出", "quit", "exit", "q"):
+            print("再见。", flush=True)
+            logger.info("repl.exit")
+            break
+
+        logger.info("turn.start user_input=%s", user_input)
+        messages.append({"role": "user", "content": user_input})
+        result = await agent.ainvoke({"messages": messages})
+        assistant_text = extract_text(result)
+        messages.append({"role": "assistant", "content": assistant_text})
+        logger.info("turn.end assistant_output=%s", assistant_text)
+        print(f"\n助手: {assistant_text}", flush=True)
+
+    return 0
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Validate generated opencli skills")
-    parser.add_argument("--prompt", required=True, help="Prompt to send to the agent")
+    parser = argparse.ArgumentParser(description="Validate generated opencli skills interactively")
     return parser.parse_args()
 
 
 def main() -> int:
+    setup_logging()
     load_environment()
-    args = parse_args()
-    prompt = args.prompt.strip()
-    if not prompt:
-        raise SystemExit("Prompt must not be empty.")
-    print(asyncio.run(run_prompt(prompt)))
-    return 0
+    parse_args()
+    return asyncio.run(run_repl())
 
 
 if __name__ == "__main__":
