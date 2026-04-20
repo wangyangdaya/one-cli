@@ -8,7 +8,7 @@ import (
 )
 
 func TestJSONSuccessEnvelope(t *testing.T) {
-	out, err := output.JSONSuccess("one-leave get", "查询成功", map[string]string{"k": "v"})
+	out, err := output.JSONSuccess("mycli users list", "查询成功", map[string]string{"k": "v"})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -21,7 +21,7 @@ func TestJSONSuccessEnvelope(t *testing.T) {
 	if !envelope.OK {
 		t.Fatal("expected ok=true")
 	}
-	if envelope.Command != "one-leave get" {
+	if envelope.Command != "mycli users list" {
 		t.Fatalf("unexpected command: %q", envelope.Command)
 	}
 	if envelope.Message != "查询成功" {
@@ -38,7 +38,7 @@ func TestJSONSuccessEnvelope(t *testing.T) {
 }
 
 func TestJSONErrorEnvelope(t *testing.T) {
-	out, err := output.JSONError("one-leave request", "validation_error", "bad input")
+	out, err := output.JSONError("mycli users create", "validation_error", "bad input")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -51,7 +51,7 @@ func TestJSONErrorEnvelope(t *testing.T) {
 	if envelope.OK {
 		t.Fatal("expected ok=false")
 	}
-	if envelope.Command != "one-leave request" {
+	if envelope.Command != "mycli users create" {
 		t.Fatalf("unexpected command: %q", envelope.Command)
 	}
 	if envelope.Error.Code != "validation_error" {

@@ -52,7 +52,7 @@ func Do(client *http.Client, req *http.Request) (*http.Response, []byte, error) 
 	resp, err := client.Do(req)
 	if err != nil {
 		if req != nil && req.URL != nil {
-			logf("[opencli][http] request_failed method=%s url=%s err=%v", req.Method, req.URL.String(), err)
+			logf("[opencli][http] request_failed\n  method: %s\n  url: %s\n  error: %v", req.Method, req.URL.String(), err)
 		}
 		return nil, nil, err
 	}
@@ -61,7 +61,7 @@ func Do(client *http.Client, req *http.Request) (*http.Response, []byte, error) 
 	if err != nil {
 		_ = resp.Body.Close()
 		if req != nil && req.URL != nil {
-			logf("[opencli][http] response_read_failed method=%s url=%s status=%d err=%v", req.Method, req.URL.String(), resp.StatusCode, err)
+			logf("[opencli][http] response_read_failed\n  method: %s\n  url: %s\n  status: %d\n  error: %v", req.Method, req.URL.String(), resp.StatusCode, err)
 		}
 		return nil, nil, err
 	}
@@ -69,7 +69,7 @@ func Do(client *http.Client, req *http.Request) (*http.Response, []byte, error) 
 	resp.Body = io.NopCloser(bytes.NewReader(body))
 
 	if req != nil && req.URL != nil {
-		logf("[opencli][http] response method=%s url=%s status=%d body=%s", req.Method, req.URL.String(), resp.StatusCode, preview(body))
+		logf("[opencli][http] response\n  method: %s\n  url: %s\n  status: %d\n  body: %s", req.Method, req.URL.String(), resp.StatusCode, preview(body))
 	}
 
 	return resp, body, nil
@@ -90,7 +90,7 @@ func (t traceTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := base.RoundTrip(req)
 	if err != nil {
 		if req != nil && req.URL != nil {
-			logf("[opencli][http] request_failed method=%s url=%s err=%v", req.Method, req.URL.String(), err)
+			logf("[opencli][http] request_failed\n  method: %s\n  url: %s\n  error: %v", req.Method, req.URL.String(), err)
 		}
 		return nil, err
 	}
@@ -99,7 +99,7 @@ func (t traceTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if readErr != nil {
 		_ = resp.Body.Close()
 		if req != nil && req.URL != nil {
-			logf("[opencli][http] response_read_failed method=%s url=%s status=%d err=%v", req.Method, req.URL.String(), resp.StatusCode, readErr)
+			logf("[opencli][http] response_read_failed\n  method: %s\n  url: %s\n  status: %d\n  error: %v", req.Method, req.URL.String(), resp.StatusCode, readErr)
 		}
 		return nil, readErr
 	}
@@ -107,7 +107,7 @@ func (t traceTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp.Body = io.NopCloser(bytes.NewReader(body))
 
 	if req != nil && req.URL != nil {
-		logf("[opencli][http] response method=%s url=%s status=%d body=%s", req.Method, req.URL.String(), resp.StatusCode, preview(body))
+		logf("[opencli][http] response\n  method: %s\n  url: %s\n  status: %d\n  body: %s", req.Method, req.URL.String(), resp.StatusCode, preview(body))
 	}
 
 	return resp, nil
@@ -142,7 +142,7 @@ func logRequest(req *http.Request) {
 	}
 
 	logf(
-		"[opencli][http] request method=%s url=%s query=%s headers=%s body=%s",
+		"[opencli][http] request\n  method: %s\n  url: %s\n  query: %s\n  headers: %s\n  body: %s",
 		req.Method,
 		req.URL.String(),
 		previewValues(req.URL.Query()),

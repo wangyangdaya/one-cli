@@ -31,5 +31,13 @@ description: {{- if .Group.Description }} {{ .Group.Description }}{{- else }} Co
 {{- if .BodyMode }}
 - Body input: `{{ .BodyMode }}`
 {{- end }}
+{{- if operationHasHeaderParams . }}
+- Header input: use `--header "Name: Value"` for header parameters
+{{- range .Parameters }}
+{{- if eq .In "header" }}
+- Header example: `--header "{{ .Name }}: <value>"`
+{{- end }}
+{{- end }}
+{{- end }}
 
 {{- end }}

@@ -20,6 +20,14 @@ Simple JSON body endpoints accept top-level flags plus raw JSON input modes:
 ./bin/{{ .App.Name }} auth login --file login.json
 ```
 
+## Header Input
+
+Endpoints with OpenAPI header parameters accept repeatable `--header` flags:
+
+```bash
+./bin/{{ .App.Name }} auth me --header "Authorization: Bearer token"
+```
+
 ## Trace
 
 Enable HTTP request and response tracing with:

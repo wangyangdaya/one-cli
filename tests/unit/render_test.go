@@ -61,3 +61,43 @@ func TestRenderProject(t *testing.T) {
 		t.Fatalf("generated project should compile, got %v, output: %s", err, string(out))
 	}
 }
+
+func TestRenderProjectSkillIncludesHeaderUsageNotes(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name: "one",
+		Groups: []model.Group{
+			{
+				Name: "auth",
+				Operations: []model.Operation{
+					{
+						CommandName: "me",
+						Method:      "GET",
+						Path:        "/auth/me",
+						Parameters: []model.Parameter{
+							{Name: "authorization", In: "header", Type: "string"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := render.Project(dir, "github.com/acme/one-cli", app); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+
+	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "auth", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated skill markdown: %v", err)
+	}
+	skillText := string(skillContent)
+	for _, want := range []string{
+		"`authorization` (`header`, `string`) optional",
+		"`--header \"authorization: <value>\"`",
+	} {
+		if !strings.Contains(skillText, want) {
+			t.Fatalf("generated skill markdown missing %q:\n%s", want, skillText)
+		}
+	}
+}

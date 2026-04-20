@@ -344,7 +344,6 @@ make clean
 make build-host              # 当前主机
 make build-darwin-arm64      # macOS ARM64
 make build-linux-amd64       # Linux AMD64
-make build-example-one-leave # 示例项目
 ```
 
 ---

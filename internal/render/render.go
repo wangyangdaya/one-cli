@@ -100,10 +100,12 @@ func renderTemplate(name string, data any) ([]byte, error) {
 	}
 
 	tmpl, err := template.New(name).Funcs(template.FuncMap{
-		"pascal":            pascal,
-		"bodyFlagHelp":      bodyFlagHelp,
-		"goType":            goType,
-		"groupHasBodyInput": groupHasBodyInput,
+		"pascal":                   pascal,
+		"bodyFlagHelp":             bodyFlagHelp,
+		"goType":                   goType,
+		"groupHasBodyInput":        groupHasBodyInput,
+		"groupHasHeaderParams":     groupHasHeaderParams,
+		"operationHasHeaderParams": operationHasHeaderParams,
 	}).Parse(string(raw))
 	if err != nil {
 		return nil, err
@@ -164,6 +166,24 @@ func goType(value string) string {
 func groupHasBodyInput(group model.Group) bool {
 	for _, operation := range group.Operations {
 		if strings.TrimSpace(operation.BodyMode) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func groupHasHeaderParams(group model.Group) bool {
+	for _, operation := range group.Operations {
+		if operationHasHeaderParams(operation) {
+			return true
+		}
+	}
+	return false
+}
+
+func operationHasHeaderParams(operation model.Operation) bool {
+	for _, parameter := range operation.Parameters {
+		if strings.TrimSpace(parameter.In) == "header" {
 			return true
 		}
 	}

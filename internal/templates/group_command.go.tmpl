@@ -23,6 +23,9 @@ func new{{ .CommandName | pascal }}Command() *cobra.Command {
 	var bodyData string
 	var bodyFile string
 {{- end }}
+{{- if operationHasHeaderParams . }}
+	var headers []string
+{{- end }}
 {{- range .Parameters }}
 {{- if or (eq .In "path") (eq .In "query") }}
 	var param{{ .Name | pascal }} {{ goType .Type }}
@@ -50,6 +53,9 @@ func new{{ .CommandName | pascal }}Command() *cobra.Command {
 				BodyData: bodyData,
 				BodyFile: bodyFile,
 {{- end }}
+{{- if operationHasHeaderParams . }}
+				Headers: headers,
+{{- end }}
 {{- range .BodyFields }}
 				{{ .Name | pascal }}: body{{ .Name | pascal }},
 {{- end }}
@@ -65,6 +71,9 @@ func new{{ .CommandName | pascal }}Command() *cobra.Command {
 {{- if .BodyMode }}
 	cmd.Flags().StringVar(&bodyData, "data", "", "Raw JSON request body")
 	cmd.Flags().StringVar(&bodyFile, "file", "", "Path to JSON request body file")
+{{- end }}
+{{- if operationHasHeaderParams . }}
+	cmd.Flags().StringArrayVar(&headers, "header", nil, "Request header in 'Name: Value' format; repeatable")
 {{- end }}
 {{- range .Parameters }}
 {{- if eq .In "path" }}
