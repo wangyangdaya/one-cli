@@ -98,9 +98,12 @@ def build_agent():
     if not skills_dir.exists():
         raise SystemExit(f"Skills directory not found: {skills_dir}")
 
+    # Get allowed executables from environment variable
+    executables = os.getenv("ALLOWED_EXECUTABLES", "openapi-cli")
+
     return create_deep_agent(
         model=build_llm(),
-        backend=CliBackend(repo_root=repo_root, app_dir=app_dir),
+        backend=CliBackend(repo_root=repo_root, app_dir=app_dir, executables=executables),
         system_prompt=SYSTEM_PROMPT,
         skills=[str(skills_dir)],
         checkpointer=MemorySaver(),

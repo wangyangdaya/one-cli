@@ -18,7 +18,7 @@ class CliBackend(FilesystemBackend, SandboxBackendProtocol):
         repo_root: str | Path,
         *,
         app_dir: str | Path = "tmp/openapi",
-        executable: str = "openapi-cli",
+        executables: str | list[str] = "openapi-cli",
         timeout: int = 120,
         env: dict[str, str] | None = None,
         inherit_env: bool = True,
@@ -34,7 +34,17 @@ class CliBackend(FilesystemBackend, SandboxBackendProtocol):
             resolved_app_dir = self.repo_root / resolved_app_dir
         self.app_dir = resolved_app_dir.resolve()
         self.skills_dir = self.app_dir / "skills"
-        self.executable = executable
+        
+        # Support multiple executables
+        if isinstance(executables, str):
+            # Support comma-separated list from env var
+            self.executables = [e.strip() for e in executables.split(",") if e.strip()]
+        else:
+            self.executables = list(executables)
+        
+        if not self.executables:
+            self.executables = ["openapi-cli"]
+        
         self.timeout = timeout
         self.cwd = self.app_dir
 
@@ -64,18 +74,24 @@ class CliBackend(FilesystemBackend, SandboxBackendProtocol):
 
         if not args:
             return None
-        if os.path.basename(args[0]) != self.executable:
+        
+        # Check if the command matches any of the allowed executables
+        command_basename = os.path.basename(args[0])
+        if command_basename not in self.executables:
             return None
+        
         if any(arg in SHELL_CONTROL_TOKENS for arg in args[1:]):
             return None
-        args[0] = self.executable
+        
+        # Keep the original command name (don't replace it)
         return args
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         args = self._parse(command)
         if args is None:
+            allowed = ", ".join(self.executables)
             return ExecuteResponse(
-                output="Error: Only openapi-cli commands are allowed.",
+                output=f"Error: Only these commands are allowed: {allowed}",
                 exit_code=126,
             )
 
