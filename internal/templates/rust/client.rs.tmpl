@@ -1,0 +1,163 @@
+use reqwest::Method;
+use serde_json::{json, Value};
+
+use crate::types::AppResult;
+
+pub async fn request(
+    method: &str,
+    path: &str,
+    query: Vec<(String, String)>,
+    headers: Vec<(String, String)>,
+    body: Option<Value>,
+) -> AppResult<Value> {
+    let base_url = std::env::var("OPENCLI_BASE_URL")
+        .map_err(|_| "missing OPENCLI_BASE_URL".to_string())?;
+    let trimmed = base_url.trim_end_matches('/');
+    let mut url = reqwest::Url::parse(&format!("{trimmed}{path}")).map_err(|err| err.to_string())?;
+    {
+        let mut pairs = url.query_pairs_mut();
+        for (name, value) in query {
+            pairs.append_pair(&name, &value);
+        }
+    }
+
+    let method = Method::from_bytes(method.as_bytes()).map_err(|err| err.to_string())?;
+    let client = reqwest::Client::new();
+    let mut request = client.request(method, url);
+    for (name, value) in headers {
+        request = request.header(name, value);
+    }
+    if let Some(body) = body {
+        request = request.json(&body);
+    }
+
+    let response = request.send().await.map_err(|err| err.to_string())?;
+    let status = response.status();
+    let text = response.text().await.map_err(|err| err.to_string())?;
+    if !status.is_success() {
+        return Err(format!("request failed: {status}"));
+    }
+    if text.trim().is_empty() {
+        return Ok(json!({ "status": status.as_u16() }));
+    }
+    serde_json::from_str(&text).or_else(|_| Ok(json!({ "message": text })))
+}
+
+pub fn parse_headers(values: &[String]) -> AppResult<Vec<(String, String)>> {
+    let mut headers = Vec::with_capacity(values.len());
+    for raw in values {
+        let Some((name, value)) = raw.split_once(':') else {
+            return Err(format!("invalid --header value {raw:?}: expected Name: Value"));
+        };
+        let name = name.trim();
+        let value = value.trim();
+        if name.is_empty() || value.is_empty() {
+            return Err(format!("invalid --header value {raw:?}: expected Name: Value"));
+        }
+        headers.push((name.to_string(), value.to_string()));
+	}
+	Ok(headers)
+}
+
+pub async fn call_mcp_tool(
+    endpoint: &str,
+    headers: Vec<(String, String)>,
+    tool_name: &str,
+    arguments: Value,
+) -> AppResult<Value> {
+    let request_url = std::env::var("OPENCLI_BASE_URL").unwrap_or_else(|_| endpoint.to_string());
+    if request_url.trim().is_empty() {
+        return Err("missing OPENCLI_BASE_URL".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    let initialize = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-03-26",
+            "capabilities": {},
+            "clientInfo": { "name": "opencli-rust", "version": "0.1.0" }
+        }
+    });
+    let (session_id, _) = send_mcp_request(&client, &request_url, &headers, None, initialize).await?;
+
+    let call = json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": tool_name,
+            "arguments": arguments
+        }
+    });
+    let (_, result) = send_mcp_request(&client, &request_url, &headers, session_id.as_deref(), call).await?;
+    Ok(result)
+}
+
+async fn send_mcp_request(
+    client: &reqwest::Client,
+    request_url: &str,
+    headers: &[(String, String)],
+    session_id: Option<&str>,
+    payload: Value,
+) -> AppResult<(Option<String>, Value)> {
+    let mut request = client
+        .post(request_url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream");
+
+    for (name, value) in headers {
+        if name.eq_ignore_ascii_case("Mcp-Session-Id") {
+            continue;
+        }
+        request = request.header(name, value);
+    }
+    if let Some(session_id) = session_id {
+        if !session_id.trim().is_empty() {
+            request = request.header("Mcp-Session-Id", session_id);
+        }
+    }
+
+    let response = request
+        .body(payload.to_string())
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+    let status = response.status();
+    let response_session = response
+        .headers()
+        .get("Mcp-Session-Id")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_string());
+    let body = response.text().await.map_err(|err| err.to_string())?;
+    if !status.is_success() {
+        return Err(format!("mcp request failed: {status}"));
+    }
+
+    let payload = parse_mcp_payload(&body)?;
+    let result = payload
+        .get("result")
+        .cloned()
+        .unwrap_or_else(|| json!({ "message": body }));
+    Ok((response_session, result))
+}
+
+fn parse_mcp_payload(body: &str) -> AppResult<Value> {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return Ok(json!({}));
+    }
+    if trimmed.starts_with('{') {
+        return serde_json::from_str(trimmed).map_err(|err| err.to_string());
+    }
+
+    for line in trimmed.lines() {
+        if let Some(data) = line.strip_prefix("data: ") {
+            return serde_json::from_str(data.trim()).map_err(|err| err.to_string());
+        }
+    }
+
+    Err("unable to parse MCP response payload".to_string())
+}

@@ -1,0 +1,30 @@
+use clap::{Parser, Subcommand};
+
+use crate::commands;
+use crate::types::AppResult;
+
+#[derive(Parser)]
+#[command(name = "{{ .App.Name }}", about = "{{ .App.Name }} CLI")]
+struct Cli {
+    #[command(subcommand)]
+    command: GroupCommand,
+}
+
+#[derive(Subcommand)]
+enum GroupCommand {
+{{- range .App.Groups }}
+    {{ .Name | pascal }} {
+        #[command(subcommand)]
+        command: commands::{{ rustModuleName . }}::Command,
+    },
+{{- end }}
+}
+
+pub async fn run() -> AppResult<()> {
+    let cli = Cli::parse();
+    match cli.command {
+{{- range .App.Groups }}
+        GroupCommand::{{ .Name | pascal }} { command } => command.run().await,
+{{- end }}
+    }
+}

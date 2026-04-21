@@ -1,0 +1,3 @@
+{{- range .App.Groups }}
+pub mod {{ rustModuleName . }};
+{{- end }}

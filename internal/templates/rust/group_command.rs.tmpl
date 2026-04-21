@@ -1,0 +1,151 @@
+use clap::{Args, Subcommand};
+use serde_json::{Map, Value};
+
+use crate::client;
+use crate::output;
+use crate::types::AppResult;
+
+#[derive(Subcommand)]
+pub enum Command {
+{{- range .Group.Operations }}
+    {{ .CommandName | pascal }}({{ .CommandName | pascal }}Args),
+{{- end }}
+}
+
+impl Command {
+    pub async fn run(self) -> AppResult<()> {
+        match self {
+{{- range .Group.Operations }}
+            Command::{{ .CommandName | pascal }}(args) => run_{{ rustFieldName .CommandName }}(args).await,
+{{- end }}
+        }
+    }
+}
+
+{{- range .Group.Operations }}
+#[derive(Args)]
+pub struct {{ .CommandName | pascal }}Args {
+{{- range .Parameters }}
+{{- if eq .In "path" }}
+    #[arg(long)]
+    pub {{ rustFieldName .Name }}: {{ if .Required }}{{ rustType .Type }}{{ else }}Option<{{ rustType .Type }}>{{ end }},
+{{- end }}
+{{- if eq .In "query" }}
+    #[arg(long)]
+    pub {{ rustFieldName .Name }}: {{ if .Required }}{{ rustType .Type }}{{ else }}Option<{{ rustType .Type }}>{{ end }},
+{{- end }}
+{{- end }}
+{{- if operationHasHeaderParams . }}
+    #[arg(long = "header")]
+    pub header: Vec<String>,
+{{- end }}
+{{- if .BodyMode }}
+    #[arg(long = "data")]
+    pub body_data: Option<String>,
+    #[arg(long = "file")]
+    pub body_file: Option<String>,
+{{- end }}
+{{- range .BodyFields }}
+    #[arg(long)]
+    pub {{ rustFieldName .Name }}: Option<{{ rustType .Type }}>,
+{{- end }}
+}
+
+async fn run_{{ rustFieldName .CommandName }}(args: {{ .CommandName | pascal }}Args) -> AppResult<()> {
+{{- if or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group) }}
+    let arguments = build_{{ rustFieldName .CommandName }}_body(&args)?.unwrap_or_else(|| Value::Object(Map::new()));
+    let response = client::call_mcp_tool(
+        "{{ $.Group.Endpoint }}",
+        vec![
+{{- range $name, $value := $.Group.Headers }}
+            ("{{ $name }}".to_string(), "{{ $value }}".to_string()),
+{{- end }}
+        ],
+        "{{ .RemoteName }}",
+        arguments,
+    ).await?;
+{{- else }}
+    let mut path = String::from("{{ .Path }}");
+{{- range .Parameters }}
+{{- if eq .In "path" }}
+    path = path.replace("{{ printf "{%s}" .Name }}", &args.{{ rustFieldName .Name }}.to_string());
+{{- end }}
+{{- end }}
+
+    let mut query = Vec::new();
+{{- range .Parameters }}
+{{- if eq .In "query" }}
+{{- if .Required }}
+    query.push(("{{ .Name }}".to_string(), args.{{ rustFieldName .Name }}.to_string()));
+{{- else }}
+    if let Some(value) = &args.{{ rustFieldName .Name }} {
+        query.push(("{{ .Name }}".to_string(), value.to_string()));
+    }
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- if operationHasHeaderParams . }}
+    let headers = client::parse_headers(&args.header)?;
+{{- else }}
+    let headers = Vec::new();
+{{- end }}
+    let body = build_{{ rustFieldName .CommandName }}_body(&args)?;
+    let response = client::request("{{ .Method }}", &path, query, headers, body).await?;
+{{- end }}
+    output::print_output(&response)
+}
+
+fn build_{{ rustFieldName .CommandName }}_body(args: &{{ .CommandName | pascal }}Args) -> AppResult<Option<Value>> {
+{{- if not .BodyMode }}
+    let _ = args;
+    Ok(None)
+{{- else }}
+    let has_data = args.body_data.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false);
+    let has_file = args.body_file.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false);
+    if has_data && has_file {
+        return Err("--data and --file are mutually exclusive".to_string());
+    }
+
+    if let Some(data) = &args.body_data {
+        let parsed = serde_json::from_str::<Value>(data).map_err(|err| err.to_string())?;
+        return Ok(Some(parsed));
+    }
+    if let Some(path) = &args.body_file {
+        let content = std::fs::read_to_string(path).map_err(|err| err.to_string())?;
+        let parsed = serde_json::from_str::<Value>(&content).map_err(|err| err.to_string())?;
+        return Ok(Some(parsed));
+    }
+
+    let mut payload = Map::new();
+    let mut has_flag_body = false;
+{{- range .BodyFields }}
+    if let Some(value) = &args.{{ rustFieldName .Name }} {
+        payload.insert("{{ .Name }}".to_string(), serde_json::json!(value));
+        has_flag_body = true;
+    }
+{{- end }}
+{{- if eq .BodyMode "simple-json" }}
+    if has_flag_body {
+{{- range .BodyFields }}
+{{- if .Required }}
+        if args.{{ rustFieldName .Name }}.is_none() {
+            return Err("missing required body field: {{ .Name }}".to_string());
+        }
+{{- end }}
+{{- end }}
+        return Ok(Some(Value::Object(payload)));
+    }
+{{- else }}
+    if has_flag_body {
+        return Ok(Some(Value::Object(payload)));
+    }
+{{- end }}
+{{- if .BodyRequired }}
+    Err("request body is required".to_string())
+{{- else }}
+    Ok(None)
+{{- end }}
+{{- end }}
+}
+{{ end -}}

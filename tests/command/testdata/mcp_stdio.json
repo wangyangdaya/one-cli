@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "local-demo": {
+      "transport": "stdio",
+      "command": "python",
+      "args": ["server.py"]
+    }
+  }
+}

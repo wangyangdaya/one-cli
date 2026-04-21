@@ -1,0 +1,20 @@
+package main
+
+import (
+	"os"
+
+	"{{ .Module }}/internal/cli"
+	"{{ .Module }}/internal/httpx"
+{{- range .App.Groups }}
+	{{ groupPackageName . }} "{{ $.Module }}/internal/{{ groupPackageName . }}"
+{{- end }}
+)
+
+func main() {
+	root := cli.NewRootCommand("{{ .App.Name }}", "{{ .App.Name }} CLI")
+	cli.BindTrace(httpx.SetTraceEnabled)
+{{- range .App.Groups }}
+	root.AddCommand({{ groupPackageName . }}.NewCommand())
+{{- end }}
+	os.Exit(cli.ExecuteRoot(root))
+}
