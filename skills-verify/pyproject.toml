@@ -7,8 +7,10 @@ requires-python = ">=3.11"
 dependencies = [
     "deepagents",
     "langchain-core",
+    "langchain-mcp-adapters",
     "langchain-openai",
     "python-dotenv",
+    "pytest",
 ]
 
 [tool.uv]

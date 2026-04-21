@@ -1,6 +1,6 @@
 # OpenCLI
 
-**从 OpenAPI/Swagger 文档自动生成 Go CLI 工具**
+**从 OpenAPI/Swagger 或 MCP 服务自动生成 Go CLI 工具**
 
 [![Go Version](https://img.shields.io/badge/Go-1.23%2B-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -9,11 +9,11 @@
 
 ## 📖 简介
 
-`opencli` 是一个代码生成器，它读取 OpenAPI/Swagger API 文档，自动生成完整的、可运行的 Go CLI 项目。
+`opencli` 是一个代码生成器，它读取 OpenAPI/Swagger API 文档或 MCP 服务定义，在生成时发现可用能力，并自动生成完整的、可运行的 Go CLI 项目。
 
 ### 核心特性
 
-- ✅ **自动生成** - 从 OpenAPI 文档一键生成完整 CLI 项目
+- ✅ **自动生成** - 从 OpenAPI 文档或 MCP 服务一键生成完整 CLI 项目
 - ✅ **即开即用** - 生成的代码可直接编译运行，无需手动修改
 - ✅ **灵活配置** - 支持命名自定义、请求体模式配置等
 - ✅ **标准架构** - 基于 Cobra 框架，遵循 Go 最佳实践
@@ -23,7 +23,7 @@
 ### 工作流程
 
 ```
-OpenAPI 文档 → opencli → Go CLI 项目 → 编译 → 可执行的 CLI 工具
+OpenAPI 文档 / MCP 服务 → opencli → Go CLI 项目 → 编译 → 可执行的 CLI 工具
 ```
 
 ---
@@ -33,7 +33,7 @@ OpenAPI 文档 → opencli → Go CLI 项目 → 编译 → 可执行的 CLI 工
 ### 前置要求
 
 - Go 1.23.0 或更高版本
-- 一个 OpenAPI/Swagger 文档（YAML 或 JSON 格式）
+- 一个 OpenAPI/Swagger 文档，或一个可连接的 MCP 服务配置
 
 ### 安装
 
@@ -64,6 +64,16 @@ cd my-petcli
 go build -o bin/petcli ./cmd/petcli
 ./bin/petcli --help
 ./bin/petcli pet list
+```
+
+MCP 生成示例：
+
+```bash
+./dist/opencli generate \
+  --mcp-config ./mcp.json \
+  --output ./my-mcp-cli \
+  --module github.com/myorg/my-mcp-cli \
+  --app quark
 ```
 
 ---
@@ -99,7 +109,7 @@ users DELETE /users/{userId} deleteUser
 
 ### `opencli generate`
 
-从 OpenAPI 文档生成完整的 Go CLI 项目。
+从 OpenAPI 文档或 MCP 服务生成完整的 Go CLI 项目。
 
 ```bash
 opencli generate \
@@ -110,15 +120,66 @@ opencli generate \
   --config ./opencli.yaml  # 可选
 ```
 
+或：
+
+```bash
+opencli generate \
+  --mcp-config ./mcp.json \
+  --output ./my-cli \
+  --module github.com/myorg/my-cli \
+  --app mycli
+```
+
 **参数说明**:
 
 | 参数 | 必需 | 说明 |
 |------|------|------|
-| `--input` | ✅ | OpenAPI 文档路径或 URL |
+| `--input` | 二选一 | OpenAPI 文档路径或 URL |
+| `--mcp-config` | 二选一 | MCP 配置文件路径 |
 | `--output` | ✅ | 生成项目的输出目录 |
 | `--module` | ✅ | Go module 路径 |
 | `--app` | ✅ | CLI 二进制名称和根命令名 |
 | `--config` | ❌ | 配置文件路径（可选） |
+
+`--input` 和 `--mcp-config` 互斥，必须且只能提供一个。
+
+### MCP 配置文件
+
+首版 MCP 生成支持：
+
+- `streamable_http`
+- `stdio`
+
+生成时会连接 MCP server，执行 `initialize` 和 `tools/list`，把发现到的 tools 固化为静态 CLI。生成后的 CLI 不依赖 MCP discovery，它直接按生成结果运行。
+
+示例 `mcp.json`：
+
+```json
+{
+  "servers": {
+    "tool-quark-web-search": {
+      "transport": "streamable_http",
+      "url": "https://example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${MCP_KEY}"
+      }
+    },
+    "local-demo": {
+      "transport": "stdio",
+      "command": "python",
+      "args": ["server.py"],
+      "env": {
+        "DEBUG": "1"
+      }
+    }
+  }
+}
+```
+
+MCP tool 参数映射规则：
+
+- 简单 object schema 会展开为独立 flags
+- 复杂 schema 会回退为 `--data` / `--file`
 
 ### `opencli init`
 
@@ -209,7 +270,7 @@ my-cli/
 
 ## 🎨 映射规则
 
-OpenCLI 按照以下规则将 OpenAPI 元素映射到 CLI 命令：
+OpenCLI 按照以下规则将 OpenAPI 或 MCP 元素映射到 CLI 命令：
 
 | OpenAPI 元素 | 生成的 CLI 元素 | 示例 |
 |-------------|----------------|------|
@@ -218,6 +279,15 @@ OpenCLI 按照以下规则将 OpenAPI 元素映射到 CLI 命令：
 | `path parameters` | 必需标志 | `{userId}` → `--user-id` |
 | `query parameters` | 可选标志 | `?page=1` → `--page 1` |
 | `requestBody` | 文件或数据输入 | `--file body.json` |
+
+MCP 映射：
+
+| MCP 元素 | 生成的 CLI 元素 | 示例 |
+|---------|----------------|------|
+| `server` | 命令组 | `search` → `mycli search` |
+| `tool name` | 子命令 | `web-search` → `mycli search web-search` |
+| `inputSchema` 简单字段 | CLI flags | `query` → `--query golang` |
+| `inputSchema` 复杂结构 | JSON 输入 | `--data '{"filters":[...]}'` |
 
 ---
 

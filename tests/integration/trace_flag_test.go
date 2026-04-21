@@ -14,7 +14,7 @@ import (
 
 func TestGeneratedCLITraceFlagControlsHTTPLogging(t *testing.T) {
 	projectDir := t.TempDir()
-	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "openapi.json"), projectDir, "github.com/acme/generated", "openapi-cli", ""); err != nil {
+	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "openapi.json"), "", projectDir, "github.com/acme/generated", "openapi-cli", ""); err != nil {
 		t.Fatalf("generate: %v", err)
 	}
 

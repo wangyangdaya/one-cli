@@ -191,3 +191,24 @@ func TestBuildPropagatesSimpleJSONBodyFields(t *testing.T) {
 		t.Fatalf("complex body should not expose fields: %+v", order.BodyFields)
 	}
 }
+
+func TestBuildUsesMCPToolNameForCLICommand(t *testing.T) {
+	doc := openapi.Document{
+		Operations: []openapi.Operation{
+			{Method: "MCP", Backend: "mcp-streamable-http", Path: "/quark_web_search", Tag: "tool-quark-web-search", OperationID: "quark_web_search"},
+			{Method: "MCP", Backend: "mcp-streamable-http", Path: "/search_tool", Tag: "tool-search", OperationID: "search_tool"},
+		},
+	}
+
+	plan, err := planner.Build(doc, configgen.Config{})
+	if err != nil {
+		t.Fatalf("build plan: %v", err)
+	}
+
+	if got := plan.Groups[0].Operations[0].CommandName; got != "quark-web-search" {
+		t.Fatalf("first mcp command = %q want %q", got, "quark-web-search")
+	}
+	if got := plan.Groups[1].Operations[0].CommandName; got != "search-tool" {
+		t.Fatalf("second mcp command = %q want %q", got, "search-tool")
+	}
+}

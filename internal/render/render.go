@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
 	"unicode"
@@ -31,11 +32,12 @@ func Project(outputDir, module string, app model.App) error {
 	}
 	for _, group := range app.Groups {
 		data := templateData{Module: module, App: app, Group: group}
+		groupDir := groupPackageName(group)
 		files = append(files,
-			generatedFile{Path: filepath.Join("internal", group.Name, "command.go"), Template: "group_command.go.tmpl", Data: data},
-			generatedFile{Path: filepath.Join("internal", group.Name, "service.go"), Template: "group_service.go.tmpl", Data: data},
-			generatedFile{Path: filepath.Join("internal", group.Name, "types.go"), Template: "group_types.go.tmpl", Data: data},
-			generatedFile{Path: filepath.Join("skills", group.Name, "SKILL.md"), Template: "skill.md.tmpl", Data: data},
+			generatedFile{Path: filepath.Join("internal", groupDir, "command.go"), Template: "group_command.go.tmpl", Data: data},
+			generatedFile{Path: filepath.Join("internal", groupDir, "service.go"), Template: "group_service.go.tmpl", Data: data},
+			generatedFile{Path: filepath.Join("internal", groupDir, "types.go"), Template: "group_types.go.tmpl", Data: data},
+			generatedFile{Path: filepath.Join("skills", groupDir, "SKILL.md"), Template: "skill.md.tmpl", Data: data},
 		)
 	}
 
@@ -105,7 +107,15 @@ func renderTemplate(name string, data any) ([]byte, error) {
 		"goType":                   goType,
 		"groupHasBodyInput":        groupHasBodyInput,
 		"groupHasHeaderParams":     groupHasHeaderParams,
+		"groupUsesMCPHTTP":         groupUsesMCPHTTP,
+		"groupUsesMCPStdio":        groupUsesMCPStdio,
+		"appHasMCPHTTP":            appHasMCPHTTP,
+		"appHasMCPStdio":           appHasMCPStdio,
+		"appHasAnyMCP":             appHasAnyMCP,
+		"groupPackageName":         groupPackageName,
 		"operationHasHeaderParams": operationHasHeaderParams,
+		"stringMapLiteral":         stringMapLiteral,
+		"stringSliceLiteral":       stringSliceLiteral,
 		"exampleValue":             exampleValue,
 	}).Parse(string(raw))
 	if err != nil {
@@ -180,6 +190,50 @@ func groupHasHeaderParams(group model.Group) bool {
 		}
 	}
 	return false
+}
+
+func groupUsesMCPHTTP(group model.Group) bool {
+	return strings.TrimSpace(group.Backend) == "mcp-streamable-http"
+}
+
+func groupUsesMCPStdio(group model.Group) bool {
+	return strings.TrimSpace(group.Backend) == "mcp-stdio"
+}
+
+func groupPackageName(group model.Group) string {
+	if trimmed := strings.TrimSpace(group.PackageName); trimmed != "" {
+		return trimmed
+	}
+	value := strings.TrimSpace(group.Name)
+	if value == "" {
+		return "default"
+	}
+	value = strings.ReplaceAll(value, "-", "_")
+	value = strings.ReplaceAll(value, ".", "_")
+	value = strings.ReplaceAll(value, " ", "_")
+	return strings.ToLower(value)
+}
+
+func appHasMCPHTTP(app model.App) bool {
+	for _, group := range app.Groups {
+		if groupUsesMCPHTTP(group) {
+			return true
+		}
+	}
+	return false
+}
+
+func appHasMCPStdio(app model.App) bool {
+	for _, group := range app.Groups {
+		if groupUsesMCPStdio(group) {
+			return true
+		}
+	}
+	return false
+}
+
+func appHasAnyMCP(app model.App) bool {
+	return appHasMCPHTTP(app) || appHasMCPStdio(app)
 }
 
 func operationHasHeaderParams(operation model.Operation) bool {
@@ -272,6 +326,33 @@ func exampleValue(fieldType, fieldName string) string {
 
 	// Default
 	return "value"
+}
+
+func stringMapLiteral(values map[string]string) string {
+	if len(values) == 0 {
+		return "map[string]string(nil)"
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%q: %q", key, values[key]))
+	}
+	return "map[string]string{" + strings.Join(parts, ", ") + "}"
+}
+
+func stringSliceLiteral(values []string) string {
+	if len(values) == 0 {
+		return "[]string(nil)"
+	}
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, fmt.Sprintf("%q", value))
+	}
+	return "[]string{" + strings.Join(parts, ", ") + "}"
 }
 
 func writeRuntime(outputDir string) error {

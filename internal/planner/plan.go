@@ -28,6 +28,7 @@ func Build(doc openapi.Document, cfg configgen.Config) (Plan, error) {
 			Method:       strings.ToUpper(strings.TrimSpace(op.Method)),
 			Path:         strings.TrimSpace(op.Path),
 			CommandName:  commandName,
+			RemoteName:   strings.TrimSpace(op.OperationID),
 			Summary:      strings.TrimSpace(op.Summary),
 			BodyMode:     bodyMode(op, groupName, commandName, cfg),
 			BodyRequired: op.RequestBody.Required,
@@ -60,12 +61,61 @@ func Build(doc openapi.Document, cfg configgen.Config) (Plan, error) {
 		groupIndex[groupName] = len(app.Groups)
 		app.Groups = append(app.Groups, model.Group{
 			Name:        groupName,
+			PackageName: packageName(groupName),
 			Description: groupDescription(op, groupName, groupDescriptions),
+			Backend:     strings.TrimSpace(op.Backend),
+			Endpoint:    strings.TrimSpace(op.Endpoint),
+			Headers:     cloneStringMap(op.Headers),
+			Command:     strings.TrimSpace(op.Command),
+			Args:        append([]string(nil), op.Args...),
+			Env:         cloneStringMap(op.Env),
 			Operations:  []model.Operation{plannedOp},
 		})
 	}
 
 	return app, nil
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func packageName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "default"
+	}
+
+	var builder strings.Builder
+	lastUnderscore := false
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			builder.WriteRune(r)
+			lastUnderscore = false
+		default:
+			if !lastUnderscore {
+				builder.WriteRune('_')
+				lastUnderscore = true
+			}
+		}
+	}
+
+	result := strings.Trim(builder.String(), "_")
+	if result == "" {
+		return "default"
+	}
+	if result[0] >= '0' && result[0] <= '9' {
+		return "group_" + result
+	}
+	return strings.ToLower(result)
 }
 
 func groupDescription(op openapi.Operation, groupName string, descriptions map[string]string) string {

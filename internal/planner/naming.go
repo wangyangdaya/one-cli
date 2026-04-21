@@ -15,9 +15,20 @@ func commandName(op openapi.Operation, cfg configgen.Config) string {
 		}
 	}
 	if trimmed := strings.TrimSpace(op.OperationID); trimmed != "" {
+		if strings.EqualFold(strings.TrimSpace(op.Method), "MCP") || strings.HasPrefix(strings.TrimSpace(op.Backend), "mcp-") {
+			return mcpToolCommandName(trimmed)
+		}
 		return simplifyOperationID(trimmed)
 	}
 	return deriveFromMethodPath(op.Method, op.Path)
+}
+
+func mcpToolCommandName(operationID string) string {
+	parts := splitIdentifier(operationID)
+	if len(parts) == 0 {
+		return "tool"
+	}
+	return strings.Join(parts, "-")
 }
 
 func simplifyOperationID(operationID string) string {

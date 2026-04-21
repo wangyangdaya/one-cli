@@ -18,6 +18,12 @@ type Operation struct {
 	Tag         string
 	OperationID string
 	Summary     string
+	Backend     string
+	Endpoint    string
+	Headers     map[string]string
+	Command     string
+	Args        []string
+	Env         map[string]string
 	Parameters  []Parameter
 	RequestBody RequestBody
 }

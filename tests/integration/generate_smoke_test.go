@@ -11,7 +11,7 @@ import (
 
 func TestGenerateSmoke(t *testing.T) {
 	dir := t.TempDir()
-	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "petstore.yaml"), dir, "github.com/acme/generated", "petcli", ""); err != nil {
+	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "petstore.yaml"), "", dir, "github.com/acme/generated", "petcli", ""); err != nil {
 		t.Fatalf("run generate: %v", err)
 	}
 
@@ -31,7 +31,7 @@ func TestGenerateSmoke(t *testing.T) {
 
 func TestGenerateSmokeIncludesSimpleJSONBodyFlags(t *testing.T) {
 	dir := t.TempDir()
-	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "openapi.json"), dir, "github.com/acme/generated", "openapi-cli", ""); err != nil {
+	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "openapi.json"), "", dir, "github.com/acme/generated", "openapi-cli", ""); err != nil {
 		t.Fatalf("run generate: %v", err)
 	}
 
@@ -57,7 +57,7 @@ func TestGenerateSmokeIncludesSimpleJSONBodyFlags(t *testing.T) {
 
 func TestGenerateSmokeIncludesHeaderFlagsAndDocs(t *testing.T) {
 	dir := t.TempDir()
-	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "openapi.json"), dir, "github.com/acme/generated", "openapi-cli", ""); err != nil {
+	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "openapi.json"), "", dir, "github.com/acme/generated", "openapi-cli", ""); err != nil {
 		t.Fatalf("run generate: %v", err)
 	}
 

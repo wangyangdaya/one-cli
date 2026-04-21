@@ -101,3 +101,36 @@ func TestRenderProjectSkillIncludesHeaderUsageNotes(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderProjectCompilesWhenGroupNameContainsHyphen(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name: "quark",
+		Groups: []model.Group{
+			{
+				Name:        "tool-quark-web-search",
+				PackageName: "tool_quark_web_search",
+				Backend:     "mcp-streamable-http",
+				Endpoint:    "https://example.com/mcp",
+				Operations: []model.Operation{
+					{CommandName: "quark", Method: "MCP", Path: "/quark_web_search"},
+				},
+			},
+		},
+	}
+
+	if err := render.Project(dir, "github.com/acme/quark-cli", app); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+
+	cmd := exec.Command("go", "test", "./...")
+	cmd.Dir = dir
+	cmd.Env = append(cmd.Environ(),
+		"GOCACHE="+filepath.Join(t.TempDir(), "gocache"),
+		"GOTOOLCHAIN=local",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated project should compile for hyphenated groups, got %v, output: %s", err, string(out))
+	}
+}

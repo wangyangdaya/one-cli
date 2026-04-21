@@ -6,7 +6,7 @@ import (
 	"{{ .Module }}/internal/cli"
 	"{{ .Module }}/internal/httpx"
 {{- range .App.Groups }}
-	"{{ $.Module }}/internal/{{ .Name }}"
+	{{ groupPackageName . }} "{{ $.Module }}/internal/{{ groupPackageName . }}"
 {{- end }}
 )
 
@@ -14,7 +14,7 @@ func main() {
 	root := cli.NewRootCommand("{{ .App.Name }}", "{{ .App.Name }} CLI")
 	cli.BindTrace(httpx.SetTraceEnabled)
 {{- range .App.Groups }}
-	root.AddCommand({{ .Name }}.NewCommand())
+	root.AddCommand({{ groupPackageName . }}.NewCommand())
 {{- end }}
 	os.Exit(cli.ExecuteRoot(root))
 }

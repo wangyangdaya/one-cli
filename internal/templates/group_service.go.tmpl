@@ -1,19 +1,34 @@
-package {{ .Group.Name }}
+package {{ groupPackageName .Group }}
 
 import (
+{{- if groupUsesMCPStdio .Group }}
+	"bufio"
+{{- end }}
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+{{- if not (or (groupUsesMCPHTTP .Group) (groupUsesMCPStdio .Group)) }}
 	"net/http"
 	"net/url"
-	"strings"
-{{- if groupHasBodyInput .Group }}
+{{- else if groupUsesMCPHTTP .Group }}
+	"net/http"
+{{- end }}
+{{- if or (groupHasBodyInput .Group) (groupUsesMCPStdio .Group) }}
 	"os"
 {{- end }}
+{{- if groupUsesMCPStdio .Group }}
+	"os/exec"
+	"strconv"
+{{- end }}
+	"strings"
 
+{{- if or (groupUsesMCPHTTP .Group) (not (groupUsesMCPStdio .Group)) }}
 	"{{ .Module }}/internal/config"
+{{- end }}
+{{- if not (or (groupUsesMCPHTTP .Group) (groupUsesMCPStdio .Group)) }}
 	"{{ .Module }}/internal/httpx"
+{{- end }}
 )
 
 {{- range .Group.Operations }}
@@ -36,6 +51,11 @@ type {{ .CommandName | pascal }}Input struct {
 }
 
 func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (Result, error) {
+{{- if groupUsesMCPHTTP $.Group }}
+	return invokeMCPHTTP("{{ .RemoteName }}", input)
+{{- else if groupUsesMCPStdio $.Group }}
+	return invokeMCPStdio("{{ .RemoteName }}", input)
+{{- else }}
 	requestURL, err := build{{ .CommandName | pascal }}URL(input)
 	if err != nil {
 		return Result{}, err
@@ -86,8 +106,10 @@ func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (
 		return result, nil
 	}
 	return Result{Message: strings.TrimSpace(string(payload))}, nil
+{{- end }}
 }
 
+{{- if not (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) }}
 func build{{ .CommandName | pascal }}URL(input {{ .CommandName | pascal }}Input) (string, error) {
 	baseURL := strings.TrimSpace(config.Lookup("OPENCLI_BASE_URL"))
 	if baseURL == "" {
@@ -128,6 +150,7 @@ func build{{ .CommandName | pascal }}URL(input {{ .CommandName | pascal }}Input)
 	requestURL.RawQuery = query.Encode()
 	return requestURL.String(), nil
 }
+{{- end }}
 
 func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input) ([]byte, error) {
 {{- if not .BodyMode }}
@@ -225,5 +248,339 @@ func applyHeaders(req *http.Request, headers []string) error {
 		req.Header.Set(name, value)
 	}
 	return nil
+}
+{{- end }}
+{{- if groupUsesMCPHTTP .Group }}
+
+var defaultMCPHeaders = {{ stringMapLiteral .Group.Headers }}
+
+func invokeMCPHTTP(toolName string, input any) (Result, error) {
+	requestURL := strings.TrimSpace(config.Lookup("OPENCLI_BASE_URL"))
+	if requestURL == "" {
+		requestURL = "{{ .Group.Endpoint }}"
+	}
+	if requestURL == "" {
+		return Result{}, fmt.Errorf("missing OPENCLI_BASE_URL")
+	}
+
+	sessionID, err := initializeMCPHTTP(requestURL)
+	if err != nil {
+		return Result{}, err
+	}
+
+	arguments, err := buildMCPArguments(input)
+	if err != nil {
+		return Result{}, err
+	}
+	payload, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      toolName,
+			"arguments": arguments,
+		},
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("marshal MCP request: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, requestURL, bytes.NewReader(payload))
+	if err != nil {
+		return Result{}, fmt.Errorf("build MCP request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	for name, value := range defaultMCPHeaders {
+		if strings.EqualFold(name, "Mcp-Session-Id") {
+			continue
+		}
+		req.Header.Set(name, value)
+	}
+	if strings.TrimSpace(sessionID) != "" {
+		req.Header.Set("Mcp-Session-Id", sessionID)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return Result{}, fmt.Errorf("call MCP tool %s: %w", toolName, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return Result{}, fmt.Errorf("read MCP response: %w", err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return Result{}, fmt.Errorf("mcp request failed: %s", resp.Status)
+	}
+
+	return decodeMCPResponsePayload(resp.Header.Get("Content-Type"), body)
+}
+
+func initializeMCPHTTP(requestURL string) (string, error) {
+	payload, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params": map[string]any{
+			"protocolVersion": "2025-03-26",
+			"capabilities":    map[string]any{},
+			"clientInfo": map[string]any{
+				"name":    "opencli",
+				"version": "generated",
+			},
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal MCP initialize request: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, requestURL, bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("build MCP initialize request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	for name, value := range defaultMCPHeaders {
+		if strings.EqualFold(name, "Mcp-Session-Id") {
+			continue
+		}
+		req.Header.Set(name, value)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("initialize MCP tool: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read MCP initialize response: %w", err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf("mcp initialize failed: %s", resp.Status)
+	}
+	if _, err := decodeMCPResponsePayload(resp.Header.Get("Content-Type"), body); err != nil {
+		return "", err
+	}
+
+	return resp.Header.Get("Mcp-Session-Id"), nil
+}
+{{- end }}
+{{- if groupUsesMCPStdio .Group }}
+
+var defaultMCPCommand = "{{ .Group.Command }}"
+var defaultMCPArgs = {{ stringSliceLiteral .Group.Args }}
+var defaultMCPEnv = {{ stringMapLiteral .Group.Env }}
+
+func invokeMCPStdio(toolName string, input any) (Result, error) {
+	arguments, err := buildMCPArguments(input)
+	if err != nil {
+		return Result{}, err
+	}
+
+	cmd := exec.Command(defaultMCPCommand, defaultMCPArgs...)
+	cmd.Env = append(os.Environ(), envPairs(defaultMCPEnv)...)
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return Result{}, fmt.Errorf("open stdin: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return Result{}, fmt.Errorf("open stdout: %w", err)
+	}
+	cmd.Stderr = io.Discard
+
+	if err := cmd.Start(); err != nil {
+		return Result{}, fmt.Errorf("start MCP command: %w", err)
+	}
+	defer func() {
+		_ = stdin.Close()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+	}()
+
+	reader := bufio.NewReader(stdout)
+	if _, err := doMCPStdioRPC(stdin, reader, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params": map[string]any{
+			"protocolVersion": "2025-03-26",
+			"capabilities":    map[string]any{},
+			"clientInfo":      map[string]any{"name": "opencli", "version": "generated"},
+		},
+	}); err != nil {
+		return Result{}, err
+	}
+	if err := sendMCPStdio(stdin, map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "notifications/initialized",
+	}); err != nil {
+		return Result{}, err
+	}
+
+	payload, err := doMCPStdioRPC(stdin, reader, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      toolName,
+			"arguments": arguments,
+		},
+	})
+	if err != nil {
+		return Result{}, err
+	}
+
+	return decodeMCPResponse(payload)
+}
+
+func doMCPStdioRPC(stdin io.Writer, reader *bufio.Reader, payload map[string]any) ([]byte, error) {
+	if err := sendMCPStdio(stdin, payload); err != nil {
+		return nil, err
+	}
+	return readMCPStdioFrame(reader)
+}
+
+func sendMCPStdio(writer io.Writer, payload map[string]any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(writer, "Content-Length: %d\r\n\r\n", len(body)); err != nil {
+		return err
+	}
+	_, err = writer.Write(body)
+	return err
+}
+
+func readMCPStdioFrame(reader *bufio.Reader) ([]byte, error) {
+	length := 0
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			break
+		}
+		name, value, ok := strings.Cut(line, ":")
+		if ok && strings.EqualFold(strings.TrimSpace(name), "Content-Length") {
+			length, err = strconv.Atoi(strings.TrimSpace(value))
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if length <= 0 {
+		return nil, fmt.Errorf("missing Content-Length")
+	}
+
+	payload := make([]byte, length)
+	if _, err := io.ReadFull(reader, payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
+func envPairs(values map[string]string) []string {
+	pairs := make([]string, 0, len(values))
+	for key, value := range values {
+		pairs = append(pairs, key+"="+value)
+	}
+	return pairs
+}
+{{- end }}
+{{- if or (groupUsesMCPHTTP .Group) (groupUsesMCPStdio .Group) }}
+
+func buildMCPArguments(input any) (map[string]any, error) {
+	bodyBuilder, ok := input.(interface{ buildBody() ([]byte, error) })
+	if ok {
+		_ = bodyBuilder
+	}
+
+	switch typed := input.(type) {
+{{- range .Group.Operations }}
+	case {{ .CommandName | pascal }}Input:
+		body, err := build{{ .CommandName | pascal }}Body(typed)
+		if err != nil {
+			return nil, err
+		}
+		if len(bytes.TrimSpace(body)) == 0 {
+			return map[string]any{}, nil
+		}
+		var arguments map[string]any
+		if err := json.Unmarshal(body, &arguments); err != nil {
+			return nil, fmt.Errorf("decode body arguments: %w", err)
+		}
+		return arguments, nil
+{{- end }}
+	default:
+		return nil, fmt.Errorf("unsupported MCP input type %T", input)
+	}
+}
+
+func decodeMCPResponsePayload(contentType string, payload []byte) (Result, error) {
+	if strings.Contains(strings.ToLower(contentType), "text/event-stream") {
+		var err error
+		payload, err = extractSSEMessage(payload)
+		if err != nil {
+			return Result{}, err
+		}
+	}
+	return decodeMCPResponse(payload)
+}
+
+func decodeMCPResponse(payload []byte) (Result, error) {
+	var response struct {
+		Result map[string]any `json:"result"`
+		Error  *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(payload, &response); err != nil {
+		return Result{}, fmt.Errorf("decode MCP response: %w", err)
+	}
+	if response.Error != nil {
+		return Result{}, fmt.Errorf("%s", strings.TrimSpace(response.Error.Message))
+	}
+	if content, ok := response.Result["content"].([]any); ok {
+		for _, item := range content {
+			entry, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if text, ok := entry["text"].(string); ok && strings.TrimSpace(text) != "" {
+				return Result{Message: strings.TrimSpace(text)}, nil
+			}
+		}
+	}
+	rendered, err := json.Marshal(response.Result)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Message: strings.TrimSpace(string(rendered))}, nil
+}
+
+func extractSSEMessage(payload []byte) ([]byte, error) {
+	lines := strings.Split(string(payload), "\n")
+	data := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "data:") {
+			data = append(data, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		}
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("missing SSE data payload")
+	}
+	return []byte(strings.Join(data, "\n")), nil
 }
 {{- end }}

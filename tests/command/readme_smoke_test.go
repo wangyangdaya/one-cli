@@ -25,7 +25,7 @@ func TestREADMEContainsOpenCLICommands(t *testing.T) {
 
 func TestGeneratedREADMEIncludesSetupAndTraceGuidance(t *testing.T) {
 	dir := t.TempDir()
-	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "openapi.json"), dir, "github.com/acme/generated", "openapi-cli", ""); err != nil {
+	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "openapi.json"), "", dir, "github.com/acme/generated", "openapi-cli", ""); err != nil {
 		t.Fatalf("generate: %v", err)
 	}
 
