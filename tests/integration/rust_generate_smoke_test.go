@@ -37,6 +37,23 @@ func TestGenerateRustOpenAPISmoke(t *testing.T) {
 		}
 	}
 
+	cargoContent, err := os.ReadFile(filepath.Join(dir, "Cargo.toml"))
+	if err != nil {
+		t.Fatalf("read Cargo.toml: %v", err)
+	}
+	cargoText := string(cargoContent)
+	for _, want := range []string{
+		"[profile.release]",
+		"strip = true",
+		"lto = true",
+		"codegen-units = 1",
+		`panic = "abort"`,
+	} {
+		if !strings.Contains(cargoText, want) {
+			t.Fatalf("generated Cargo.toml missing %q:\n%s", want, cargoText)
+		}
+	}
+
 	tryCargoBuild(t, dir)
 }
 

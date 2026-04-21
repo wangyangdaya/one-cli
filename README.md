@@ -76,7 +76,7 @@ GOOS=linux GOARCH=amd64 go build -o dist/linux-amd64/petcli ./cmd/petcli
 GOOS=windows GOARCH=amd64 go build -o dist/windows-amd64/petcli.exe ./cmd/petcli
 ```
 
-Rust 生成示例：
+Rust + OpenAPI 生成示例：
 
 ```bash
 ./dist/opencli generate \
@@ -87,16 +87,43 @@ Rust 生成示例：
   --app petcli
 
 cd my-petcli-rs
+
+# 当前平台调试构建
 cargo build
+
+# 发布构建
+cargo build --release
+
+# 安装额外 target 后，可按目标平台构建
+rustup target add aarch64-apple-darwin x86_64-unknown-linux-gnu x86_64-pc-windows-msvc
+cargo build --release --target aarch64-apple-darwin
+cargo build --release --target x86_64-unknown-linux-gnu
+cargo build --release --target x86_64-pc-windows-msvc
+
+# 产物示例
+ls target/aarch64-apple-darwin/release
+ls target/x86_64-unknown-linux-gnu/release
+ls target/x86_64-pc-windows-msvc/release
 ```
 
-MCP 生成示例：
+Go + MCP 生成示例：
 
 ```bash
 ./dist/opencli generate \
   --mcp-config ./mcp.json \
   --output ./my-mcp-cli \
   --module github.com/myorg/my-mcp-cli \
+  --app quark
+```
+
+Rust + MCP 生成示例：
+
+```bash
+./dist/opencli generate \
+  --target rust \
+  --mcp-config ./mcp.json \
+  --output ./my-mcp-cli-rs \
+  --module quark \
   --app quark
 ```
 
@@ -133,7 +160,7 @@ users DELETE /users/{userId} deleteUser
 
 ### `opencli generate`
 
-从 OpenAPI 文档或 MCP 服务生成完整的 Go CLI 项目。
+从 OpenAPI 文档或 MCP 服务生成 CLI 项目。默认生成 Go；传 `--target rust` 时生成 Rust。
 
 ```bash
 opencli generate \
@@ -144,7 +171,18 @@ opencli generate \
   --config ./opencli.yaml  # 可选
 ```
 
-或：
+OpenAPI + Rust：
+
+```bash
+opencli generate \
+  --target rust \
+  --input ./api.yaml \
+  --output ./my-cli-rs \
+  --module mycli \
+  --app mycli
+```
+
+MCP + Go：
 
 ```bash
 opencli generate \
@@ -154,27 +192,54 @@ opencli generate \
   --app mycli
 ```
 
+MCP + Rust：
+
+```bash
+opencli generate \
+  --target rust \
+  --mcp-config ./mcp.json \
+  --output ./my-cli-rs \
+  --module mycli \
+  --app mycli
+```
+
 **参数说明**:
 
 | 参数 | 必需 | 说明 |
 |------|------|------|
-| `--input` | 二选一 | OpenAPI 文档路径或 URL |
+| `--target` | ❌ | 生成目标：`go` 或 `rust`，默认 `go` |
+| `--input` | 二选一 | OpenAPI/Swagger 文档路径或 URL |
 | `--mcp-config` | 二选一 | MCP 配置文件路径 |
 | `--output` | ✅ | 生成项目的输出目录 |
-| `--module` | ✅ | Go module 路径 |
+| `--module` | ✅ | Go target 下是 Go module 路径；Rust target 下用作 Cargo package 名称来源 |
 | `--app` | ✅ | CLI 二进制名称和根命令名 |
 | `--config` | ❌ | 配置文件路径（可选） |
 
 `--input` 和 `--mcp-config` 互斥，必须且只能提供一个。
 
+推荐按下面理解参数组合：
+
+| 场景 | 必填参数 |
+|------|----------|
+| OpenAPI/Swagger -> Go | `--input` |
+| OpenAPI/Swagger -> Rust | `--target rust --input` |
+| MCP -> Go | `--mcp-config` |
+| MCP -> Rust | `--target rust --mcp-config` |
+
+注意：
+
+- `--target rust` 只决定生成语言，不会把 `--input` 变成 MCP 模式。
+- MCP 配置文件必须配合 `--mcp-config` 使用，不能传给 `--input`。
+- 如果把 MCP JSON 传给 `--input`，通常只会得到一个空项目骨架，因为它不是 OpenAPI 文档。
+
 ### MCP 配置文件
 
 首版 MCP 生成支持：
 
-- `streamable_http`
-- `stdio`
+- Go target: `streamable_http`、`stdio`
+- Rust target: `streamable_http`
 
-Rust 目标当前仅支持 `streamable_http`。
+Rust 目标当前不支持 `stdio`。
 
 生成时会连接 MCP server，执行 `initialize` 和 `tools/list`，把发现到的 tools 固化为静态 CLI。生成后的 CLI 不依赖 MCP discovery，它直接按生成结果运行。
 
