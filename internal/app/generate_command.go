@@ -21,12 +21,13 @@ func NewGenerateCommand() *cobra.Command {
 	var module string
 	var appName string
 	var configPath string
+	var target string
 
 	cmd := &cobra.Command{
 		Use:   "generate",
 		Short: "Generate a Go CLI project from Swagger/OpenAPI or MCP",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunGenerate(input, mcpConfig, output, module, appName, configPath)
+			return RunGenerate(input, mcpConfig, output, module, appName, configPath, target)
 		},
 	}
 
@@ -36,6 +37,7 @@ func NewGenerateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&module, "module", "", "Go module path for the generated project")
 	cmd.Flags().StringVar(&appName, "app", "", "Binary/root command name for the generated project")
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to opencli YAML config")
+	cmd.Flags().StringVar(&target, "target", "go", "Generation target: go or rust")
 	_ = cmd.MarkFlagRequired("output")
 	_ = cmd.MarkFlagRequired("module")
 	_ = cmd.MarkFlagRequired("app")
@@ -51,9 +53,56 @@ func validateGenerateSources(input, mcpConfig string) error {
 	return nil
 }
 
-func RunGenerate(input, mcpConfig, output, module, appName, configPath string) error {
+func normalizeTarget(values []string) (string, error) {
+	target := "go"
+	if len(values) > 0 {
+		target = strings.TrimSpace(values[0])
+	}
+
+	switch strings.ToLower(target) {
+	case "", "go":
+		return "go", nil
+	case "rust":
+		return "rust", nil
+	default:
+		return "", fmt.Errorf("unsupported target %q: expected go or rust", target)
+	}
+}
+
+func validateRustMCPConfig(path string) error {
+	raw, err := loaders.Load(strings.TrimSpace(path))
+	if err != nil {
+		return err
+	}
+
+	cfg, err := mcp.LoadConfig(raw)
+	if err != nil {
+		return err
+	}
+
+	for name, server := range cfg.Servers {
+		if strings.TrimSpace(server.Transport) != "streamable_http" {
+			return fmt.Errorf("rust target only supports MCP streamable_http transport; server %q uses %q", name, server.Transport)
+		}
+	}
+
+	return nil
+}
+
+func RunGenerate(input, mcpConfig, output, module, appName, configPath string, targets ...string) error {
+	target, err := normalizeTarget(targets)
+	if err != nil {
+		return err
+	}
+
 	if err := validateGenerateSources(input, mcpConfig); err != nil {
 		return err
+	}
+
+	if target == "rust" && strings.TrimSpace(mcpConfig) != "" {
+		if err := validateRustMCPConfig(strings.TrimSpace(mcpConfig)); err != nil {
+			return err
+		}
 	}
 
 	cfg, err := configgen.Load(strings.TrimSpace(configPath))
@@ -84,5 +133,5 @@ func RunGenerate(input, mcpConfig, output, module, appName, configPath string) e
 		return err
 	}
 	plan.Name = strings.TrimSpace(appName)
-	return render.Project(strings.TrimSpace(output), strings.TrimSpace(module), plan)
+	return render.Project(strings.TrimSpace(output), strings.TrimSpace(module), plan, target)
 }

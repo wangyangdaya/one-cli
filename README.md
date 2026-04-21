@@ -59,11 +59,35 @@ make build
   --module github.com/myorg/my-petcli \
   --app petcli
 
-# 3. 构建并运行生成的 CLI
+# 3. 直接运行生成的 CLI
 cd my-petcli
-go build -o bin/petcli ./cmd/petcli
 ./bin/petcli --help
 ./bin/petcli pet list
+
+# 4. 如需分发，编译为真实二进制
+# 生成后的 bin/petcli 是启动脚本；下面会用编译产物覆盖它
+go build -o bin/petcli ./cmd/petcli
+./bin/petcli --help
+
+# 5. 按目标平台生成不同二进制
+mkdir -p dist/darwin-arm64 dist/linux-amd64 dist/windows-amd64
+GOOS=darwin GOARCH=arm64 go build -o dist/darwin-arm64/petcli ./cmd/petcli
+GOOS=linux GOARCH=amd64 go build -o dist/linux-amd64/petcli ./cmd/petcli
+GOOS=windows GOARCH=amd64 go build -o dist/windows-amd64/petcli.exe ./cmd/petcli
+```
+
+Rust 生成示例：
+
+```bash
+./dist/opencli generate \
+  --target rust \
+  --input ./examples/petstore.yaml \
+  --output ./my-petcli-rs \
+  --module petcli \
+  --app petcli
+
+cd my-petcli-rs
+cargo build
 ```
 
 MCP 生成示例：
@@ -149,6 +173,8 @@ opencli generate \
 
 - `streamable_http`
 - `stdio`
+
+Rust 目标当前仅支持 `streamable_http`。
 
 生成时会连接 MCP server，执行 `initialize` 和 `tools/list`，把发现到的 tools 固化为静态 CLI。生成后的 CLI 不依赖 MCP discovery，它直接按生成结果运行。
 

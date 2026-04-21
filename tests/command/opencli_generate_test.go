@@ -73,3 +73,38 @@ func TestGenerateCommandRejectsMixedSources(t *testing.T) {
 		t.Fatalf("expected mixed source error, got %v", err)
 	}
 }
+
+func TestGenerateCommandAcceptsRustTargetWithOpenAPI(t *testing.T) {
+	dir := t.TempDir()
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--target", "rust",
+		"--input", filepath.Join("..", "..", "examples", "petstore.yaml"),
+		"--output", dir,
+		"--module", "petcli",
+		"--app", "petcli",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute rust generate: %v", err)
+	}
+}
+
+func TestGenerateCommandRejectsUnknownTarget(t *testing.T) {
+	dir := t.TempDir()
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--target", "python",
+		"--input", filepath.Join("..", "..", "examples", "petstore.yaml"),
+		"--output", dir,
+		"--module", "petcli",
+		"--app", "petcli",
+	})
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "unsupported target") {
+		t.Fatalf("expected unsupported target error, got %v", err)
+	}
+}

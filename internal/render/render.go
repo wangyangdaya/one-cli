@@ -13,75 +13,6 @@ import (
 	"one-cli/internal/model"
 )
 
-func Project(outputDir, module string, app model.App) error {
-	if strings.TrimSpace(outputDir) == "" {
-		return fmt.Errorf("missing output directory")
-	}
-	if strings.TrimSpace(module) == "" {
-		return fmt.Errorf("missing module path")
-	}
-	if strings.TrimSpace(app.Name) == "" {
-		return fmt.Errorf("missing app name")
-	}
-
-	files := []generatedFile{
-		{Path: filepath.Join("cmd", app.Name, "main.go"), Template: "root_main.go.tmpl", Data: templateData{Module: module, App: app}},
-		{Path: "README.md", Template: "readme.md.tmpl", Data: templateData{Module: module, App: app}},
-		{Path: filepath.Join("bin", app.Name), Template: "bin_launcher.sh.tmpl", Data: templateData{Module: module, App: app}, Mode: 0o755},
-		{Path: filepath.Join("bin", app.Name+".cmd"), Template: "bin_launcher.cmd.tmpl", Data: templateData{Module: module, App: app}, Mode: 0o644},
-	}
-	for _, group := range app.Groups {
-		data := templateData{Module: module, App: app, Group: group}
-		groupDir := groupPackageName(group)
-		files = append(files,
-			generatedFile{Path: filepath.Join("internal", groupDir, "command.go"), Template: "group_command.go.tmpl", Data: data},
-			generatedFile{Path: filepath.Join("internal", groupDir, "service.go"), Template: "group_service.go.tmpl", Data: data},
-			generatedFile{Path: filepath.Join("internal", groupDir, "types.go"), Template: "group_types.go.tmpl", Data: data},
-			generatedFile{Path: filepath.Join("skills", groupDir, "SKILL.md"), Template: "skill.md.tmpl", Data: data},
-		)
-	}
-
-	if err := writeGoMod(outputDir, module); err != nil {
-		return err
-	}
-	if err := writeGoSum(outputDir); err != nil {
-		return err
-	}
-	if err := writeTemplates(outputDir, files); err != nil {
-		return err
-	}
-	if err := writeRuntime(outputDir); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func writeGoMod(outputDir, module string) error {
-	content, err := os.ReadFile(filepath.Join(filepath.Dir(packageRoot()), "..", "go.mod"))
-	if err != nil {
-		return err
-	}
-
-	lines := strings.Split(string(content), "\n")
-	for i, line := range lines {
-		if strings.HasPrefix(line, "module ") {
-			lines[i] = "module " + module
-			break
-		}
-	}
-
-	return writeFile(filepath.Join(outputDir, "go.mod"), []byte(strings.Join(lines, "\n")), 0)
-}
-
-func writeGoSum(outputDir string) error {
-	content, err := os.ReadFile(filepath.Join(filepath.Dir(packageRoot()), "..", "go.sum"))
-	if err != nil {
-		return err
-	}
-	return writeFile(filepath.Join(outputDir, "go.sum"), content, 0)
-}
-
 func writeTemplates(outputDir string, files []generatedFile) error {
 	for _, file := range files {
 		content, err := renderTemplate(file.Template, file.Data)
@@ -104,6 +35,7 @@ func renderTemplate(name string, data any) ([]byte, error) {
 	tmpl, err := template.New(name).Funcs(template.FuncMap{
 		"pascal":                   pascal,
 		"bodyFlagHelp":             bodyFlagHelp,
+		"cargoPackageName":         cargoPackageName,
 		"goType":                   goType,
 		"groupHasBodyInput":        groupHasBodyInput,
 		"groupHasHeaderParams":     groupHasHeaderParams,
@@ -114,6 +46,9 @@ func renderTemplate(name string, data any) ([]byte, error) {
 		"appHasAnyMCP":             appHasAnyMCP,
 		"groupPackageName":         groupPackageName,
 		"operationHasHeaderParams": operationHasHeaderParams,
+		"rustFieldName":            rustFieldName,
+		"rustModuleName":           rustModuleName,
+		"rustType":                 rustType,
 		"stringMapLiteral":         stringMapLiteral,
 		"stringSliceLiteral":       stringSliceLiteral,
 		"exampleValue":             exampleValue,
