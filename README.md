@@ -1,6 +1,6 @@
 # OpenCLI
 
-**从 OpenAPI/Swagger 或 MCP 服务自动生成 Go CLI 工具**
+**从 OpenAPI/Swagger 或 MCP 服务自动生成 CLI 工具（支持 Go 和 Rust）**
 
 [![Go Version](https://img.shields.io/badge/Go-1.23%2B-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](#-许可证)
