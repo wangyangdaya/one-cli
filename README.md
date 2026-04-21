@@ -3,7 +3,7 @@
 **从 OpenAPI/Swagger 或 MCP 服务自动生成 Go CLI 工具**
 
 [![Go Version](https://img.shields.io/badge/Go-1.23%2B-blue.svg)](https://golang.org)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](#-许可证)
 
 ---
 
@@ -131,9 +131,9 @@ Rust + MCP 生成示例：
 
 ## 📚 文档
 
-- **[用户指南](docs/USER_GUIDE.md)** - 完整的使用说明和实战示例
+- **[用户指南](docs/USER_GUIDE.md)** - 完整的使用说明
 - **[代码审查报告](docs/CODE_REVIEW_2026-04-20.md)** - 项目代码质量分析
-- **[设计文档](docs/superpowers/specs/)** - 架构设计和实现计划
+- **设计文档** - 位于 `docs/superpowers/specs/`
 - **[开发指南](AGENTS.md)** - 贡献者指南和开发规范
 
 ---
@@ -326,7 +326,7 @@ overrides:
 | `file-or-data` | 支持文件或直接数据 | `--file user.json` 或 `--data '{...}'` |
 | `flags` | 展开为独立标志 | `--name John --email john@example.com` |
 
-详细配置说明请参考 [用户指南](docs/USER_GUIDE.md#配置文件)。
+详细配置说明请参考 [用户指南](docs/USER_GUIDE.md) 中的“配置文件”章节。
 
 ---
 
@@ -447,7 +447,7 @@ opencli generate \
   --app petstore
 ```
 
-更多示例请参考 [用户指南](docs/USER_GUIDE.md#实战示例)。
+更多示例请参考 [用户指南](docs/USER_GUIDE.md) 中的“实战示例”章节。
 
 ---
 
@@ -610,7 +610,7 @@ go build -o bin/petcli ./cmd/petcli
 
 ## 📄 许可证
 
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件。
+本项目采用 MIT 许可证。
 
 ---
 
