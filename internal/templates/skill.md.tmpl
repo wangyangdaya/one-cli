@@ -6,9 +6,10 @@ description: {{- if .Group.Description }} {{ .Group.Description }}{{- else }} Co
 # {{ .App.Name }} {{ .Group.Name }} Skill
 
 {{- if .Group.Description }}
-{{ .Group.Description }}
 
+{{ .Group.Description }}
 {{- end }}
+
 ## Commands
 
 {{- range .Group.Operations }}
@@ -18,26 +19,70 @@ description: {{- if .Group.Description }} {{ .Group.Description }}{{- else }} Co
 ## Usage Notes
 
 {{- range .Group.Operations }}
+
 ### `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}`
+{{- if .Summary }}
+
+{{ .Summary }}
+{{- end }}
 
 - Method: `{{ .Method }}`
 - Path: `{{ .Path }}`
 {{- if .Parameters }}
 - Parameters:
 {{- range .Parameters }}
-  - `{{ .Name }}` (`{{ .In }}`{{ if .Type }}, `{{ .Type }}`{{ end }}){{ if .Required }} required{{ else }} optional{{ end }}
+  - `{{ .Name }}` (`{{ .In }}`{{ if .Type }}, `{{ .Type }}`{{ end }}){{ if .Required }} required{{ else }} optional{{ end }}{{ if .Description }} - {{ .Description }}{{ end }}
 {{- end }}
 {{- end }}
 {{- if .BodyMode }}
 - Body input: `{{ .BodyMode }}`
 {{- end }}
+{{- if and (eq .BodyMode "simple-json") .BodyFields }}
+- Body fields:
+{{- $hasRequired := false }}
+{{- $hasOptional := false }}
+{{- range .BodyFields }}
+  {{- if .Required }}{{ $hasRequired = true }}{{ end }}
+  {{- if not .Required }}{{ $hasOptional = true }}{{ end }}
+{{- end }}
+{{- if $hasRequired }}
+  - Required:
+{{- range .BodyFields }}
+{{- if .Required }}
+    - `{{ .Name }}` (`{{ .Type }}`){{ if .Description }} - {{ .Description }}{{ end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if $hasOptional }}
+  - Optional:
+{{- range .BodyFields }}
+{{- if not .Required }}
+    - `{{ .Name }}` (`{{ .Type }}`){{ if .Description }} - {{ .Description }}{{ end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- if operationHasHeaderParams . }}
 - Header input: use `--header "Name: Value"` for header parameters
-{{- range .Parameters }}
-{{- if eq .In "header" }}
-- Header example: `--header "{{ .Name }}: <value>"`
 {{- end }}
-{{- end }}
+
+**Example:**
+```bash
+{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .Parameters }}{{ if eq .In "path" }} \
+  --{{ .Name }} "<{{ .Name }}>"{{ end }}{{ end }}{{ range .Parameters }}{{ if eq .In "query" }} \
+  --{{ .Name }} "<{{ .Name }}>"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }}{{ if .Required }} \
+  --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ end }}{{ if eq .BodyMode "file-or-data" }} \
+  --file request.json{{ end }}{{ range .Parameters }}{{ if eq .In "header" }} \
+  --header "{{ .Name }}: <value>"{{ end }}{{ end }}
+```
+{{- if eq .BodyMode "file-or-data" }}
+
+**Example request.json:**
+```json
+{
+  "field": "value"
+}
+```
 {{- end }}
 
 {{- end }}

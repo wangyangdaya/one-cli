@@ -54,6 +54,7 @@ Optional variables:
 - `LLM_MODEL_NAME` defaults to `gpt-4o-mini`
 - `LOG_LEVEL` defaults to `INFO`
 - `SKILLS_VERIFY_THREAD_ID` defaults to `skills-verify`
+- `SKILLS_VERIFY_APP_DIR` defaults to `tmp/openapi` and controls both CLI validation and `SKILL.md` loading
 
 ## Verification Prompt
 

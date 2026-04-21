@@ -94,7 +94,7 @@ func TestRenderProjectSkillIncludesHeaderUsageNotes(t *testing.T) {
 	skillText := string(skillContent)
 	for _, want := range []string{
 		"`authorization` (`header`, `string`) optional",
-		"`--header \"authorization: <value>\"`",
+		`--header "authorization: <value>"`,
 	} {
 		if !strings.Contains(skillText, want) {
 			t.Fatalf("generated skill markdown missing %q:\n%s", want, skillText)

@@ -18,12 +18,20 @@ Do not invent APIs or shell commands.
 DEFAULT_MODEL_NAME = "gpt-4o-mini"
 DEFAULT_LOG_LEVEL = "INFO"
 DEFAULT_THREAD_ID = "skills-verify"
-DEFAULT_RECURSION_LIMIT = 50
+DEFAULT_RECURSION_LIMIT = 25
+DEFAULT_APP_DIR = "tmp/openapi"
 logger = logging.getLogger("skills_verify")
 
 
 def resolve_repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
+
+
+def resolve_app_dir(repo_root: Path) -> Path:
+    app_dir = Path(os.getenv("SKILLS_VERIFY_APP_DIR", DEFAULT_APP_DIR))
+    if app_dir.is_absolute():
+        return app_dir
+    return repo_root / app_dir
 
 
 def setup_logging() -> None:
@@ -85,14 +93,14 @@ def build_agent():
         ) from exc
 
     repo_root = resolve_repo_root()
-    app_dir = repo_root / "tmp" / "openapi"
+    app_dir = resolve_app_dir(repo_root)
     skills_dir = app_dir / "skills"
     if not skills_dir.exists():
         raise SystemExit(f"Skills directory not found: {skills_dir}")
 
     return create_deep_agent(
         model=build_llm(),
-        backend=CliBackend(repo_root=repo_root),
+        backend=CliBackend(repo_root=repo_root, app_dir=app_dir),
         system_prompt=SYSTEM_PROMPT,
         skills=[str(skills_dir)],
         checkpointer=MemorySaver(),
@@ -117,6 +125,15 @@ def extract_text(result) -> str:
     return str(result)
 
 
+async def invoke_agent(
+    *,
+    agent,
+    messages: list[dict[str, str]],
+    config: dict,
+):
+    return await agent.ainvoke({"messages": messages}, config=config)
+
+
 def build_agent_config(thread_id: str) -> dict:
     return {
         "configurable": {
@@ -128,7 +145,8 @@ def build_agent_config(thread_id: str) -> dict:
 
 async def run_repl(thread_id: str) -> int:
     repo_root = resolve_repo_root()
-    skills_dir = repo_root / "tmp" / "openapi" / "skills"
+    app_dir = resolve_app_dir(repo_root)
+    skills_dir = app_dir / "skills"
     if not skills_dir.exists():
         raise SystemExit(f"Skills directory not found: {skills_dir}")
 
@@ -162,7 +180,11 @@ async def run_repl(thread_id: str) -> int:
 
         logger.info("turn.start user_input=%s", user_input)
         messages.append({"role": "user", "content": user_input})
-        result = await agent.ainvoke({"messages": messages}, config=config)
+        result = await invoke_agent(
+            agent=agent,
+            messages=messages,
+            config=config,
+        )
         assistant_text = extract_text(result)
         messages.append({"role": "assistant", "content": assistant_text})
         logger.info("turn.end assistant_output=%s", assistant_text)

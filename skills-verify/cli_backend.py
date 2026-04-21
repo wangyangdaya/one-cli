@@ -17,7 +17,7 @@ class CliBackend(FilesystemBackend, SandboxBackendProtocol):
         self,
         repo_root: str | Path,
         *,
-        app_dir: str = "tmp/openapi",
+        app_dir: str | Path = "tmp/openapi",
         executable: str = "openapi-cli",
         timeout: int = 120,
         env: dict[str, str] | None = None,
@@ -29,7 +29,10 @@ class CliBackend(FilesystemBackend, SandboxBackendProtocol):
             max_file_size_mb=10,
         )
         self.repo_root = Path(repo_root).resolve()
-        self.app_dir = (self.repo_root / app_dir).resolve()
+        resolved_app_dir = Path(app_dir)
+        if not resolved_app_dir.is_absolute():
+            resolved_app_dir = self.repo_root / resolved_app_dir
+        self.app_dir = resolved_app_dir.resolve()
         self.skills_dir = self.app_dir / "skills"
         self.executable = executable
         self.timeout = timeout

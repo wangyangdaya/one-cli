@@ -91,7 +91,7 @@ func TestGenerateSmokeIncludesHeaderFlagsAndDocs(t *testing.T) {
 	skillText := string(skillContent)
 	for _, want := range []string{
 		"`authorization` (`header`) optional",
-		"`--header \"authorization: <value>\"`",
+		`--header "authorization: <value>"`,
 	} {
 		if !strings.Contains(skillText, want) {
 			t.Fatalf("generated skill missing %q:\n%s", want, skillText)

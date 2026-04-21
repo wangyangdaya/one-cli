@@ -106,6 +106,7 @@ func renderTemplate(name string, data any) ([]byte, error) {
 		"groupHasBodyInput":        groupHasBodyInput,
 		"groupHasHeaderParams":     groupHasHeaderParams,
 		"operationHasHeaderParams": operationHasHeaderParams,
+		"exampleValue":             exampleValue,
 	}).Parse(string(raw))
 	if err != nil {
 		return nil, err
@@ -188,6 +189,89 @@ func operationHasHeaderParams(operation model.Operation) bool {
 		}
 	}
 	return false
+}
+
+func exampleValue(fieldType, fieldName string) string {
+	fieldType = strings.TrimSpace(strings.ToLower(fieldType))
+	fieldName = strings.TrimSpace(strings.ToLower(fieldName))
+
+	// Type-specific examples
+	switch fieldType {
+	case "boolean", "bool":
+		return "true"
+	case "integer", "int":
+		if strings.Contains(fieldName, "age") {
+			return "25"
+		}
+		if strings.Contains(fieldName, "count") || strings.Contains(fieldName, "quantity") {
+			return "10"
+		}
+		if strings.Contains(fieldName, "id") {
+			return "123"
+		}
+		return "1"
+	case "number", "float", "double":
+		if strings.Contains(fieldName, "price") || strings.Contains(fieldName, "amount") {
+			return "99.99"
+		}
+		if strings.Contains(fieldName, "rate") {
+			return "0.85"
+		}
+		return "1.5"
+	}
+
+	// String field name-based examples
+	if strings.Contains(fieldName, "email") {
+		return "user@example.com"
+	}
+	if strings.Contains(fieldName, "password") {
+		return "secret123"
+	}
+	if strings.Contains(fieldName, "name") {
+		return "John Doe"
+	}
+	if strings.Contains(fieldName, "phone") {
+		return "+1234567890"
+	}
+	if strings.Contains(fieldName, "url") || strings.Contains(fieldName, "link") {
+		return "https://example.com"
+	}
+	if strings.Contains(fieldName, "token") {
+		return "eyJhbGci..."
+	}
+	if strings.Contains(fieldName, "date") {
+		return "2026-04-21"
+	}
+	if strings.Contains(fieldName, "time") {
+		return "14:30:00"
+	}
+	if strings.Contains(fieldName, "address") {
+		return "123 Main St"
+	}
+	if strings.Contains(fieldName, "city") {
+		return "New York"
+	}
+	if strings.Contains(fieldName, "country") {
+		return "USA"
+	}
+	if strings.Contains(fieldName, "code") {
+		return "ABC123"
+	}
+	if strings.Contains(fieldName, "status") {
+		return "active"
+	}
+	if strings.Contains(fieldName, "type") {
+		return "standard"
+	}
+	if strings.Contains(fieldName, "description") {
+		return "Sample description"
+	}
+	if strings.Contains(fieldName, "title") {
+		return "Sample Title"
+	}
+
+	// Default
+	return "value"
 }
 
 func writeRuntime(outputDir string) error {
