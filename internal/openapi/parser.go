@@ -9,6 +9,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// MaxSimpleJSONFields is the maximum number of properties a JSON schema can have
+// to be treated as "simple JSON" (individual CLI flags). Both the OpenAPI parser
+// and the MCP converter reference this constant to stay in sync.
+const MaxSimpleJSONFields = 5
+
 func Parse(data []byte) (Document, error) {
 	if len(data) == 0 {
 		return Document{}, nil
@@ -213,7 +218,7 @@ func normalizeSimpleJSONFields(schema rawSchema, schemas map[string]rawSchema) (
 	if len(schema.AnyOf) > 0 || len(schema.OneOf) > 0 || len(schema.AllOf) > 0 {
 		return false, nil
 	}
-	if len(schema.Properties) == 0 || len(schema.Properties) > 5 {
+	if len(schema.Properties) == 0 || len(schema.Properties) > MaxSimpleJSONFields {
 		return false, nil
 	}
 

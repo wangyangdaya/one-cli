@@ -68,6 +68,11 @@ func convertInputSchema(schema map[string]any) (openapi.RequestBody, error) {
 		return body, nil
 	}
 
+	if len(properties) > openapi.MaxSimpleJSONFields {
+		body.IsSimpleJSON = false
+		return body, nil
+	}
+
 	body.JSONFields = make([]openapi.BodyField, 0, len(properties))
 	for name, rawProperty := range properties {
 		property, ok := rawProperty.(map[string]any)

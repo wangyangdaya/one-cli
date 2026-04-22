@@ -1,0 +1,288 @@
+package {{ groupPackageName .Group }}
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+)
+
+{{- range .Group.Operations }}
+type {{ .CommandName | pascal }}Input struct {
+{{- range .Parameters }}
+{{- if or (eq .In "path") (eq .In "query") }}
+	{{ .Name | pascal }} {{ goType .Type }}
+{{- end }}
+{{- end }}
+{{- if .BodyMode }}
+	BodyData string
+	BodyFile string
+{{- end }}
+{{- range .BodyFields }}
+	{{ .Name | pascal }} {{ goType .Type }}
+{{- end }}
+}
+
+func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (Result, error) {
+	return invokeMCPStdio("{{ .RemoteName }}", input)
+}
+
+func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input) ([]byte, error) {
+{{- if not .BodyMode }}
+	return nil, nil
+{{- else }}
+	hasData := strings.TrimSpace(input.BodyData) != ""
+	hasFile := strings.TrimSpace(input.BodyFile) != ""
+	hasFlagBody := false
+{{- range .BodyFields }}
+{{- if eq (goType .Type) "string" }}
+	hasFlagBody = hasFlagBody || strings.TrimSpace(input.{{ .Name | pascal }}) != ""
+{{- else if eq (goType .Type) "int" }}
+	hasFlagBody = hasFlagBody || input.{{ .Name | pascal }} != 0
+{{- else if eq (goType .Type) "float64" }}
+	hasFlagBody = hasFlagBody || input.{{ .Name | pascal }} != 0
+{{- else if eq (goType .Type) "bool" }}
+	hasFlagBody = hasFlagBody || input.{{ .Name | pascal }}
+{{- end }}
+{{- end }}
+
+	switch {
+	case hasData && hasFile:
+		return nil, fmt.Errorf("--data and --file are mutually exclusive")
+	case hasFlagBody && (hasData || hasFile):
+		return nil, fmt.Errorf("body input flags cannot be combined with --data or --file")
+	case hasData:
+		return []byte(input.BodyData), nil
+	case hasFile:
+		return os.ReadFile(input.BodyFile)
+{{- if eq .BodyMode "simple-json" }}
+	case hasFlagBody:
+{{- range .BodyFields }}
+{{- if .Required }}
+{{- if eq (goType .Type) "string" }}
+		if strings.TrimSpace(input.{{ .Name | pascal }}) == "" {
+			return nil, fmt.Errorf("missing required body field: {{ .Name }}")
+		}
+{{- end }}
+{{- end }}
+{{- end }}
+		payload := map[string]any{}
+{{- range .BodyFields }}
+{{- if eq (goType .Type) "string" }}
+		if strings.TrimSpace(input.{{ .Name | pascal }}) != "" {
+			payload["{{ .Name }}"] = input.{{ .Name | pascal }}
+		}
+{{- else if eq (goType .Type) "int" }}
+		if input.{{ .Name | pascal }} != 0 {
+			payload["{{ .Name }}"] = input.{{ .Name | pascal }}
+		}
+{{- else if eq (goType .Type) "float64" }}
+		if input.{{ .Name | pascal }} != 0 {
+			payload["{{ .Name }}"] = input.{{ .Name | pascal }}
+		}
+{{- else if eq (goType .Type) "bool" }}
+		if input.{{ .Name | pascal }} {
+			payload["{{ .Name }}"] = input.{{ .Name | pascal }}
+		}
+{{- end }}
+{{- end }}
+		return json.Marshal(payload)
+{{- end }}
+	default:
+{{- if .BodyRequired }}
+		return nil, fmt.Errorf("request body is required")
+{{- else }}
+		return nil, nil
+{{- end }}
+	}
+{{- end }}
+}
+{{ end -}}
+
+var defaultMCPCommand = "{{ .Group.Command }}"
+var defaultMCPArgs = {{ stringSliceLiteral .Group.Args }}
+var defaultMCPEnv = {{ stringMapLiteral .Group.Env }}
+
+func invokeMCPStdio(toolName string, input any) (Result, error) {
+	arguments, err := buildMCPArguments(input)
+	if err != nil {
+		return Result{}, err
+	}
+
+	cmd := exec.Command(defaultMCPCommand, defaultMCPArgs...)
+	cmd.Env = append(os.Environ(), envPairs(defaultMCPEnv)...)
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return Result{}, fmt.Errorf("open stdin: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return Result{}, fmt.Errorf("open stdout: %w", err)
+	}
+	cmd.Stderr = io.Discard
+
+	if err := cmd.Start(); err != nil {
+		return Result{}, fmt.Errorf("start MCP command: %w", err)
+	}
+	defer func() {
+		_ = stdin.Close()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+	}()
+
+	reader := bufio.NewReader(stdout)
+	if _, err := doMCPStdioRPC(stdin, reader, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params": map[string]any{
+			"protocolVersion": "2025-03-26",
+			"capabilities":    map[string]any{},
+			"clientInfo":      map[string]any{"name": "opencli", "version": "generated"},
+		},
+	}); err != nil {
+		return Result{}, err
+	}
+	if err := sendMCPStdio(stdin, map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "notifications/initialized",
+	}); err != nil {
+		return Result{}, err
+	}
+
+	payload, err := doMCPStdioRPC(stdin, reader, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      toolName,
+			"arguments": arguments,
+		},
+	})
+	if err != nil {
+		return Result{}, err
+	}
+
+	return decodeMCPResponse(payload)
+}
+
+func doMCPStdioRPC(stdin io.Writer, reader *bufio.Reader, payload map[string]any) ([]byte, error) {
+	if err := sendMCPStdio(stdin, payload); err != nil {
+		return nil, err
+	}
+	return readMCPStdioFrame(reader)
+}
+
+func sendMCPStdio(writer io.Writer, payload map[string]any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(writer, "Content-Length: %d\r\n\r\n", len(body)); err != nil {
+		return err
+	}
+	_, err = writer.Write(body)
+	return err
+}
+
+// readMCPStdioFrame reads a Content-Length framed message from the reader.
+// 与 internal/mcp/transport_stdio.go 保持一致
+func readMCPStdioFrame(reader *bufio.Reader) ([]byte, error) {
+	length := 0
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			break
+		}
+		name, value, ok := strings.Cut(line, ":")
+		if ok && strings.EqualFold(strings.TrimSpace(name), "Content-Length") {
+			parsed, err := strconv.Atoi(strings.TrimSpace(value))
+			if err != nil {
+				return nil, err
+			}
+			length = parsed
+		}
+	}
+	if length <= 0 {
+		return nil, fmt.Errorf("missing Content-Length")
+	}
+
+	payload := make([]byte, length)
+	if _, err := io.ReadFull(reader, payload); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSpace(payload), nil
+}
+
+func envPairs(values map[string]string) []string {
+	pairs := make([]string, 0, len(values))
+	for key, value := range values {
+		pairs = append(pairs, key+"="+value)
+	}
+	return pairs
+}
+
+func buildMCPArguments(input any) (map[string]any, error) {
+	switch typed := input.(type) {
+{{- range .Group.Operations }}
+	case {{ .CommandName | pascal }}Input:
+		body, err := build{{ .CommandName | pascal }}Body(typed)
+		if err != nil {
+			return nil, err
+		}
+		if len(bytes.TrimSpace(body)) == 0 {
+			return map[string]any{}, nil
+		}
+		var arguments map[string]any
+		if err := json.Unmarshal(body, &arguments); err != nil {
+			return nil, fmt.Errorf("decode body arguments: %w", err)
+		}
+		return arguments, nil
+{{- end }}
+	default:
+		return nil, fmt.Errorf("unsupported MCP input type %T", input)
+	}
+}
+
+func decodeMCPResponse(payload []byte) (Result, error) {
+	var response struct {
+		Result map[string]any `json:"result"`
+		Error  *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(payload, &response); err != nil {
+		return Result{}, fmt.Errorf("decode MCP response: %w", err)
+	}
+	if response.Error != nil {
+		return Result{}, fmt.Errorf("%s", strings.TrimSpace(response.Error.Message))
+	}
+	if content, ok := response.Result["content"].([]any); ok {
+		for _, item := range content {
+			entry, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if text, ok := entry["text"].(string); ok && strings.TrimSpace(text) != "" {
+				return Result{Message: strings.TrimSpace(text)}, nil
+			}
+		}
+	}
+	rendered, err := json.Marshal(response.Result)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Message: strings.TrimSpace(string(rendered))}, nil
+}

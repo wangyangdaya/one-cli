@@ -1,7 +1,6 @@
 package render
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -20,7 +19,7 @@ func writeGoProject(outputDir, module string, app model.App) error {
 		groupDir := groupPackageName(group)
 		files = append(files,
 			generatedFile{Path: filepath.Join("internal", groupDir, "command.go"), Template: "go/group_command.go.tmpl", Data: data},
-			generatedFile{Path: filepath.Join("internal", groupDir, "service.go"), Template: "go/group_service.go.tmpl", Data: data},
+			generatedFile{Path: filepath.Join("internal", groupDir, "service.go"), Template: serviceTemplate(group), Data: data},
 			generatedFile{Path: filepath.Join("internal", groupDir, "types.go"), Template: "go/group_types.go.tmpl", Data: data},
 			generatedFile{Path: filepath.Join("skills", groupDir, "SKILL.md"), Template: "go/skill.md.tmpl", Data: data},
 		)
@@ -42,8 +41,21 @@ func writeGoProject(outputDir, module string, app model.App) error {
 	return nil
 }
 
+// serviceTemplate returns the template name for the service file based on the group's backend type.
+// This will be updated in task 4.4 to route to the split templates.
+func serviceTemplate(group model.Group) string {
+	switch strings.TrimSpace(group.Backend) {
+	case "mcp-streamable-http":
+		return "go/group_service_mcp_http.go.tmpl"
+	case "mcp-stdio":
+		return "go/group_service_mcp_stdio.go.tmpl"
+	default:
+		return "go/group_service_http.go.tmpl"
+	}
+}
+
 func writeGoMod(outputDir, module string) error {
-	content, err := os.ReadFile(filepath.Join(filepath.Dir(packageRoot()), "..", "go.mod"))
+	content, err := embeddedFS.ReadFile("gomod.tmpl")
 	if err != nil {
 		return err
 	}
@@ -60,7 +72,7 @@ func writeGoMod(outputDir, module string) error {
 }
 
 func writeGoSum(outputDir string) error {
-	content, err := os.ReadFile(filepath.Join(filepath.Dir(packageRoot()), "..", "go.sum"))
+	content, err := embeddedFS.ReadFile("gosum.tmpl")
 	if err != nil {
 		return err
 	}

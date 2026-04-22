@@ -27,7 +27,7 @@ func writeTemplates(outputDir string, files []generatedFile) error {
 }
 
 func renderTemplate(name string, data any) ([]byte, error) {
-	raw, err := os.ReadFile(templatePath(name))
+	raw, err := embeddedFS.ReadFile("templates/" + name)
 	if err != nil {
 		return nil, err
 	}
@@ -291,22 +291,19 @@ func stringSliceLiteral(values []string) string {
 }
 
 func writeRuntime(outputDir string) error {
-	root := runtimeRoot()
-	paths, err := readRuntimeDir(root)
+	paths, err := listEmbedDir(embeddedFS, "runtime")
 	if err != nil {
 		return err
 	}
 
 	for _, path := range paths {
-		content, err := os.ReadFile(path)
+		content, err := embeddedFS.ReadFile(path)
 		if err != nil {
 			return err
 		}
 
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
+		// Strip the "runtime/" prefix to get the relative path
+		relative := path[len("runtime/"):]
 		if err := writeFile(filepath.Join(outputDir, "internal", relative), content, 0); err != nil {
 			return err
 		}

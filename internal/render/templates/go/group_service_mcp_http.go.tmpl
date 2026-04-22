@@ -1,34 +1,18 @@
 package {{ groupPackageName .Group }}
 
 import (
-{{- if groupUsesMCPStdio .Group }}
 	"bufio"
-{{- end }}
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
-{{- if not (or (groupUsesMCPHTTP .Group) (groupUsesMCPStdio .Group)) }}
 	"net/http"
-	"net/url"
-{{- else if groupUsesMCPHTTP .Group }}
-	"net/http"
-{{- end }}
-{{- if or (groupHasBodyInput .Group) (groupUsesMCPStdio .Group) }}
+{{- if groupHasBodyInput .Group }}
 	"os"
-{{- end }}
-{{- if groupUsesMCPStdio .Group }}
-	"os/exec"
-	"strconv"
 {{- end }}
 	"strings"
 
-{{- if or (groupUsesMCPHTTP .Group) (not (groupUsesMCPStdio .Group)) }}
 	"{{ .Module }}/internal/config"
-{{- end }}
-{{- if not (or (groupUsesMCPHTTP .Group) (groupUsesMCPStdio .Group)) }}
-	"{{ .Module }}/internal/httpx"
-{{- end }}
 )
 
 {{- range .Group.Operations }}
@@ -37,9 +21,6 @@ type {{ .CommandName | pascal }}Input struct {
 {{- if or (eq .In "path") (eq .In "query") }}
 	{{ .Name | pascal }} {{ goType .Type }}
 {{- end }}
-{{- end }}
-{{- if operationHasHeaderParams . }}
-	Headers []string
 {{- end }}
 {{- if .BodyMode }}
 	BodyData string
@@ -51,106 +32,8 @@ type {{ .CommandName | pascal }}Input struct {
 }
 
 func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (Result, error) {
-{{- if groupUsesMCPHTTP $.Group }}
 	return invokeMCPHTTP("{{ .RemoteName }}", input)
-{{- else if groupUsesMCPStdio $.Group }}
-	return invokeMCPStdio("{{ .RemoteName }}", input)
-{{- else }}
-	requestURL, err := build{{ .CommandName | pascal }}URL(input)
-	if err != nil {
-		return Result{}, err
-	}
-
-	body, err := build{{ .CommandName | pascal }}Body(input)
-	if err != nil {
-		return Result{}, err
-	}
-
-	var reader io.Reader
-	if len(body) > 0 {
-		reader = bytes.NewReader(body)
-	}
-
-	req, err := http.NewRequest(http.Method{{ .Method | pascal }}, requestURL, reader)
-	if err != nil {
-		return Result{}, fmt.Errorf("build request: %w", err)
-	}
-	if len(body) > 0 {
-		req.Header.Set("Content-Type", "application/json")
-	}
-{{- if operationHasHeaderParams . }}
-	if err := applyHeaders(req, input.Headers); err != nil {
-		return Result{}, err
-	}
-{{- end }}
-
-	resp, err := httpx.NewClient().Do(req)
-	if err != nil {
-		return Result{}, fmt.Errorf("request {{ .Method }} {{ .Path }}: %w", err)
-	}
-	defer resp.Body.Close()
-
-	payload, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return Result{}, fmt.Errorf("read response: %w", err)
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return Result{}, fmt.Errorf("request failed: %s", resp.Status)
-	}
-	if len(bytes.TrimSpace(payload)) == 0 {
-		return Result{Message: "{{ .Method }} {{ .Path }}"}, nil
-	}
-
-	var result Result
-	if err := json.Unmarshal(payload, &result); err == nil && strings.TrimSpace(result.Message) != "" {
-		return result, nil
-	}
-	return Result{Message: strings.TrimSpace(string(payload))}, nil
-{{- end }}
 }
-
-{{- if not (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) }}
-func build{{ .CommandName | pascal }}URL(input {{ .CommandName | pascal }}Input) (string, error) {
-	baseURL := strings.TrimSpace(config.Lookup("OPENCLI_BASE_URL"))
-	if baseURL == "" {
-		return "", fmt.Errorf("missing OPENCLI_BASE_URL")
-	}
-
-	requestURL, err := url.Parse(strings.TrimRight(baseURL, "/") + "{{ .Path }}")
-	if err != nil {
-		return "", fmt.Errorf("parse request URL: %w", err)
-	}
-{{- range .Parameters }}
-{{- if eq .In "path" }}
-	requestURL.Path = strings.ReplaceAll(requestURL.Path, {{ printf "%q" (printf "{%s}" .Name) }}, url.PathEscape(fmt.Sprint(input.{{ .Name | pascal }})))
-{{- end }}
-{{- end }}
-	query := requestURL.Query()
-{{- range .Parameters }}
-{{- if eq .In "query" }}
-{{- if eq (goType .Type) "string" }}
-	if strings.TrimSpace(input.{{ .Name | pascal }}) != "" {
-		query.Set("{{ .Name }}", input.{{ .Name | pascal }})
-	}
-{{- else if eq (goType .Type) "int" }}
-	if input.{{ .Name | pascal }} != 0 {
-		query.Set("{{ .Name }}", fmt.Sprint(input.{{ .Name | pascal }}))
-	}
-{{- else if eq (goType .Type) "float64" }}
-	if input.{{ .Name | pascal }} != 0 {
-		query.Set("{{ .Name }}", fmt.Sprint(input.{{ .Name | pascal }}))
-	}
-{{- else if eq (goType .Type) "bool" }}
-	if input.{{ .Name | pascal }} {
-		query.Set("{{ .Name }}", fmt.Sprint(input.{{ .Name | pascal }}))
-	}
-{{- end }}
-{{- end }}
-{{- end }}
-	requestURL.RawQuery = query.Encode()
-	return requestURL.String(), nil
-}
-{{- end }}
 
 func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input) ([]byte, error) {
 {{- if not .BodyMode }}
@@ -188,18 +71,6 @@ func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input
 		if strings.TrimSpace(input.{{ .Name | pascal }}) == "" {
 			return nil, fmt.Errorf("missing required body field: {{ .Name }}")
 		}
-{{- else if eq (goType .Type) "int" }}
-		if input.{{ .Name | pascal }} == 0 {
-			return nil, fmt.Errorf("missing required body field: {{ .Name }}")
-		}
-{{- else if eq (goType .Type) "float64" }}
-		if input.{{ .Name | pascal }} == 0 {
-			return nil, fmt.Errorf("missing required body field: {{ .Name }}")
-		}
-{{- else if eq (goType .Type) "bool" }}
-		if !input.{{ .Name | pascal }} {
-			return nil, fmt.Errorf("missing required body field: {{ .Name }}")
-		}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -235,22 +106,6 @@ func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input
 {{- end }}
 }
 {{ end -}}
-{{- if groupHasHeaderParams .Group }}
-
-func applyHeaders(req *http.Request, headers []string) error {
-	for _, raw := range headers {
-		name, value, ok := strings.Cut(raw, ":")
-		name = strings.TrimSpace(name)
-		value = strings.TrimSpace(value)
-		if !ok || name == "" || value == "" {
-			return fmt.Errorf("invalid --header value %q: expected %q", raw, "Name: Value")
-		}
-		req.Header.Set(name, value)
-	}
-	return nil
-}
-{{- end }}
-{{- if groupUsesMCPHTTP .Group }}
 
 var defaultMCPHeaders = {{ stringMapLiteral .Group.Headers }}
 
@@ -368,144 +223,8 @@ func initializeMCPHTTP(requestURL string) (string, error) {
 
 	return resp.Header.Get("Mcp-Session-Id"), nil
 }
-{{- end }}
-{{- if groupUsesMCPStdio .Group }}
-
-var defaultMCPCommand = "{{ .Group.Command }}"
-var defaultMCPArgs = {{ stringSliceLiteral .Group.Args }}
-var defaultMCPEnv = {{ stringMapLiteral .Group.Env }}
-
-func invokeMCPStdio(toolName string, input any) (Result, error) {
-	arguments, err := buildMCPArguments(input)
-	if err != nil {
-		return Result{}, err
-	}
-
-	cmd := exec.Command(defaultMCPCommand, defaultMCPArgs...)
-	cmd.Env = append(os.Environ(), envPairs(defaultMCPEnv)...)
-
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return Result{}, fmt.Errorf("open stdin: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return Result{}, fmt.Errorf("open stdout: %w", err)
-	}
-	cmd.Stderr = io.Discard
-
-	if err := cmd.Start(); err != nil {
-		return Result{}, fmt.Errorf("start MCP command: %w", err)
-	}
-	defer func() {
-		_ = stdin.Close()
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		_ = cmd.Wait()
-	}()
-
-	reader := bufio.NewReader(stdout)
-	if _, err := doMCPStdioRPC(stdin, reader, map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "initialize",
-		"params": map[string]any{
-			"protocolVersion": "2025-03-26",
-			"capabilities":    map[string]any{},
-			"clientInfo":      map[string]any{"name": "opencli", "version": "generated"},
-		},
-	}); err != nil {
-		return Result{}, err
-	}
-	if err := sendMCPStdio(stdin, map[string]any{
-		"jsonrpc": "2.0",
-		"method":  "notifications/initialized",
-	}); err != nil {
-		return Result{}, err
-	}
-
-	payload, err := doMCPStdioRPC(stdin, reader, map[string]any{
-		"jsonrpc": "2.0",
-		"id":      2,
-		"method":  "tools/call",
-		"params": map[string]any{
-			"name":      toolName,
-			"arguments": arguments,
-		},
-	})
-	if err != nil {
-		return Result{}, err
-	}
-
-	return decodeMCPResponse(payload)
-}
-
-func doMCPStdioRPC(stdin io.Writer, reader *bufio.Reader, payload map[string]any) ([]byte, error) {
-	if err := sendMCPStdio(stdin, payload); err != nil {
-		return nil, err
-	}
-	return readMCPStdioFrame(reader)
-}
-
-func sendMCPStdio(writer io.Writer, payload map[string]any) error {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(writer, "Content-Length: %d\r\n\r\n", len(body)); err != nil {
-		return err
-	}
-	_, err = writer.Write(body)
-	return err
-}
-
-func readMCPStdioFrame(reader *bufio.Reader) ([]byte, error) {
-	length := 0
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			return nil, err
-		}
-		line = strings.TrimSpace(line)
-		if line == "" {
-			break
-		}
-		name, value, ok := strings.Cut(line, ":")
-		if ok && strings.EqualFold(strings.TrimSpace(name), "Content-Length") {
-			length, err = strconv.Atoi(strings.TrimSpace(value))
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-	if length <= 0 {
-		return nil, fmt.Errorf("missing Content-Length")
-	}
-
-	payload := make([]byte, length)
-	if _, err := io.ReadFull(reader, payload); err != nil {
-		return nil, err
-	}
-	return payload, nil
-}
-
-func envPairs(values map[string]string) []string {
-	pairs := make([]string, 0, len(values))
-	for key, value := range values {
-		pairs = append(pairs, key+"="+value)
-	}
-	return pairs
-}
-{{- end }}
-{{- if or (groupUsesMCPHTTP .Group) (groupUsesMCPStdio .Group) }}
 
 func buildMCPArguments(input any) (map[string]any, error) {
-	bodyBuilder, ok := input.(interface{ buildBody() ([]byte, error) })
-	if ok {
-		_ = bodyBuilder
-	}
-
 	switch typed := input.(type) {
 {{- range .Group.Operations }}
 	case {{ .CommandName | pascal }}Input:
@@ -569,18 +288,22 @@ func decodeMCPResponse(payload []byte) (Result, error) {
 	return Result{Message: strings.TrimSpace(string(rendered))}, nil
 }
 
+// extractSSEMessage parses a text/event-stream response and extracts data: lines.
+// 与 internal/mcp/transport_streamable_http.go 保持一致
 func extractSSEMessage(payload []byte) ([]byte, error) {
-	lines := strings.Split(string(payload), "\n")
-	data := make([]string, 0, len(lines))
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
+	scanner := bufio.NewScanner(bytes.NewReader(payload))
+	var dataLines []string
+	for scanner.Scan() {
+		line := scanner.Text()
 		if strings.HasPrefix(line, "data:") {
-			data = append(data, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
 		}
 	}
-	if len(data) == 0 {
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if len(dataLines) == 0 {
 		return nil, fmt.Errorf("missing SSE data payload")
 	}
-	return []byte(strings.Join(data, "\n")), nil
+	return []byte(strings.Join(dataLines, "\n")), nil
 }
-{{- end }}

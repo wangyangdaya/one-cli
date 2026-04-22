@@ -5,7 +5,7 @@ import "github.com/spf13/cobra"
 func NewRootCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "opencli",
-		Short:         "Generate Go CLI projects from Swagger/OpenAPI",
+		Short:         "Generate CLI projects from OpenAPI/Swagger or MCP (Go & Rust)",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {

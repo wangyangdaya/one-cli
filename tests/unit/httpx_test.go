@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"one-cli/internal/httpx"
-	runtimehttpx "one-cli/internal/runtime/httpx"
+	runtimehttpx "one-cli/internal/render/runtime/httpx"
 )
 
 func TestJSONHeaders(t *testing.T) {

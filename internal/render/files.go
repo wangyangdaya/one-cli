@@ -1,9 +1,9 @@
 package render
 
 import (
+	"embed"
+	"io/fs"
 	"os"
-	"path/filepath"
-	"runtime"
 )
 
 type generatedFile struct {
@@ -19,35 +19,21 @@ type templateData struct {
 	Group  any
 }
 
-func packageRoot() string {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		// Fallback to current working directory if Caller fails
-		// This should never happen in normal operation
-		return "."
-	}
-	return filepath.Dir(file)
+func readTemplate(name string) ([]byte, error) {
+	return embeddedFS.ReadFile("templates/" + name)
 }
 
-func templatePath(name string) string {
-	return filepath.Join(packageRoot(), "..", "templates", name)
-}
-
-func runtimeRoot() string {
-	return filepath.Join(packageRoot(), "..", "runtime")
-}
-
-func readRuntimeDir(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
+func listEmbedDir(fsys embed.FS, dir string) ([]string, error) {
+	entries, err := fs.ReadDir(fsys, dir)
 	if err != nil {
 		return nil, err
 	}
 
 	paths := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		fullPath := filepath.Join(dir, entry.Name())
+		fullPath := dir + "/" + entry.Name()
 		if entry.IsDir() {
-			children, err := readRuntimeDir(fullPath)
+			children, err := listEmbedDir(fsys, fullPath)
 			if err != nil {
 				return nil, err
 			}
