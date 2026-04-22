@@ -59,6 +59,7 @@ pub fn parse_headers(values: &[String]) -> AppResult<Vec<(String, String)>> {
 	Ok(headers)
 }
 
+{{- if appHasAnyMCP .App }}
 pub async fn call_mcp_tool(
     endpoint: &str,
     headers: Vec<(String, String)>,
@@ -161,3 +162,4 @@ fn parse_mcp_payload(body: &str) -> AppResult<Value> {
 
     Err("unable to parse MCP response payload".to_string())
 }
+{{- end }}

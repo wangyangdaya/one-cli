@@ -195,9 +195,39 @@ func TestGenerateExamplesRustOpenAPI(t *testing.T) {
 		"src/cli.rs",
 		"src/client.rs",
 		"src/commands/mod.rs",
+		"src/commands/auth.rs",
 	} {
 		if _, err := os.Stat(filepath.Join(outDir, rel)); err != nil {
 			t.Errorf("missing generated file %s: %v", rel, err)
+		}
+	}
+
+	commandContent, err := os.ReadFile(filepath.Join(outDir, "src", "commands", "auth.rs"))
+	if err != nil {
+		t.Fatalf("read generated auth command: %v", err)
+	}
+	commandText := string(commandContent)
+	for _, unwanted := range []string{
+		`let mut path = String::from("/nodus/api/v1/auth/login");`,
+		`let mut query = Vec::new();`,
+	} {
+		if strings.Contains(commandText, unwanted) {
+			t.Fatalf("generated auth command should avoid unnecessary mutability %q:\n%s", unwanted, commandText)
+		}
+	}
+
+	clientContent, err := os.ReadFile(filepath.Join(outDir, "src", "client.rs"))
+	if err != nil {
+		t.Fatalf("read generated client: %v", err)
+	}
+	clientText := string(clientContent)
+	for _, unwanted := range []string{
+		"pub async fn call_mcp_tool(",
+		"async fn send_mcp_request(",
+		"fn parse_mcp_payload(",
+	} {
+		if strings.Contains(clientText, unwanted) {
+			t.Fatalf("generated OpenAPI client should not include MCP helper %q:\n%s", unwanted, clientText)
 		}
 	}
 
@@ -229,6 +259,39 @@ func TestGenerateExamplesRustOpenAPI(t *testing.T) {
 	}
 
 	t.Logf("Rust OpenAPI binary: %s", binaryPath)
+}
+
+func TestGenerateExamplesRustLeaveMakeupAvoidsEmptyBodyMutability(t *testing.T) {
+	if _, err := exec.LookPath("cargo"); err != nil {
+		t.Skip("cargo not installed")
+	}
+
+	root := workspaceRoot(t)
+	outDir := tmpDir(t, "leave-makeup-rust")
+
+	inputPath := filepath.Join(root, "examples", "leave_makeup.yaml")
+	if err := app.RunGenerate(inputPath, "", outDir, "one-ai", "one-ai", "", "rust"); err != nil {
+		t.Fatalf("generate rust from leave_makeup.yaml: %v", err)
+	}
+
+	for _, rel := range []string{
+		"src/commands/attendance.rs",
+		"src/commands/leave.rs",
+	} {
+		content, err := os.ReadFile(filepath.Join(outDir, rel))
+		if err != nil {
+			t.Fatalf("read generated file %s: %v", rel, err)
+		}
+		text := string(content)
+		for _, unwanted := range []string{
+			"let mut payload = Map::new();",
+			"let mut has_flag_body = false;",
+		} {
+			if strings.Contains(text, unwanted) {
+				t.Fatalf("generated file %s should avoid empty body mutability %q:\n%s", rel, unwanted, text)
+			}
+		}
+	}
 }
 
 // ── Rust + MCP (quark.json) ───────────────────────────────────────────────────

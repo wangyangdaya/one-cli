@@ -39,7 +39,8 @@ type rawDocument struct {
 }
 
 type rawComponents struct {
-	Schemas map[string]rawSchema `yaml:"schemas"`
+	Schemas    map[string]rawSchema    `yaml:"schemas"`
+	Parameters map[string]rawParameter `yaml:"parameters"`
 }
 
 type rawInfo struct {
@@ -72,6 +73,7 @@ type rawOperation struct {
 }
 
 type rawParameter struct {
+	Ref         string             `yaml:"$ref"`
 	Name        string             `yaml:"name"`
 	In          string             `yaml:"in"`
 	Required    bool               `yaml:"required"`
@@ -114,7 +116,7 @@ func normalizeDocument(raw rawDocument) Document {
 
 	for _, path := range sortedKeys(raw.Paths) {
 		item := raw.Paths[path]
-		doc.Operations = append(doc.Operations, normalizeOperations(path, item, raw.Components.Schemas)...)
+		doc.Operations = append(doc.Operations, normalizeOperations(path, item, raw.Components)...)
 	}
 
 	return doc
@@ -131,7 +133,7 @@ func normalizeTags(tags []rawTag) []Tag {
 	return out
 }
 
-func normalizeOperations(path string, item rawPath, schemas map[string]rawSchema) []Operation {
+func normalizeOperations(path string, item rawPath, components rawComponents) []Operation {
 	operations := []struct {
 		method string
 		raw    rawOperation
@@ -151,20 +153,20 @@ func normalizeOperations(path string, item rawPath, schemas map[string]rawSchema
 		if isEmptyOperation(op.raw) {
 			continue
 		}
-		out = append(out, normalizeOperation(path, op.method, op.raw, schemas))
+		out = append(out, normalizeOperation(path, op.method, op.raw, components))
 	}
 
 	return out
 }
 
-func normalizeOperation(path, method string, raw rawOperation, schemas map[string]rawSchema) Operation {
+func normalizeOperation(path, method string, raw rawOperation, components rawComponents) Operation {
 	op := Operation{
 		Method:      strings.ToUpper(strings.TrimSpace(method)),
 		Path:        strings.TrimSpace(path),
 		OperationID: strings.TrimSpace(raw.OperationID),
 		Summary:     strings.TrimSpace(raw.Summary),
-		Parameters:  normalizeParameters(raw.Parameters),
-		RequestBody: normalizeRequestBody(raw.RequestBody, schemas),
+		Parameters:  normalizeParameters(raw.Parameters, components.Parameters),
+		RequestBody: normalizeRequestBody(raw.RequestBody, components.Schemas),
 	}
 	if len(raw.Tags) > 0 {
 		op.Tag = strings.TrimSpace(raw.Tags[0])
@@ -172,9 +174,10 @@ func normalizeOperation(path, method string, raw rawOperation, schemas map[strin
 	return op
 }
 
-func normalizeParameters(parameters []rawParameter) []Parameter {
+func normalizeParameters(parameters []rawParameter, refs map[string]rawParameter) []Parameter {
 	out := make([]Parameter, 0, len(parameters))
 	for _, parameter := range parameters {
+		parameter = resolveParameter(parameter, refs, nil)
 		out = append(out, Parameter{
 			Name:        strings.TrimSpace(parameter.Name),
 			In:          strings.TrimSpace(parameter.In),
@@ -184,6 +187,33 @@ func normalizeParameters(parameters []rawParameter) []Parameter {
 		})
 	}
 	return out
+}
+
+func resolveParameter(parameter rawParameter, refs map[string]rawParameter, seen map[string]bool) rawParameter {
+	ref := strings.TrimSpace(parameter.Ref)
+	if ref == "" {
+		return parameter
+	}
+	const prefix = "#/components/parameters/"
+	if !strings.HasPrefix(ref, prefix) {
+		return parameter
+	}
+	name := strings.TrimPrefix(ref, prefix)
+	if name == "" {
+		return parameter
+	}
+	if seen == nil {
+		seen = map[string]bool{}
+	}
+	if seen[name] {
+		return parameter
+	}
+	referenced, ok := refs[name]
+	if !ok {
+		return parameter
+	}
+	seen[name] = true
+	return resolveParameter(referenced, refs, seen)
 }
 
 func parameterType(parameter rawParameter) string {

@@ -201,3 +201,53 @@ components:
 		t.Fatalf("fields = %d want 3", len(body.JSONFields))
 	}
 }
+
+func TestParseDocumentResolvesReferencedParameters(t *testing.T) {
+	doc, err := openapi.Parse([]byte(`
+openapi: 3.0.0
+info:
+  title: Demo API
+  version: "1.0"
+paths:
+  /reports:
+    get:
+      operationId: listReports
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationHeader'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: ok
+components:
+  parameters:
+    AuthorizationHeader:
+      name: Authorization
+      in: header
+      required: true
+      description: Bearer token
+      schema:
+        type: string
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	if len(doc.Operations) != 1 {
+		t.Fatalf("operations = %d want 1", len(doc.Operations))
+	}
+	if len(doc.Operations[0].Parameters) != 2 {
+		t.Fatalf("parameters = %d want 2", len(doc.Operations[0].Parameters))
+	}
+
+	header := doc.Operations[0].Parameters[0]
+	if header.Name != "Authorization" || header.In != "header" || !header.Required || header.Type != "string" {
+		t.Fatalf("unexpected referenced header parameter: %+v", header)
+	}
+	if header.Description != "Bearer token" {
+		t.Fatalf("description = %q want %q", header.Description, "Bearer token")
+	}
+}

@@ -27,7 +27,7 @@ func writeTemplates(outputDir string, files []generatedFile) error {
 }
 
 func renderTemplate(name string, data any) ([]byte, error) {
-	raw, err := embeddedFS.ReadFile("templates/" + name)
+	raw, err := readTemplate(name)
 	if err != nil {
 		return nil, err
 	}
@@ -39,6 +39,7 @@ func renderTemplate(name string, data any) ([]byte, error) {
 		"goType":                   goType,
 		"groupHasBodyInput":        groupHasBodyInput,
 		"groupHasHeaderParams":     groupHasHeaderParams,
+		"groupHasBodyFields":       groupHasBodyFields,
 		"groupUsesMCPHTTP":         groupUsesMCPHTTP,
 		"groupUsesMCPStdio":        groupUsesMCPStdio,
 		"appHasMCPHTTP":            appHasMCPHTTP,
@@ -46,6 +47,8 @@ func renderTemplate(name string, data any) ([]byte, error) {
 		"appHasAnyMCP":             appHasAnyMCP,
 		"groupPackageName":         groupPackageName,
 		"operationHasHeaderParams": operationHasHeaderParams,
+		"operationHasPathParams":   operationHasPathParams,
+		"operationHasQueryParams":  operationHasQueryParams,
 		"rustFieldName":            rustFieldName,
 		"rustModuleName":           rustModuleName,
 		"rustType":                 rustType,
@@ -127,6 +130,15 @@ func groupHasHeaderParams(group model.Group) bool {
 	return false
 }
 
+func groupHasBodyFields(group model.Group) bool {
+	for _, operation := range group.Operations {
+		if len(operation.BodyFields) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func groupUsesMCPHTTP(group model.Group) bool {
 	return strings.TrimSpace(group.Backend) == "mcp-streamable-http"
 }
@@ -174,6 +186,24 @@ func appHasAnyMCP(app model.App) bool {
 func operationHasHeaderParams(operation model.Operation) bool {
 	for _, parameter := range operation.Parameters {
 		if strings.TrimSpace(parameter.In) == "header" {
+			return true
+		}
+	}
+	return false
+}
+
+func operationHasPathParams(operation model.Operation) bool {
+	for _, parameter := range operation.Parameters {
+		if strings.TrimSpace(parameter.In) == "path" {
+			return true
+		}
+	}
+	return false
+}
+
+func operationHasQueryParams(operation model.Operation) bool {
+	for _, parameter := range operation.Parameters {
+		if strings.TrimSpace(parameter.In) == "query" {
 			return true
 		}
 	}

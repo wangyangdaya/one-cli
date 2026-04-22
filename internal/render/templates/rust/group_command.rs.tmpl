@@ -1,5 +1,9 @@
 use clap::{Args, Subcommand};
+{{- if or (groupHasBodyFields .Group) (groupUsesMCPHTTP .Group) (groupUsesMCPStdio .Group) }}
 use serde_json::{Map, Value};
+{{- else }}
+use serde_json::Value;
+{{- end }}
 
 use crate::client;
 use crate::output;
@@ -65,14 +69,22 @@ async fn run_{{ rustFieldName .CommandName }}(args: {{ .CommandName | pascal }}A
         arguments,
     ).await?;
 {{- else }}
+{{- if operationHasPathParams . }}
     let mut path = String::from("{{ .Path }}");
+{{- else }}
+    let path = String::from("{{ .Path }}");
+{{- end }}
 {{- range .Parameters }}
 {{- if eq .In "path" }}
     path = path.replace("{{ printf "{%s}" .Name }}", &args.{{ rustFieldName .Name }}.to_string());
 {{- end }}
 {{- end }}
 
+{{- if operationHasQueryParams . }}
     let mut query = Vec::new();
+{{- else }}
+    let query = Vec::new();
+{{- end }}
 {{- range .Parameters }}
 {{- if eq .In "query" }}
 {{- if .Required }}
@@ -117,6 +129,7 @@ fn build_{{ rustFieldName .CommandName }}_body(args: &{{ .CommandName | pascal }
         return Ok(Some(parsed));
     }
 
+{{- if .BodyFields }}
     let mut payload = Map::new();
     let mut has_flag_body = false;
 {{- range .BodyFields }}
@@ -140,6 +153,7 @@ fn build_{{ rustFieldName .CommandName }}_body(args: &{{ .CommandName | pascal }
     if has_flag_body {
         return Ok(Some(Value::Object(payload)));
     }
+{{- end }}
 {{- end }}
 {{- if .BodyRequired }}
     Err("request body is required".to_string())
