@@ -58,6 +58,9 @@ class CliBackend(FilesystemBackend, SandboxBackendProtocol):
         opencli_base_url = os.getenv("OPENCLI_BASE_URL")
         if opencli_base_url:
             self._env["OPENCLI_BASE_URL"] = opencli_base_url
+        self._opencli_base_url_map = self._parse_opencli_base_url_map(
+            os.getenv("OPENCLI_BASE_URL_MAP", "")
+        )
 
         path_parts = [part for part in self._env.get("PATH", "").split(os.pathsep) if part]
         for candidate in (self.app_dir / "bin", self.app_dir):
@@ -65,6 +68,20 @@ class CliBackend(FilesystemBackend, SandboxBackendProtocol):
             if candidate.exists() and candidate_text not in path_parts:
                 path_parts.insert(0, candidate_text)
         self._env["PATH"] = os.pathsep.join(path_parts)
+
+    @staticmethod
+    def _parse_opencli_base_url_map(raw_value: str) -> dict[str, str]:
+        mappings: dict[str, str] = {}
+        for item in raw_value.split(","):
+            candidate = item.strip()
+            if not candidate or "=" not in candidate:
+                continue
+            executable, base_url = candidate.split("=", 1)
+            executable = executable.strip()
+            base_url = base_url.strip()
+            if executable and base_url:
+                mappings[executable] = base_url
+        return mappings
 
     def _parse(self, command: str) -> list[str] | None:
         try:
@@ -95,6 +112,12 @@ class CliBackend(FilesystemBackend, SandboxBackendProtocol):
                 exit_code=126,
             )
 
+        command_basename = os.path.basename(args[0])
+        env = self._env.copy()
+        mapped_base_url = self._opencli_base_url_map.get(command_basename)
+        if mapped_base_url:
+            env["OPENCLI_BASE_URL"] = mapped_base_url
+
         try:
             result = subprocess.run(
                 args,
@@ -103,7 +126,7 @@ class CliBackend(FilesystemBackend, SandboxBackendProtocol):
                 text=True,
                 timeout=timeout or self.timeout,
                 cwd=str(self.cwd),
-                env=self._env.copy(),
+                env=env,
             )
         except subprocess.TimeoutExpired:
             return ExecuteResponse(

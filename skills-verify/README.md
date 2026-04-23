@@ -48,6 +48,7 @@ Edit `skills-verify/.env`:
 - `LOG_LEVEL`: Logging level (default: `INFO`)
 - `SKILLS_VERIFY_APP_DIR`: Generated app directory (default: `tmp/openapi`)
 - `OPENCLI_BASE_URL`: Base URL for API calls (required by generated CLI)
+- `OPENCLI_BASE_URL_MAP`: Optional per-executable base URL mapping
 - `ALLOWED_EXECUTABLES`: Comma-separated list of allowed CLI executables
 
 ### Multi-Executable Configuration
@@ -64,6 +65,17 @@ ALLOWED_EXECUTABLES=openapi-cli,petcli,usercli
 # With spaces (will be trimmed)
 ALLOWED_EXECUTABLES=openapi-cli, petcli, usercli
 ```
+
+When different CLI commands should call different backends, set `OPENCLI_BASE_URL_MAP`:
+
+```bash
+OPENCLI_BASE_URL=https://fallback.example.com
+OPENCLI_BASE_URL_MAP=openapi-cli=https://api.a.example.com,petcli=https://api.b.example.com
+```
+
+Resolution order at execution time:
+- If command exists in `OPENCLI_BASE_URL_MAP`, use mapped URL
+- Otherwise, use `OPENCLI_BASE_URL` as fallback
 
 ## Usage
 
