@@ -19,6 +19,8 @@
 - ✅ **标准架构** - 基于 Cobra 框架，遵循 Go 最佳实践
 - ✅ **本地/远程** - 支持本地文件和远程 URL 作为输入
 - ✅ **类型安全** - 生成强类型的 Go 代码
+- ✅ **全版本兼容** - 支持 OpenAPI 2.0（Swagger）、3.0 和 3.1
+- ✅ **复杂 Schema** - 完整的 `$ref` 解析、`allOf` 合并、`oneOf`/`anyOf` 处理
 
 ### 工作流程
 
@@ -579,7 +581,10 @@ go build -o bin/petcli ./cmd/petcli
 ## 📋 路线图
 
 ### 已完成 ✅
-- [x] OpenAPI 3.0 和 Swagger 2.0 支持
+- [x] OpenAPI 2.0（Swagger）、3.0 和 3.1 全版本支持
+- [x] 基于 kin-openapi 的完整 `$ref` 解析（含嵌套引用链）
+- [x] `allOf` 属性自动合并，支持复合 schema 展开为 CLI flag
+- [x] `oneOf`/`anyOf` 正确识别并回退为 `--file`/`--data` 模式
 - [x] 本地文件和远程 URL 加载
 - [x] 命令组和子命令生成
 - [x] 参数映射（path, query, body）
@@ -590,6 +595,7 @@ go build -o bin/petcli ./cmd/petcli
 ### 计划中 🚧
 - [ ] `opencli init` 命令实现
 - [ ] `--version` 标志支持
+- [ ] Rust 生成目标 `--trace` 支持
 - [ ] HTTP 重试机制
 - [ ] 更详细的错误消息
 - [ ] 进度指示器
@@ -603,7 +609,8 @@ go build -o bin/petcli ./cmd/petcli
 ## 🐛 已知问题
 
 - `opencli init` 命令尚未实现
-- 部分复杂的 OpenAPI schema 可能需要手动调整
+- Rust 生成目标不支持 `--trace` flag（Go 目标已支持）
+- Rust 生成目标不支持 MCP `stdio` 传输
 - 生成的代码需要手动添加实际的 HTTP 请求逻辑
 
 ---
@@ -618,6 +625,7 @@ go build -o bin/petcli ./cmd/petcli
 
 本项目使用了以下优秀的开源库：
 
+- [kin-openapi](https://github.com/getkin/kin-openapi) - OpenAPI 2.0/3.0/3.1 解析与验证
 - [Cobra](https://github.com/spf13/cobra) - CLI 框架
 - [yaml.v3](https://github.com/go-yaml/yaml) - YAML 解析
 - [godotenv](https://github.com/joho/godotenv) - 环境变量加载
@@ -631,4 +639,4 @@ go build -o bin/petcli ./cmd/petcli
 
 ---
 
-**最后更新**: 2026-04-20
+**最后更新**: 2026-04-27

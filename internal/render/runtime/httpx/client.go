@@ -124,6 +124,12 @@ func logf(format string, args ...any) {
 	logger.Printf(format, args...)
 }
 
+// Logf logs a trace message if tracing is enabled. Exported for use by
+// other packages (e.g. MCP stdio service).
+func Logf(format string, args ...any) {
+	logf(format, args...)
+}
+
 func logRequest(req *http.Request) {
 	if req == nil || req.URL == nil {
 		return

@@ -6,6 +6,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/getkin/kin-openapi/openapi2"
+	"github.com/getkin/kin-openapi/openapi2conv"
+	"github.com/getkin/kin-openapi/openapi3"
 	"gopkg.in/yaml.v3"
 )
 
@@ -14,117 +17,97 @@ import (
 // and the MCP converter reference this constant to stay in sync.
 const MaxSimpleJSONFields = 5
 
+// Parse parses raw bytes (YAML or JSON) into a Document.
+// It supports OpenAPI 2.0 (Swagger), 3.0, and 3.1.
 func Parse(data []byte) (Document, error) {
 	if len(data) == 0 {
 		return Document{}, nil
 	}
 
-	var raw rawDocument
+	version, err := detectVersion(data)
+	if err != nil {
+		return Document{}, err
+	}
+
+	doc3, err := loadAsOpenAPI3(data, version)
+	if err != nil {
+		return Document{}, err
+	}
+
+	return convertDocument(doc3), nil
+}
+
+// versionHeader is used to extract the version identifier from raw bytes.
+type versionHeader struct {
+	OpenAPI string `yaml:"openapi" json:"openapi"`
+	Swagger string `yaml:"swagger" json:"swagger"`
+}
+
+// detectVersion extracts the OpenAPI/Swagger version from raw bytes.
+// Returns "2.0", "3.0", or "3.1".
+func detectVersion(data []byte) (string, error) {
+	var header versionHeader
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(false)
-	if err := dec.Decode(&raw); err != nil {
-		return Document{}, fmt.Errorf("decode openapi: %w", err)
+	if err := dec.Decode(&header); err != nil {
+		return "", fmt.Errorf("decode openapi: %w", err)
 	}
 
-	return normalizeDocument(raw), nil
+	if strings.TrimSpace(header.Swagger) == "2.0" {
+		return "2.0", nil
+	}
+	if strings.HasPrefix(strings.TrimSpace(header.OpenAPI), "3.1") {
+		return "3.1", nil
+	}
+	if strings.HasPrefix(strings.TrimSpace(header.OpenAPI), "3.0") {
+		return "3.0", nil
+	}
+	return "", fmt.Errorf("unsupported or missing OpenAPI version")
 }
 
-type rawDocument struct {
-	OpenAPI    string             `yaml:"openapi"`
-	Swagger    string             `yaml:"swagger"`
-	Info       rawInfo            `yaml:"info"`
-	Tags       []rawTag           `yaml:"tags"`
-	Paths      map[string]rawPath `yaml:"paths"`
-	Components rawComponents      `yaml:"components"`
-}
-
-type rawComponents struct {
-	Schemas    map[string]rawSchema    `yaml:"schemas"`
-	Parameters map[string]rawParameter `yaml:"parameters"`
-}
-
-type rawInfo struct {
-	Title   string `yaml:"title"`
-	Version string `yaml:"version"`
-}
-
-type rawTag struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
-}
-
-type rawPath struct {
-	Get     rawOperation `yaml:"get"`
-	Put     rawOperation `yaml:"put"`
-	Post    rawOperation `yaml:"post"`
-	Delete  rawOperation `yaml:"delete"`
-	Patch   rawOperation `yaml:"patch"`
-	Head    rawOperation `yaml:"head"`
-	Options rawOperation `yaml:"options"`
-	Trace   rawOperation `yaml:"trace"`
-}
-
-type rawOperation struct {
-	Tags        []string       `yaml:"tags"`
-	OperationID string         `yaml:"operationId"`
-	Summary     string         `yaml:"summary"`
-	Parameters  []rawParameter `yaml:"parameters"`
-	RequestBody rawRequestBody `yaml:"requestBody"`
-}
-
-type rawParameter struct {
-	Ref         string             `yaml:"$ref"`
-	Name        string             `yaml:"name"`
-	In          string             `yaml:"in"`
-	Required    bool               `yaml:"required"`
-	Description string             `yaml:"description"`
-	Schema      rawParameterSchema `yaml:"schema"`
-	Type        string             `yaml:"type"`
-}
-
-type rawParameterSchema struct {
-	Type string `yaml:"type"`
-}
-
-type rawRequestBody struct {
-	Required bool                    `yaml:"required"`
-	Content  map[string]rawMediaType `yaml:"content"`
-}
-
-type rawMediaType struct {
-	Schema rawSchema `yaml:"schema"`
-}
-
-type rawSchema struct {
-	Ref         string               `yaml:"$ref"`
-	Type        string               `yaml:"type"`
-	Description string               `yaml:"description"`
-	Required    []string             `yaml:"required"`
-	Properties  map[string]rawSchema `yaml:"properties"`
-	Items       *rawSchema           `yaml:"items"`
-	AnyOf       []rawSchema          `yaml:"anyOf"`
-	OneOf       []rawSchema          `yaml:"oneOf"`
-	AllOf       []rawSchema          `yaml:"allOf"`
-}
-
-func normalizeDocument(raw rawDocument) Document {
-	doc := Document{
-		Title:   strings.TrimSpace(raw.Info.Title),
-		Version: strings.TrimSpace(raw.Info.Version),
-		Tags:    normalizeTags(raw.Tags),
+// loadAsOpenAPI3 loads raw bytes into an openapi3.T document.
+// For OpenAPI 3.x it uses the kin-openapi loader directly.
+// For Swagger 2.0 it unmarshals into openapi2.T then converts via openapi2conv.
+func loadAsOpenAPI3(data []byte, version string) (*openapi3.T, error) {
+	if version == "2.0" {
+		var doc2 openapi2.T
+		if err := yaml.Unmarshal(data, &doc2); err != nil {
+			return nil, fmt.Errorf("decode swagger 2.0: %w", err)
+		}
+		doc3, err := openapi2conv.ToV3(&doc2)
+		if err != nil {
+			return nil, fmt.Errorf("convert swagger 2.0 to openapi 3.0: %w", err)
+		}
+		return doc3, nil
 	}
 
-	for _, path := range sortedKeys(raw.Paths) {
-		item := raw.Paths[path]
-		doc.Operations = append(doc.Operations, normalizeOperations(path, item, raw.Components)...)
+	loader := openapi3.NewLoader()
+	doc, err := loader.LoadFromData(data)
+	if err != nil {
+		return nil, fmt.Errorf("decode openapi: %w", err)
 	}
-
-	return doc
+	return doc, nil
 }
 
-func normalizeTags(tags []rawTag) []Tag {
+// convertDocument converts an openapi3.T into our internal Document model.
+func convertDocument(doc *openapi3.T) Document {
+	d := Document{}
+	if doc.Info != nil {
+		d.Title = strings.TrimSpace(doc.Info.Title)
+		d.Version = strings.TrimSpace(doc.Info.Version)
+	}
+	d.Tags = convertTags(doc.Tags)
+	d.Operations = convertOperations(doc.Paths)
+	return d
+}
+
+// convertTags maps kin-openapi Tags to our internal Tag slice.
+func convertTags(tags openapi3.Tags) []Tag {
 	out := make([]Tag, 0, len(tags))
 	for _, tag := range tags {
+		if tag == nil {
+			continue
+		}
 		out = append(out, Tag{
 			Name:        strings.TrimSpace(tag.Name),
 			Description: strings.TrimSpace(tag.Description),
@@ -133,186 +116,229 @@ func normalizeTags(tags []rawTag) []Tag {
 	return out
 }
 
-func normalizeOperations(path string, item rawPath, components rawComponents) []Operation {
-	operations := []struct {
-		method string
-		raw    rawOperation
-	}{
-		{method: "get", raw: item.Get},
-		{method: "put", raw: item.Put},
-		{method: "post", raw: item.Post},
-		{method: "delete", raw: item.Delete},
-		{method: "patch", raw: item.Patch},
-		{method: "head", raw: item.Head},
-		{method: "options", raw: item.Options},
-		{method: "trace", raw: item.Trace},
+// convertOperations iterates paths in sorted order and methods in a fixed order,
+// producing a deterministic list of Operations.
+func convertOperations(paths *openapi3.Paths) []Operation {
+	if paths == nil {
+		return nil
 	}
+	var ops []Operation
+	pathMap := paths.Map()
+	for _, path := range sortedKeys(pathMap) {
+		item := pathMap[path]
+		methods := []struct {
+			name string
+			op   *openapi3.Operation
+		}{
+			{"GET", item.Get},
+			{"PUT", item.Put},
+			{"POST", item.Post},
+			{"DELETE", item.Delete},
+			{"PATCH", item.Patch},
+			{"HEAD", item.Head},
+			{"OPTIONS", item.Options},
+			{"TRACE", item.Trace},
+		}
+		for _, m := range methods {
+			if m.op == nil {
+				continue
+			}
+			ops = append(ops, convertOperation(path, m.name, m.op))
+		}
+	}
+	return ops
+}
 
-	out := make([]Operation, 0, len(operations))
-	for _, op := range operations {
-		if isEmptyOperation(op.raw) {
+// convertOperation maps a single kin-openapi Operation to our internal Operation.
+func convertOperation(path, method string, op *openapi3.Operation) Operation {
+	result := Operation{
+		Method:      strings.TrimSpace(method),
+		Path:        strings.TrimSpace(path),
+		OperationID: strings.TrimSpace(op.OperationID),
+		Summary:     strings.TrimSpace(op.Summary),
+		Parameters:  convertParameters(op.Parameters),
+		RequestBody: convertRequestBody(op.RequestBody),
+	}
+	if len(op.Tags) > 0 {
+		result.Tag = strings.TrimSpace(op.Tags[0])
+	}
+	return result
+}
+
+// convertParameters maps kin-openapi Parameters to our internal Parameter slice.
+func convertParameters(params openapi3.Parameters) []Parameter {
+	out := make([]Parameter, 0, len(params))
+	for _, ref := range params {
+		if ref == nil || ref.Value == nil {
 			continue
 		}
-		out = append(out, normalizeOperation(path, op.method, op.raw, components))
-	}
-
-	return out
-}
-
-func normalizeOperation(path, method string, raw rawOperation, components rawComponents) Operation {
-	op := Operation{
-		Method:      strings.ToUpper(strings.TrimSpace(method)),
-		Path:        strings.TrimSpace(path),
-		OperationID: strings.TrimSpace(raw.OperationID),
-		Summary:     strings.TrimSpace(raw.Summary),
-		Parameters:  normalizeParameters(raw.Parameters, components.Parameters),
-		RequestBody: normalizeRequestBody(raw.RequestBody, components.Schemas),
-	}
-	if len(raw.Tags) > 0 {
-		op.Tag = strings.TrimSpace(raw.Tags[0])
-	}
-	return op
-}
-
-func normalizeParameters(parameters []rawParameter, refs map[string]rawParameter) []Parameter {
-	out := make([]Parameter, 0, len(parameters))
-	for _, parameter := range parameters {
-		parameter = resolveParameter(parameter, refs, nil)
-		out = append(out, Parameter{
-			Name:        strings.TrimSpace(parameter.Name),
-			In:          strings.TrimSpace(parameter.In),
-			Required:    parameter.Required,
-			Description: strings.TrimSpace(parameter.Description),
-			Type:        parameterType(parameter),
-		})
+		out = append(out, convertParameter(ref.Value))
 	}
 	return out
 }
 
-func resolveParameter(parameter rawParameter, refs map[string]rawParameter, seen map[string]bool) rawParameter {
-	ref := strings.TrimSpace(parameter.Ref)
-	if ref == "" {
-		return parameter
+// convertParameter maps a single kin-openapi Parameter to our internal Parameter.
+func convertParameter(param *openapi3.Parameter) Parameter {
+	return Parameter{
+		Name:        strings.TrimSpace(param.Name),
+		In:          strings.TrimSpace(param.In),
+		Required:    param.Required,
+		Description: strings.TrimSpace(param.Description),
+		Type:        parameterType(param),
 	}
-	const prefix = "#/components/parameters/"
-	if !strings.HasPrefix(ref, prefix) {
-		return parameter
-	}
-	name := strings.TrimPrefix(ref, prefix)
-	if name == "" {
-		return parameter
-	}
-	if seen == nil {
-		seen = map[string]bool{}
-	}
-	if seen[name] {
-		return parameter
-	}
-	referenced, ok := refs[name]
-	if !ok {
-		return parameter
-	}
-	seen[name] = true
-	return resolveParameter(referenced, refs, seen)
 }
 
-func parameterType(parameter rawParameter) string {
-	if strings.TrimSpace(parameter.Type) != "" {
-		return strings.TrimSpace(parameter.Type)
+// parameterType extracts the type string from a kin-openapi Parameter's schema.
+func parameterType(param *openapi3.Parameter) string {
+	if param.Schema == nil || param.Schema.Value == nil {
+		return ""
 	}
-	return strings.TrimSpace(parameter.Schema.Type)
+	if param.Schema.Value.Type != nil {
+		types := param.Schema.Value.Type.Slice()
+		if len(types) > 0 {
+			return strings.TrimSpace(types[0])
+		}
+	}
+	return ""
 }
 
-func normalizeRequestBody(body rawRequestBody, schemas map[string]rawSchema) RequestBody {
-	requestBody := RequestBody{Required: body.Required}
-	if len(body.Content) == 0 {
-		return requestBody
+// convertRequestBody maps a kin-openapi RequestBodyRef to our internal RequestBody.
+func convertRequestBody(body *openapi3.RequestBodyRef) RequestBody {
+	if body == nil || body.Value == nil {
+		return RequestBody{}
+	}
+	rb := RequestBody{Required: body.Value.Required}
+	content := body.Value.Content
+	if len(content) == 0 {
+		return rb
 	}
 
-	requestBody.ContentTypes = make([]string, 0, len(body.Content))
-	for contentType := range body.Content {
-		requestBody.ContentTypes = append(requestBody.ContentTypes, contentType)
+	rb.ContentTypes = make([]string, 0, len(content))
+	for ct := range content {
+		rb.ContentTypes = append(rb.ContentTypes, ct)
 	}
-	sort.Strings(requestBody.ContentTypes)
-	if mediaType, ok := body.Content["application/json"]; ok {
-		requestBody.HasJSONSchema = true
-		requestBody.IsSimpleJSON, requestBody.JSONFields = normalizeSimpleJSONFields(resolveSchema(mediaType.Schema, schemas, nil), schemas)
+	sort.Strings(rb.ContentTypes)
+
+	if mediaType, ok := content["application/json"]; ok && mediaType != nil && mediaType.Schema != nil && mediaType.Schema.Value != nil {
+		rb.HasJSONSchema = true
+		rb.IsSimpleJSON, rb.JSONFields = classifySimpleJSON(mediaType.Schema.Value)
 	}
-	return requestBody
+	return rb
 }
 
-func normalizeSimpleJSONFields(schema rawSchema, schemas map[string]rawSchema) (bool, []BodyField) {
-	if strings.TrimSpace(schema.Type) != "object" {
-		return false, nil
+// flattenAllOf merges all sub-schemas in an allOf array into a single set of
+// properties and required fields.
+func flattenAllOf(schema *openapi3.Schema) (openapi3.Schemas, []string) {
+	properties := make(openapi3.Schemas)
+	var required []string
+
+	// Merge the top-level schema's own properties and required.
+	for name, prop := range schema.Properties {
+		properties[name] = prop
 	}
-	if len(schema.AnyOf) > 0 || len(schema.OneOf) > 0 || len(schema.AllOf) > 0 {
-		return false, nil
+	required = append(required, schema.Required...)
+
+	// Merge each allOf sub-schema.
+	for _, ref := range schema.AllOf {
+		if ref.Value == nil {
+			continue
+		}
+		sub := ref.Value
+		for name, prop := range sub.Properties {
+			properties[name] = prop
+		}
+		required = append(required, sub.Required...)
 	}
-	if len(schema.Properties) == 0 || len(schema.Properties) > MaxSimpleJSONFields {
+
+	return properties, required
+}
+
+// classifySimpleJSON determines whether a schema qualifies as "simple JSON"
+// (object with ≤ MaxSimpleJSONFields primitive-typed properties).
+func classifySimpleJSON(schema *openapi3.Schema) (bool, []BodyField) {
+	// Must be object type.
+	if !schemaIsObject(schema) {
 		return false, nil
 	}
 
-	required := make(map[string]bool, len(schema.Required))
-	for _, name := range schema.Required {
-		required[strings.TrimSpace(name)] = true
+	// Top-level oneOf or anyOf → complex.
+	if len(schema.OneOf) > 0 || len(schema.AnyOf) > 0 {
+		return false, nil
 	}
 
-	keys := sortedKeys(schema.Properties)
+	var properties openapi3.Schemas
+	var required []string
+
+	if len(schema.AllOf) > 0 {
+		properties, required = flattenAllOf(schema)
+	} else {
+		properties = schema.Properties
+		required = schema.Required
+	}
+
+	if len(properties) == 0 || len(properties) > MaxSimpleJSONFields {
+		return false, nil
+	}
+
+	requiredSet := make(map[string]bool, len(required))
+	for _, name := range required {
+		requiredSet[strings.TrimSpace(name)] = true
+	}
+
+	keys := sortedKeys(properties)
 	fields := make([]BodyField, 0, len(keys))
 	for _, key := range keys {
-		property := resolveSchema(schema.Properties[key], schemas, nil)
-		switch strings.TrimSpace(property.Type) {
+		propRef := properties[key]
+		if propRef == nil || propRef.Value == nil {
+			return false, nil
+		}
+		prop := propRef.Value
+
+		// Check for complex sub-structures.
+		if prop.Items != nil || len(prop.Properties) > 0 || len(prop.AnyOf) > 0 || len(prop.OneOf) > 0 || len(prop.AllOf) > 0 {
+			return false, nil
+		}
+
+		propType := schemaType(prop)
+		switch propType {
 		case "string", "integer", "number", "boolean":
 		default:
 			return false, nil
 		}
-		if property.Items != nil || len(property.Properties) > 0 || len(property.AnyOf) > 0 || len(property.OneOf) > 0 || len(property.AllOf) > 0 {
-			return false, nil
-		}
+
 		fields = append(fields, BodyField{
 			Name:        strings.TrimSpace(key),
-			Description: strings.TrimSpace(property.Description),
-			Required:    required[strings.TrimSpace(key)],
-			Type:        strings.TrimSpace(property.Type),
+			Description: strings.TrimSpace(prop.Description),
+			Required:    requiredSet[strings.TrimSpace(key)],
+			Type:        propType,
 		})
 	}
 	return true, fields
 }
 
-func resolveSchema(schema rawSchema, schemas map[string]rawSchema, seen map[string]bool) rawSchema {
-	ref := strings.TrimSpace(schema.Ref)
-	if ref == "" {
-		return schema
+// schemaIsObject checks whether a schema's type includes "object".
+func schemaIsObject(schema *openapi3.Schema) bool {
+	if schema.Type == nil {
+		return false
 	}
-	const prefix = "#/components/schemas/"
-	if !strings.HasPrefix(ref, prefix) {
-		return schema
+	for _, t := range schema.Type.Slice() {
+		if t == "object" {
+			return true
+		}
 	}
-	name := strings.TrimSpace(strings.TrimPrefix(ref, prefix))
-	if name == "" {
-		return schema
-	}
-	if seen == nil {
-		seen = make(map[string]bool)
-	}
-	if seen[name] {
-		return schema
-	}
-	resolved, ok := schemas[name]
-	if !ok {
-		return schema
-	}
-	seen[name] = true
-	return resolveSchema(resolved, schemas, seen)
+	return false
 }
 
-func isEmptyOperation(raw rawOperation) bool {
-	return len(raw.Tags) == 0 &&
-		strings.TrimSpace(raw.OperationID) == "" &&
-		strings.TrimSpace(raw.Summary) == "" &&
-		len(raw.Parameters) == 0 &&
-		!raw.RequestBody.Required &&
-		len(raw.RequestBody.Content) == 0
+// schemaType returns the first type string from a schema's Type field.
+func schemaType(schema *openapi3.Schema) string {
+	if schema.Type == nil {
+		return ""
+	}
+	types := schema.Type.Slice()
+	if len(types) > 0 {
+		return strings.TrimSpace(types[0])
+	}
+	return ""
 }
 
 func sortedKeys[T any](values map[string]T) []string {

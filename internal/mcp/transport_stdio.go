@@ -15,7 +15,7 @@ import (
 )
 
 func discoverStdioTools(name string, server ServerConfig) ([]Tool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, server.Command, server.Args...)
@@ -57,7 +57,7 @@ func discoverStdioTools(name string, server ServerConfig) ([]Tool, error) {
 		return nil, fmt.Errorf("server %q initialize failed: %w", name, err)
 	}
 
-	if err := sendStdioNotification(stdin, rpcRequest{
+	if err := sendStdioMessage(stdin, rpcRequest{
 		JSONRPC: "2.0",
 		Method:  "notifications/initialized",
 	}); err != nil {
@@ -77,7 +77,7 @@ func discoverStdioTools(name string, server ServerConfig) ([]Tool, error) {
 }
 
 func doStdioRPC(stdin io.Writer, reader *bufio.Reader, request rpcRequest) (map[string]any, error) {
-	if err := sendStdioNotification(stdin, request); err != nil {
+	if err := sendStdioMessage(stdin, request); err != nil {
 		return nil, err
 	}
 	responseBytes, err := readFrame(reader)
@@ -94,19 +94,55 @@ func doStdioRPC(stdin io.Writer, reader *bufio.Reader, request rpcRequest) (map[
 	return response.Result, nil
 }
 
-func sendStdioNotification(writer io.Writer, payload rpcRequest) error {
+// sendStdioMessage writes a JSON-RPC message as a newline-terminated JSON line
+// (NDJSON format). This is compatible with both NDJSON-only servers and most
+// LSP-style servers that also accept bare JSON input.
+func sendStdioMessage(writer io.Writer, payload rpcRequest) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(writer, "Content-Length: %d\r\n\r\n", len(body)); err != nil {
-		return err
-	}
+	body = append(body, '\n')
 	_, err = writer.Write(body)
 	return err
 }
 
+// readFrame reads a single MCP response frame from the reader.
+// It auto-detects two formats:
+//   - NDJSON (bare JSON lines): "{...}\n"
+//   - LSP-style framing: "Content-Length: N\r\n\r\n{...}"
+//
+// Detection: peek at the first non-blank byte. '{' means NDJSON, otherwise
+// assume LSP Content-Length headers.
 func readFrame(reader *bufio.Reader) ([]byte, error) {
+	// Skip blank lines that some servers emit between messages.
+	for {
+		first, err := reader.Peek(1)
+		if err != nil {
+			return nil, err
+		}
+		if first[0] == '\n' || first[0] == '\r' {
+			_, _ = reader.ReadByte()
+			continue
+		}
+		break
+	}
+
+	first, err := reader.Peek(1)
+	if err != nil {
+		return nil, err
+	}
+
+	// NDJSON: line starts with '{', read until newline.
+	if first[0] == '{' {
+		line, err := reader.ReadBytes('\n')
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+		return bytes.TrimSpace(line), nil
+	}
+
+	// LSP-style: read Content-Length headers, then fixed-size body.
 	length := 0
 	for {
 		line, err := reader.ReadString('\n')

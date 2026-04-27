@@ -92,8 +92,11 @@ class CliBackend(FilesystemBackend, SandboxBackendProtocol):
         if not args:
             return None
         
-        # Check if the command matches any of the allowed executables
-        command_basename = os.path.basename(args[0])
+        # Only allow bare executable names from allow-list; reject path-based invocations.
+        command_name = args[0]
+        command_basename = os.path.basename(command_name)
+        if command_name != command_basename:
+            return None
         if command_basename not in self.executables:
             return None
         

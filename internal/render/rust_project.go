@@ -14,6 +14,7 @@ func writeRustProject(outputDir, module string, app model.App) error {
 		{Path: filepath.Join("src", "cli.rs"), Template: "rust/cli.rs.tmpl", Data: templateData{Module: module, App: app}},
 		{Path: filepath.Join("src", "client.rs"), Template: "rust/client.rs.tmpl", Data: templateData{Module: module, App: app}},
 		{Path: filepath.Join("src", "output.rs"), Template: "rust/output.rs.tmpl", Data: templateData{Module: module, App: app}},
+		{Path: filepath.Join("src", "trace.rs"), Template: "rust/trace.rs.tmpl", Data: templateData{Module: module, App: app}},
 		{Path: filepath.Join("src", "types.rs"), Template: "rust/types.rs.tmpl", Data: templateData{Module: module, App: app}},
 		{Path: filepath.Join("src", "commands", "mod.rs"), Template: "rust/commands_mod.rs.tmpl", Data: templateData{Module: module, App: app}},
 	}

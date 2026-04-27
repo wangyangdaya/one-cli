@@ -8,8 +8,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strconv"
+{{- if groupHasBodyInput .Group }}
+{{- end }}
 	"strings"
+
+	"{{ .Module }}/internal/httpx"
 )
 
 {{- range .Group.Operations }}
@@ -114,6 +117,8 @@ func invokeMCPStdio(toolName string, input any) (Result, error) {
 		return Result{}, err
 	}
 
+	httpx.Logf("[opencli][mcp-stdio] start\n  command: %s\n  args: %v", defaultMCPCommand, defaultMCPArgs)
+
 	cmd := exec.Command(defaultMCPCommand, defaultMCPArgs...)
 	cmd.Env = append(os.Environ(), envPairs(defaultMCPEnv)...)
 
@@ -139,7 +144,9 @@ func invokeMCPStdio(toolName string, input any) (Result, error) {
 	}()
 
 	reader := bufio.NewReader(stdout)
-	if _, err := doMCPStdioRPC(stdin, reader, map[string]any{
+
+	httpx.Logf("[opencli][mcp-stdio] >>> initialize")
+	initResp, err := doMCPStdioRPC(stdin, reader, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "initialize",
@@ -148,15 +155,21 @@ func invokeMCPStdio(toolName string, input any) (Result, error) {
 			"capabilities":    map[string]any{},
 			"clientInfo":      map[string]any{"name": "opencli", "version": "generated"},
 		},
-	}); err != nil {
+	})
+	if err != nil {
 		return Result{}, err
 	}
+	httpx.Logf("[opencli][mcp-stdio] <<< initialize\n  %s", string(initResp))
+
 	if err := sendMCPStdio(stdin, map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "notifications/initialized",
 	}); err != nil {
 		return Result{}, err
 	}
+
+	argsJSON, _ := json.Marshal(arguments)
+	httpx.Logf("[opencli][mcp-stdio] >>> tools/call\n  tool: %s\n  arguments: %s", toolName, string(argsJSON))
 
 	payload, err := doMCPStdioRPC(stdin, reader, map[string]any{
 		"jsonrpc": "2.0",
@@ -170,6 +183,7 @@ func invokeMCPStdio(toolName string, input any) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	httpx.Logf("[opencli][mcp-stdio] <<< tools/call\n  %s", string(payload))
 
 	return decodeMCPResponse(payload)
 }
@@ -181,21 +195,46 @@ func doMCPStdioRPC(stdin io.Writer, reader *bufio.Reader, payload map[string]any
 	return readMCPStdioFrame(reader)
 }
 
+// sendMCPStdio writes a JSON-RPC message as a newline-terminated JSON line (NDJSON).
 func sendMCPStdio(writer io.Writer, payload map[string]any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(writer, "Content-Length: %d\r\n\r\n", len(body)); err != nil {
-		return err
-	}
+	body = append(body, '\n')
 	_, err = writer.Write(body)
 	return err
 }
 
-// readMCPStdioFrame reads a Content-Length framed message from the reader.
-// 与 internal/mcp/transport_stdio.go 保持一致
+// readMCPStdioFrame reads a single response frame, auto-detecting NDJSON or LSP framing.
 func readMCPStdioFrame(reader *bufio.Reader) ([]byte, error) {
+	for {
+		first, err := reader.Peek(1)
+		if err != nil {
+			return nil, err
+		}
+		if first[0] == '\n' || first[0] == '\r' {
+			_, _ = reader.ReadByte()
+			continue
+		}
+		break
+	}
+
+	first, err := reader.Peek(1)
+	if err != nil {
+		return nil, err
+	}
+
+	// NDJSON: line starts with '{'
+	if first[0] == '{' {
+		line, err := reader.ReadBytes('\n')
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+		return bytes.TrimSpace(line), nil
+	}
+
+	// LSP-style: Content-Length headers then body
 	length := 0
 	for {
 		line, err := reader.ReadString('\n')
@@ -208,11 +247,10 @@ func readMCPStdioFrame(reader *bufio.Reader) ([]byte, error) {
 		}
 		name, value, ok := strings.Cut(line, ":")
 		if ok && strings.EqualFold(strings.TrimSpace(name), "Content-Length") {
-			parsed, err := strconv.Atoi(strings.TrimSpace(value))
-			if err != nil {
-				return nil, err
+			parsed, err := fmt.Sscanf(strings.TrimSpace(value), "%d", &length)
+			if err != nil || parsed != 1 {
+				return nil, fmt.Errorf("invalid Content-Length")
 			}
-			length = parsed
 		}
 	}
 	if length <= 0 {

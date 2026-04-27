@@ -6,6 +6,10 @@ use crate::types::AppResult;
 #[derive(Parser)]
 #[command(name = "{{ .App.Name }}", about = "{{ .App.Name }} CLI")]
 struct Cli {
+    /// Print HTTP request and response trace logs
+    #[arg(long)]
+    trace: bool,
+
     #[command(subcommand)]
     command: GroupCommand,
 }
@@ -22,6 +26,7 @@ enum GroupCommand {
 
 pub async fn run() -> AppResult<()> {
     let cli = Cli::parse();
+    crate::trace::set_enabled(cli.trace);
     match cli.command {
 {{- range .App.Groups }}
         GroupCommand::{{ .Name | pascal }} { command } => command.run().await,

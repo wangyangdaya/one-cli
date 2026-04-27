@@ -6,8 +6,11 @@ import logging
 import os
 from pathlib import Path
 
-from cli_backend import CliBackend
+from deepagents import FilesystemPermission
+from langchain_core.stores import InMemoryStore
+from openai.resources.fine_tuning.checkpoints import Permissions
 
+from cli_backend import CliBackend
 
 SYSTEM_PROMPT = """You are validating generated opencli skills.
 Always use the provided skills when they apply.
@@ -101,6 +104,8 @@ def build_agent():
     # Get allowed executables from environment variable
     executables = os.getenv("ALLOWED_EXECUTABLES", "openapi-cli")
 
+    store = InMemoryStore()
+
     return create_deep_agent(
         model=build_llm(),
         backend=CliBackend(repo_root=repo_root, app_dir=app_dir, executables=executables),
@@ -108,6 +113,14 @@ def build_agent():
         skills=[str(skills_dir)],
         checkpointer=MemorySaver(),
         name="openapi_skills_verifier",
+        store=store,
+        # permissions=[
+        #     FilesystemPermission(
+        #         operations=["write"],
+        #         paths=["/**"],
+        #         mode="deny",
+        #     ),
+        # ],
     )
 
 
@@ -129,10 +142,10 @@ def extract_text(result) -> str:
 
 
 async def invoke_agent(
-    *,
-    agent,
-    messages: list[dict[str, str]],
-    config: dict,
+        *,
+        agent,
+        messages: list[dict[str, str]],
+        config: dict,
 ):
     return await agent.ainvoke({"messages": messages}, config=config)
 

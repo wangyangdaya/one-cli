@@ -56,7 +56,24 @@ pub struct {{ .CommandName | pascal }}Args {
 }
 
 async fn run_{{ rustFieldName .CommandName }}(args: {{ .CommandName | pascal }}Args) -> AppResult<()> {
-{{- if or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group) }}
+{{- if groupUsesMCPStdio $.Group }}
+    let arguments = build_{{ rustFieldName .CommandName }}_body(&args)?.unwrap_or_else(|| Value::Object(Map::new()));
+    let response = client::call_mcp_stdio_tool(
+        "{{ $.Group.Command }}",
+        &[
+{{- range $.Group.Args }}
+            "{{ . }}",
+{{- end }}
+        ],
+        &[
+{{- range $key, $value := $.Group.Env }}
+            ("{{ $key }}", "{{ $value }}"),
+{{- end }}
+        ],
+        "{{ .RemoteName }}",
+        arguments,
+    ).await?;
+{{- else if groupUsesMCPHTTP $.Group }}
     let arguments = build_{{ rustFieldName .CommandName }}_body(&args)?.unwrap_or_else(|| Value::Object(Map::new()));
     let response = client::call_mcp_tool(
         "{{ $.Group.Endpoint }}",

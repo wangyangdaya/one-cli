@@ -100,9 +100,7 @@ func RunGenerate(input, mcpConfig, output, module, appName, configPath string, t
 	}
 
 	if target == "rust" && strings.TrimSpace(mcpConfig) != "" {
-		if err := validateRustMCPConfig(strings.TrimSpace(mcpConfig)); err != nil {
-			return err
-		}
+		// Rust target now supports both streamable_http and stdio MCP transports.
 	}
 
 	cfg, err := configgen.Load(strings.TrimSpace(configPath))
