@@ -1,0 +1,21 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static ENABLED: AtomicBool = AtomicBool::new(false);
+
+pub fn set_enabled(enabled: bool) {
+    ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+pub fn is_enabled() -> bool {
+    ENABLED.load(Ordering::Relaxed)
+}
+
+/// Log a trace message to stderr if tracing is enabled.
+macro_rules! trace_log {
+    ($($arg:tt)*) => {
+        if $crate::trace::is_enabled() {
+            eprintln!($($arg)*);
+        }
+    };
+}
+pub(crate) use trace_log;
