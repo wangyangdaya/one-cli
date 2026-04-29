@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"one-cli/internal/model"
 	"one-cli/internal/openapi"
 )
 
@@ -34,10 +35,10 @@ func ConvertServer(serverName string, server ServerConfig, tools []Tool) (openap
 			Summary:     strings.TrimSpace(tool.Description),
 			Backend:     backendForServer(server),
 			Endpoint:    strings.TrimSpace(server.URL),
-			Headers:     cloneMap(server.Headers),
+			Headers:     model.CloneStringMap(server.Headers),
 			Command:     strings.TrimSpace(server.Command),
 			Args:        append([]string(nil), server.Args...),
-			Env:         cloneMap(server.Env),
+			Env:         model.CloneStringMap(server.Env),
 			RequestBody: body,
 		})
 	}
@@ -153,21 +154,10 @@ func parseToolsResult(result map[string]any) ([]Tool, error) {
 func backendForServer(server ServerConfig) string {
 	switch strings.TrimSpace(server.Transport) {
 	case "streamable_http":
-		return "mcp-streamable-http"
+		return model.BackendMCPHTTP
 	case "stdio":
-		return "mcp-stdio"
+		return model.BackendMCPStdio
 	default:
-		return ""
+		return model.BackendHTTP
 	}
-}
-
-func cloneMap(values map[string]string) map[string]string {
-	if len(values) == 0 {
-		return nil
-	}
-	cloned := make(map[string]string, len(values))
-	for key, value := range values {
-		cloned[key] = value
-	}
-	return cloned
 }

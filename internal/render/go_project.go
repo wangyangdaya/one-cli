@@ -34,20 +34,15 @@ func writeGoProject(outputDir, module string, app model.App) error {
 	if err := writeTemplates(outputDir, files); err != nil {
 		return err
 	}
-	if err := writeRuntime(outputDir); err != nil {
-		return err
-	}
-
-	return nil
+	return writeRuntime(outputDir)
 }
 
 // serviceTemplate returns the template name for the service file based on the group's backend type.
-// This will be updated in task 4.4 to route to the split templates.
 func serviceTemplate(group model.Group) string {
 	switch strings.TrimSpace(group.Backend) {
-	case "mcp-streamable-http":
+	case model.BackendMCPHTTP:
 		return "go/group_service_mcp_http.go.tmpl"
-	case "mcp-stdio":
+	case model.BackendMCPStdio:
 		return "go/group_service_mcp_stdio.go.tmpl"
 	default:
 		return "go/group_service_http.go.tmpl"

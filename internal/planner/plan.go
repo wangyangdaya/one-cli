@@ -65,26 +65,15 @@ func Build(doc openapi.Document, cfg configgen.Config) (Plan, error) {
 			Description: groupDescription(op, groupName, groupDescriptions),
 			Backend:     strings.TrimSpace(op.Backend),
 			Endpoint:    strings.TrimSpace(op.Endpoint),
-			Headers:     cloneStringMap(op.Headers),
+			Headers:     model.CloneStringMap(op.Headers),
 			Command:     strings.TrimSpace(op.Command),
 			Args:        append([]string(nil), op.Args...),
-			Env:         cloneStringMap(op.Env),
+			Env:         model.CloneStringMap(op.Env),
 			Operations:  []model.Operation{plannedOp},
 		})
 	}
 
 	return app, nil
-}
-
-func cloneStringMap(values map[string]string) map[string]string {
-	if len(values) == 0 {
-		return nil
-	}
-	cloned := make(map[string]string, len(values))
-	for key, value := range values {
-		cloned[key] = value
-	}
-	return cloned
 }
 
 func packageName(value string) string {
@@ -151,39 +140,4 @@ func groupName(op openapi.Operation, cfg configgen.Config) string {
 		return trimmed
 	}
 	return firstPathSegment(op.Path)
-}
-
-func bodyMode(op openapi.Operation, groupName, commandName string, cfg configgen.Config) string {
-	if override, ok := bodyModeOverride(op, groupName, commandName, cfg); ok {
-		return override
-	}
-	if len(op.RequestBody.ContentTypes) == 0 {
-		return ""
-	}
-	if op.RequestBody.HasJSONSchema && op.RequestBody.IsSimpleJSON {
-		return "simple-json"
-	}
-	return "file-or-data"
-}
-
-func bodyModeOverride(op openapi.Operation, groupName, commandName string, cfg configgen.Config) (string, bool) {
-	candidates := []string{
-		strings.TrimSpace(groupName) + "." + strings.TrimSpace(commandName),
-		strings.TrimSpace(op.Tag) + "." + strings.TrimSpace(commandName),
-		strings.TrimSpace(commandName),
-		strings.TrimSpace(op.OperationID),
-		strings.ToLower(strings.TrimSpace(op.Method)) + " " + strings.TrimSpace(op.Path),
-		strings.TrimSpace(op.Path),
-	}
-	for _, key := range candidates {
-		if key == "" {
-			continue
-		}
-		if override, ok := cfg.Overrides.BodyMode[key]; ok {
-			if trimmed := strings.TrimSpace(override); trimmed != "" {
-				return trimmed, true
-			}
-		}
-	}
-	return "", false
 }

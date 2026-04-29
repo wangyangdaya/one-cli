@@ -4,6 +4,8 @@ import (
 	"embed"
 	"io/fs"
 	"os"
+
+	"one-cli/internal/model"
 )
 
 type generatedFile struct {
@@ -15,8 +17,8 @@ type generatedFile struct {
 
 type templateData struct {
 	Module string
-	App    any
-	Group  any
+	App    model.App
+	Group  model.Group
 }
 
 func readTemplate(name string) ([]byte, error) {

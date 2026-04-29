@@ -27,6 +27,7 @@ coverage.html
 # IDE and editor files
 .vscode/
 .idea/
+.kiro/
 *.swp
 *.swo
 *~
@@ -44,3 +45,5 @@ Thumbs.db
 .tool-versions
 /AGENTS.md
 /.kiro/specs/project-wide-optimization/.config.kiro
+
+copilot

@@ -7,11 +7,16 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"text/template"
 	"unicode"
 
 	"one-cli/internal/model"
 )
+
+// templateCache caches parsed templates keyed by template name to avoid
+// re-parsing the same template on every renderTemplate call.
+var templateCache sync.Map
 
 func writeTemplates(outputDir string, files []generatedFile) error {
 	for _, file := range files {
@@ -27,37 +32,43 @@ func writeTemplates(outputDir string, files []generatedFile) error {
 }
 
 func renderTemplate(name string, data any) ([]byte, error) {
-	raw, err := readTemplate(name)
-	if err != nil {
-		return nil, err
-	}
-
-	tmpl, err := template.New(name).Funcs(template.FuncMap{
-		"pascal":                   pascal,
-		"bodyFlagHelp":             bodyFlagHelp,
-		"cargoPackageName":         cargoPackageName,
-		"goType":                   goType,
-		"groupHasBodyInput":        groupHasBodyInput,
-		"groupHasHeaderParams":     groupHasHeaderParams,
-		"groupHasBodyFields":       groupHasBodyFields,
-		"groupUsesMCPHTTP":         groupUsesMCPHTTP,
-		"groupUsesMCPStdio":        groupUsesMCPStdio,
-		"appHasMCPHTTP":            appHasMCPHTTP,
-		"appHasMCPStdio":           appHasMCPStdio,
-		"appHasAnyMCP":             appHasAnyMCP,
-		"groupPackageName":         groupPackageName,
-		"operationHasHeaderParams": operationHasHeaderParams,
-		"operationHasPathParams":   operationHasPathParams,
-		"operationHasQueryParams":  operationHasQueryParams,
-		"rustFieldName":            rustFieldName,
-		"rustModuleName":           rustModuleName,
-		"rustType":                 rustType,
-		"stringMapLiteral":         stringMapLiteral,
-		"stringSliceLiteral":       stringSliceLiteral,
-		"exampleValue":             exampleValue,
-	}).Parse(string(raw))
-	if err != nil {
-		return nil, err
+	var tmpl *template.Template
+	if cached, ok := templateCache.Load(name); ok {
+		tmpl = cached.(*template.Template)
+	} else {
+		raw, err := readTemplate(name)
+		if err != nil {
+			return nil, err
+		}
+		parsed, err := template.New(name).Funcs(template.FuncMap{
+			"pascal":                   pascal,
+			"bodyFlagHelp":             bodyFlagHelp,
+			"cargoPackageName":         cargoPackageName,
+			"goType":                   goType,
+			"groupHasBodyInput":        groupHasBodyInput,
+			"groupHasHeaderParams":     groupHasHeaderParams,
+			"groupHasBodyFields":       groupHasBodyFields,
+			"groupUsesMCPHTTP":         groupUsesMCPHTTP,
+			"groupUsesMCPStdio":        groupUsesMCPStdio,
+			"appHasMCPHTTP":            appHasMCPHTTP,
+			"appHasMCPStdio":           appHasMCPStdio,
+			"appHasAnyMCP":             appHasAnyMCP,
+			"groupPackageName":         groupPackageName,
+			"operationHasHeaderParams": operationHasHeaderParams,
+			"operationHasPathParams":   operationHasPathParams,
+			"operationHasQueryParams":  operationHasQueryParams,
+			"rustFieldName":            rustFieldName,
+			"rustModuleName":           rustModuleName,
+			"rustType":                 rustType,
+			"stringMapLiteral":         stringMapLiteral,
+			"stringSliceLiteral":       stringSliceLiteral,
+			"exampleValue":             exampleValue,
+		}).Parse(string(raw))
+		if err != nil {
+			return nil, err
+		}
+		templateCache.Store(name, parsed)
+		tmpl = parsed
 	}
 
 	var buf bytes.Buffer
@@ -140,11 +151,11 @@ func groupHasBodyFields(group model.Group) bool {
 }
 
 func groupUsesMCPHTTP(group model.Group) bool {
-	return strings.TrimSpace(group.Backend) == "mcp-streamable-http"
+	return strings.TrimSpace(group.Backend) == model.BackendMCPHTTP
 }
 
 func groupUsesMCPStdio(group model.Group) bool {
-	return strings.TrimSpace(group.Backend) == "mcp-stdio"
+	return strings.TrimSpace(group.Backend) == model.BackendMCPStdio
 }
 
 func groupPackageName(group model.Group) string {
@@ -183,31 +194,25 @@ func appHasAnyMCP(app model.App) bool {
 	return appHasMCPHTTP(app) || appHasMCPStdio(app)
 }
 
-func operationHasHeaderParams(operation model.Operation) bool {
+func operationHasParamsIn(operation model.Operation, location string) bool {
 	for _, parameter := range operation.Parameters {
-		if strings.TrimSpace(parameter.In) == "header" {
+		if strings.TrimSpace(parameter.In) == location {
 			return true
 		}
 	}
 	return false
+}
+
+func operationHasHeaderParams(operation model.Operation) bool {
+	return operationHasParamsIn(operation, "header")
 }
 
 func operationHasPathParams(operation model.Operation) bool {
-	for _, parameter := range operation.Parameters {
-		if strings.TrimSpace(parameter.In) == "path" {
-			return true
-		}
-	}
-	return false
+	return operationHasParamsIn(operation, "path")
 }
 
 func operationHasQueryParams(operation model.Operation) bool {
-	for _, parameter := range operation.Parameters {
-		if strings.TrimSpace(parameter.In) == "query" {
-			return true
-		}
-	}
-	return false
+	return operationHasParamsIn(operation, "query")
 }
 
 func exampleValue(fieldType, fieldName string) string {
@@ -244,7 +249,7 @@ func exampleValue(fieldType, fieldName string) string {
 		return "user@example.com"
 	}
 	if strings.Contains(fieldName, "password") {
-		return "secret123"
+		return "<password>"
 	}
 	if strings.Contains(fieldName, "name") {
 		return "John Doe"
