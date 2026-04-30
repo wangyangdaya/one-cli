@@ -25,8 +25,9 @@ func writeRustProject(outputDir, module string, app model.App) error {
 			Template: "rust/group_command.rs.tmpl",
 			Data:     templateData{Module: module, App: app, Group: group},
 		})
+		groupDir := rustModuleName(group)
 		files = append(files, generatedFile{
-			Path:     filepath.Join("skills", rustModuleName(group), "SKILL.md"),
+			Path:     filepath.Join("skills", groupDir, "SKILL.md"),
 			Template: "go/skill.md.tmpl",
 			Data:     templateData{Module: module, App: app, Group: group},
 		})

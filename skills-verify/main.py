@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 from pathlib import Path
 
-from deepagents import FilesystemPermission
 from langchain_core.stores import InMemoryStore
-from openai.resources.fine_tuning.checkpoints import Permissions
 
 from cli_backend import CliBackend
 
@@ -23,6 +22,7 @@ DEFAULT_LOG_LEVEL = "INFO"
 DEFAULT_THREAD_ID = "skills-verify"
 DEFAULT_RECURSION_LIMIT = 25
 DEFAULT_APP_DIR = "tmp/openapi"
+DEFAULT_SKILL_LOG_PREVIEW_CHARS = 240
 logger = logging.getLogger("skills_verify")
 
 
@@ -103,14 +103,21 @@ def build_agent():
 
     # Get allowed executables from environment variable
     executables = os.getenv("ALLOWED_EXECUTABLES", "openapi-cli")
+    skills = [str(skills_dir)]
 
     store = InMemoryStore()
+    logger.info(
+        "agent.build model=%s executables=%s skills=%s",
+        os.getenv("LLM_MODEL_NAME", DEFAULT_MODEL_NAME),
+        executables,
+        skills,
+    )
 
     return create_deep_agent(
         model=build_llm(),
         backend=CliBackend(repo_root=repo_root, app_dir=app_dir, executables=executables),
         system_prompt=SYSTEM_PROMPT,
-        skills=[str(skills_dir)],
+        skills=skills,
         checkpointer=MemorySaver(),
         name="openapi_skills_verifier",
         store=store,
@@ -141,12 +148,111 @@ def extract_text(result) -> str:
     return str(result)
 
 
+def _preview_text(value: str, *, max_chars: int = DEFAULT_SKILL_LOG_PREVIEW_CHARS) -> str:
+    compact = " ".join(value.split())
+    if len(compact) <= max_chars:
+        return compact
+    return f"{compact[:max_chars]}..."
+
+
+def _to_log_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except TypeError:
+        return str(value)
+
+
+def log_skills_content(skills_files: dict[str, str]) -> None:
+    logger.info("skills.loaded count=%d", len(skills_files))
+    for skill_path in sorted(skills_files):
+        content = skills_files[skill_path]
+        logger.info(
+            "skill.loaded path=%s chars=%d preview=%s",
+            skill_path,
+            len(content),
+            _preview_text(content),
+        )
+
+
+def log_tool_events(result) -> None:
+    if not isinstance(result, dict):
+        return
+
+    messages = result.get("messages", [])
+    for message in messages:
+        tool_calls = getattr(message, "tool_calls", None)
+        if tool_calls is None and isinstance(message, dict):
+            tool_calls = message.get("tool_calls")
+        if tool_calls is None:
+            additional_kwargs = getattr(message, "additional_kwargs", None)
+            if isinstance(additional_kwargs, dict):
+                tool_calls = additional_kwargs.get("tool_calls")
+
+        if tool_calls:
+            for tool_call in tool_calls:
+                if not isinstance(tool_call, dict):
+                    logger.info("tool.call raw=%s", _preview_text(_to_log_text(tool_call)))
+                    continue
+
+                function = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
+                name = tool_call.get("name") or function.get("name") or "unknown"
+                call_id = tool_call.get("id") or tool_call.get("tool_call_id") or ""
+                args = tool_call.get("args")
+                if args is None:
+                    args = function.get("arguments")
+                logger.info(
+                    "tool.call name=%s id=%s args=%s",
+                    name,
+                    call_id,
+                    _preview_text(_to_log_text(args)),
+                )
+
+        msg_type = getattr(message, "type", None)
+        if msg_type is None and isinstance(message, dict):
+            msg_type = message.get("type") or message.get("role")
+        is_tool_message = msg_type == "tool" or message.__class__.__name__ == "ToolMessage"
+        if not is_tool_message:
+            continue
+
+        tool_name = getattr(message, "name", None)
+        if tool_name is None and isinstance(message, dict):
+            tool_name = message.get("name")
+        tool_call_id = getattr(message, "tool_call_id", None)
+        if tool_call_id is None and isinstance(message, dict):
+            tool_call_id = message.get("tool_call_id")
+        content = getattr(message, "content", "")
+        if isinstance(message, dict):
+            content = message.get("content", "")
+
+        logger.info(
+            "tool.result name=%s id=%s content=%s",
+            tool_name or "unknown",
+            tool_call_id or "",
+            _preview_text(_to_log_text(content)),
+        )
+
+
 async def invoke_agent(
         *,
         agent,
         messages: list[dict[str, str]],
         config: dict,
 ):
+    thread_id = config.get("configurable", {}).get("thread_id")
+    recursion_limit = config.get("recursion_limit")
+    last_message = messages[-1] if messages else {}
+    logger.info(
+        "agent.invoke thread_id=%s recursion_limit=%s messages_count=%d last_role=%s last_content=%s",
+        thread_id,
+        recursion_limit,
+        len(messages),
+        last_message.get("role"),
+        _preview_text(str(last_message.get("content", ""))),
+    )
     return await agent.ainvoke({"messages": messages}, config=config)
 
 
@@ -173,6 +279,7 @@ async def run_repl(thread_id: str) -> int:
     agent = build_agent()
     config = build_agent_config(thread_id)
     skills_files = get_all_skills(skills_dir)
+    log_skills_content(skills_files)
     print(f"skills 已加载: {len(skills_files)} 个", flush=True)
     for skill_path in sorted(skills_files):
         print(f"  - {skill_path}", flush=True)
@@ -201,6 +308,7 @@ async def run_repl(thread_id: str) -> int:
             messages=messages,
             config=config,
         )
+        log_tool_events(result)
         assistant_text = extract_text(result)
         messages.append({"role": "assistant", "content": assistant_text})
         logger.info("turn.end assistant_output=%s", assistant_text)

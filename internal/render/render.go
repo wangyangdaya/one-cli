@@ -63,6 +63,9 @@ func renderTemplate(name string, data any) ([]byte, error) {
 			"stringMapLiteral":         stringMapLiteral,
 			"stringSliceLiteral":       stringSliceLiteral,
 			"exampleValue":             exampleValue,
+			"operationIsWriteMethod":   operationIsWriteMethod,
+			"hasOptionalFields":        hasOptionalFields,
+			"upper":                    strings.ToUpper,
 		}).Parse(string(raw))
 		if err != nil {
 			return nil, err
@@ -296,6 +299,30 @@ func exampleValue(fieldType, fieldName string) string {
 
 	// Default
 	return "value"
+}
+
+func operationIsWriteMethod(operation model.Operation) bool {
+	method := strings.ToUpper(strings.TrimSpace(operation.Method))
+	switch method {
+	case "POST", "PUT", "PATCH", "DELETE":
+		return true
+	default:
+		return false
+	}
+}
+
+func hasOptionalFields(operation model.Operation) bool {
+	for _, param := range operation.Parameters {
+		if !param.Required && strings.TrimSpace(param.In) != "header" {
+			return true
+		}
+	}
+	for _, field := range operation.BodyFields {
+		if !field.Required {
+			return true
+		}
+	}
+	return false
 }
 
 func stringMapLiteral(values map[string]string) string {

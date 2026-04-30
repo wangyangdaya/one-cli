@@ -123,8 +123,11 @@ func TestGenerateFromMCPConfig(t *testing.T) {
 	}
 	for _, want := range []string{
 		"`searchcli search search-tool`",
-		"MCP tool",
+		"## Commands",
+		"### searchcli search search-tool",
 		"`--query`",
+		"## Core Concepts",
+		"<!-- MANUAL:",
 	} {
 		if !strings.Contains(string(skillContent), want) {
 			t.Fatalf("generated skill missing %q\n%s", want, string(skillContent))

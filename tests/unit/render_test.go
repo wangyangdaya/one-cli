@@ -46,8 +46,11 @@ func TestRenderProject(t *testing.T) {
 		t.Fatalf("read generated skill markdown: %v", err)
 	}
 	skillText := string(skillContent)
-	if !strings.HasPrefix(skillText, "---\nname: leave\ndescription: Commands for the leave group in one\n---\n") {
-		t.Fatalf("generated skill markdown missing YAML frontmatter:\n%s", skillText)
+	if !strings.Contains(skillText, "name: leave") {
+		t.Fatalf("generated skill markdown missing name in frontmatter:\n%s", skillText)
+	}
+	if !strings.Contains(skillText, "version: 1.0.0") {
+		t.Fatalf("generated skill markdown missing version in frontmatter:\n%s", skillText)
 	}
 
 	cmd := exec.Command("go", "test", "./...")
@@ -93,11 +96,17 @@ func TestRenderProjectSkillIncludesHeaderUsageNotes(t *testing.T) {
 	}
 	skillText := string(skillContent)
 	for _, want := range []string{
-		"`authorization` (`header`, `string`) optional",
+		"## Commands",
+		"## Core Concepts",
+		"## Important Notes",
+		"## Common Workflows",
+		"### one auth me",
 		`--header "authorization: <value>"`,
+		"**Parameters:**",
+		"<!-- MANUAL:",
 	} {
 		if !strings.Contains(skillText, want) {
-			t.Fatalf("generated skill markdown missing %q:\n%s", want, skillText)
+			t.Fatalf("generated SKILL.md missing %q:\n%s", want, skillText)
 		}
 	}
 }
