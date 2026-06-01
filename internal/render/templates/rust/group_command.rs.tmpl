@@ -141,7 +141,14 @@ fn build_{{ rustFieldName .CommandName }}_body(args: &{{ .CommandName | pascal }
         return Ok(Some(parsed));
     }
     if let Some(path) = &args.body_file {
-        let content = std::fs::read_to_string(path).map_err(|err| err.to_string())?;
+        let content = if path.trim() == "-" {
+            use std::io::Read;
+            let mut buf = String::new();
+            std::io::stdin().read_to_string(&mut buf).map_err(|err| err.to_string())?;
+            buf
+        } else {
+            std::fs::read_to_string(path).map_err(|err| err.to_string())?
+        };
         let parsed = serde_json::from_str::<Value>(&content).map_err(|err| err.to_string())?;
         return Ok(Some(parsed));
     }

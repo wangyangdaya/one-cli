@@ -13,8 +13,12 @@ pub async fn request(
     headers: Vec<(String, String)>,
     body: Option<Value>,
 ) -> AppResult<Value> {
-    let base_url = std::env::var("OPENCLI_BASE_URL")
-        .map_err(|_| "missing OPENCLI_BASE_URL".to_string())?;
+    let base_url = std::env::var("{{ upper .App.Name }}_BASE_URL")
+        .or_else(|_| std::env::var("OPENCLI_BASE_URL"))
+        .map_err(|_| "missing {{ upper .App.Name }}_BASE_URL".to_string())?;
+    let auth_token = std::env::var("{{ upper .App.Name }}_AUTH_TOKEN")
+        .or_else(|_| std::env::var("OPENCLI_AUTH_TOKEN"))
+        .ok();
     let trimmed = base_url.trim_end_matches('/');
     let mut url = reqwest::Url::parse(&format!("{trimmed}{path}")).map_err(|err| err.to_string())?;
     {
@@ -30,6 +34,10 @@ pub async fn request(
     let method = Method::from_bytes(method.as_bytes()).map_err(|err| err.to_string())?;
     let client = reqwest::Client::new();
     let mut req = client.request(method, url);
+    if let Some(ref token) = auth_token {
+        req = req.header("Authorization", token);
+    }
+    req = req.header("Content-Type", "application/json");
     for (name, value) in &headers {
         req = req.header(name, value);
     }
@@ -44,7 +52,11 @@ pub async fn request(
     trace_log!("[opencli][http] response\n  status: {status}\n  body: {}", preview(&text));
 
     if !status.is_success() {
-        return Err(format!("request failed: {status}"));
+        let detail = text.trim();
+        if detail.is_empty() {
+            return Err(format!("request failed: {status}"));
+        }
+        return Err(format!("request failed: {status}\n{detail}"));
     }
     if text.trim().is_empty() {
         return Ok(json!({ "status": status.as_u16() }));
@@ -88,9 +100,18 @@ pub async fn call_mcp_tool(
     tool_name: &str,
     arguments: Value,
 ) -> AppResult<Value> {
-    let request_url = std::env::var("OPENCLI_BASE_URL").unwrap_or_else(|_| endpoint.to_string());
+    let request_url = std::env::var("{{ upper .App.Name }}_BASE_URL")
+        .or_else(|_| std::env::var("OPENCLI_BASE_URL"))
+        .unwrap_or_else(|_| endpoint.to_string());
     if request_url.trim().is_empty() {
-        return Err("missing OPENCLI_BASE_URL".to_string());
+        return Err("missing {{ upper .App.Name }}_BASE_URL".to_string());
+    }
+    let auth_token = std::env::var("{{ upper .App.Name }}_AUTH_TOKEN")
+        .or_else(|_| std::env::var("OPENCLI_AUTH_TOKEN"))
+        .ok();
+    let mut headers = headers;
+    if let Some(ref token) = auth_token {
+        headers.push(("Authorization".to_string(), token.clone()));
     }
 
     trace_log!("[opencli][mcp-http] initialize\n  url: {request_url}");
@@ -163,7 +184,11 @@ async fn send_mcp_request(
         .map(|value| value.to_string());
     let body = response.text().await.map_err(|err| err.to_string())?;
     if !status.is_success() {
-        return Err(format!("mcp request failed: {status}"));
+        let detail = body.trim();
+        if detail.is_empty() {
+            return Err(format!("mcp request failed: {status}"));
+        }
+        return Err(format!("mcp request failed: {status}\n{detail}"));
     }
 
     let payload = parse_mcp_payload(&body)?;

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"{{ .Module }}/internal/httpx"
+	"{{ .Module }}/internal/mcputil"
 )
 
 {{- range .Group.Operations }}
@@ -62,6 +63,9 @@ func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input
 	case hasData:
 		return []byte(input.BodyData), nil
 	case hasFile:
+		if strings.TrimSpace(input.BodyFile) == "-" {
+			return io.ReadAll(os.Stdin)
+		}
 		return os.ReadFile(input.BodyFile)
 {{- if eq .BodyMode "simple-json" }}
 	case hasFlagBody:
@@ -185,7 +189,11 @@ func invokeMCPStdio(toolName string, input any) (Result, error) {
 	}
 	httpx.Logf("[opencli][mcp-stdio] <<< tools/call\n  %s", string(payload))
 
-	return decodeMCPResponse(payload)
+	decoded, err := mcputil.DecodeResponse(payload)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Message: decoded.Message}, nil
 }
 
 func doMCPStdioRPC(stdin io.Writer, reader *bufio.Reader, payload map[string]any) ([]byte, error) {
@@ -294,33 +302,4 @@ func buildMCPArguments(input any) (map[string]any, error) {
 	}
 }
 
-func decodeMCPResponse(payload []byte) (Result, error) {
-	var response struct {
-		Result map[string]any `json:"result"`
-		Error  *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(payload, &response); err != nil {
-		return Result{}, fmt.Errorf("decode MCP response: %w", err)
-	}
-	if response.Error != nil {
-		return Result{}, fmt.Errorf("%s", strings.TrimSpace(response.Error.Message))
-	}
-	if content, ok := response.Result["content"].([]any); ok {
-		for _, item := range content {
-			entry, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			if text, ok := entry["text"].(string); ok && strings.TrimSpace(text) != "" {
-				return Result{Message: strings.TrimSpace(text)}, nil
-			}
-		}
-	}
-	rendered, err := json.Marshal(response.Result)
-	if err != nil {
-		return Result{}, err
-	}
-	return Result{Message: strings.TrimSpace(string(rendered))}, nil
-}
+

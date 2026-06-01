@@ -14,7 +14,8 @@ func TestRenderProjectAcceptsExplicitGoTarget(t *testing.T) {
 		Name: "one",
 		Groups: []model.Group{
 			{
-				Name: "leave",
+				Name:        "leave",
+				PackageName: "leave",
 				Operations: []model.Operation{
 					{CommandName: "list", Method: "GET", Path: "/leaves"},
 				},

@@ -17,7 +17,8 @@ func TestRenderProject(t *testing.T) {
 		Name: "one",
 		Groups: []model.Group{
 			{
-				Name: "leave",
+				Name:        "leave",
+				PackageName: "leave",
 				Operations: []model.Operation{
 					{CommandName: "list", Method: "GET", Path: "/leaves"},
 				},
@@ -71,7 +72,8 @@ func TestRenderProjectSkillIncludesHeaderUsageNotes(t *testing.T) {
 		Name: "one",
 		Groups: []model.Group{
 			{
-				Name: "auth",
+				Name:        "auth",
+				PackageName: "auth",
 				Operations: []model.Operation{
 					{
 						CommandName: "me",

@@ -53,13 +53,8 @@ func validateGenerateSources(input, mcpConfig string) error {
 	return nil
 }
 
-func normalizeTarget(values []string) (string, error) {
-	target := "go"
-	if len(values) > 0 {
-		target = strings.TrimSpace(values[0])
-	}
-
-	switch strings.ToLower(target) {
+func normalizeTarget(target string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(target)) {
 	case "", "go":
 		return "go", nil
 	case "rust":
@@ -90,7 +85,11 @@ func validateRustMCPConfig(path string) error {
 }
 
 func RunGenerate(input, mcpConfig, output, module, appName, configPath string, targets ...string) error {
-	target, err := normalizeTarget(targets)
+	targetStr := "go"
+	if len(targets) > 0 {
+		targetStr = targets[0]
+	}
+	target, err := normalizeTarget(targetStr)
 	if err != nil {
 		return err
 	}

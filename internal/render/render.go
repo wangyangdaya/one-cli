@@ -43,6 +43,7 @@ func renderTemplate(name string, data any) ([]byte, error) {
 		parsed, err := template.New(name).Funcs(template.FuncMap{
 			"pascal":                   pascal,
 			"bodyFlagHelp":             bodyFlagHelp,
+			"bodySchemaHint":           bodySchemaHint,
 			"cargoPackageName":         cargoPackageName,
 			"goType":                   goType,
 			"groupHasBodyInput":        groupHasBodyInput,
@@ -76,7 +77,7 @@ func renderTemplate(name string, data any) ([]byte, error) {
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("executing template %q: %w", name, err)
 	}
 
 	return buf.Bytes(), nil
@@ -111,6 +112,29 @@ func bodyFlagHelp(fields []model.BodyField) string {
 		}
 	}
 	return strings.Join(parts, "/")
+}
+
+func bodySchemaHint(fields []model.BodyField) string {
+	if len(fields) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(fields))
+	for _, field := range fields {
+		name := strings.TrimSpace(field.Name)
+		if name == "" {
+			continue
+		}
+		fieldType := strings.TrimSpace(field.Type)
+		if fieldType == "" {
+			fieldType = "string"
+		}
+		req := ""
+		if field.Required {
+			req = ", required"
+		}
+		parts = append(parts, fmt.Sprintf("  %s: %s%s", name, fieldType, req))
+	}
+	return "Expected JSON fields:\\n" + strings.Join(parts, "\\n")
 }
 
 func goType(value string) string {
@@ -165,14 +189,8 @@ func groupPackageName(group model.Group) string {
 	if trimmed := strings.TrimSpace(group.PackageName); trimmed != "" {
 		return trimmed
 	}
-	value := strings.TrimSpace(group.Name)
-	if value == "" {
-		return "default"
-	}
-	value = strings.ReplaceAll(value, "-", "_")
-	value = strings.ReplaceAll(value, ".", "_")
-	value = strings.ReplaceAll(value, " ", "_")
-	return strings.ToLower(value)
+	// Fallback: should not be reached since planner always sets PackageName.
+	return "default"
 }
 
 func appHasMCPHTTP(app model.App) bool {

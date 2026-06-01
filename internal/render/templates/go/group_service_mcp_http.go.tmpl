@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"{{ .Module }}/internal/config"
+	"{{ .Module }}/internal/mcputil"
 )
 
 {{- range .Group.Operations }}
@@ -62,6 +63,9 @@ func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input
 	case hasData:
 		return []byte(input.BodyData), nil
 	case hasFile:
+		if strings.TrimSpace(input.BodyFile) == "-" {
+			return io.ReadAll(os.Stdin)
+		}
 		return os.ReadFile(input.BodyFile)
 {{- if eq .BodyMode "simple-json" }}
 	case hasFlagBody:
@@ -110,12 +114,15 @@ func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input
 var defaultMCPHeaders = {{ stringMapLiteral .Group.Headers }}
 
 func invokeMCPHTTP(toolName string, input any) (Result, error) {
-	requestURL := strings.TrimSpace(config.Lookup("OPENCLI_BASE_URL"))
+	requestURL := strings.TrimSpace(config.Lookup("{{ upper .App.Name }}_BASE_URL"))
+	if requestURL == "" {
+		requestURL = strings.TrimSpace(config.Lookup("OPENCLI_BASE_URL"))
+	}
 	if requestURL == "" {
 		requestURL = "{{ .Group.Endpoint }}"
 	}
 	if requestURL == "" {
-		return Result{}, fmt.Errorf("missing OPENCLI_BASE_URL")
+		return Result{}, fmt.Errorf("missing {{ upper .App.Name }}_BASE_URL")
 	}
 
 	sessionID, err := initializeMCPHTTP(requestURL)
@@ -167,6 +174,10 @@ func invokeMCPHTTP(toolName string, input any) (Result, error) {
 		return Result{}, fmt.Errorf("read MCP response: %w", err)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		detail := strings.TrimSpace(string(body))
+		if detail != "" {
+			return Result{}, fmt.Errorf("mcp request failed: %s\n%s", resp.Status, detail)
+		}
 		return Result{}, fmt.Errorf("mcp request failed: %s", resp.Status)
 	}
 
@@ -215,6 +226,10 @@ func initializeMCPHTTP(requestURL string) (string, error) {
 		return "", fmt.Errorf("read MCP initialize response: %w", err)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		detail := strings.TrimSpace(string(body))
+		if detail != "" {
+			return "", fmt.Errorf("mcp initialize failed: %s\n%s", resp.Status, detail)
+		}
 		return "", fmt.Errorf("mcp initialize failed: %s", resp.Status)
 	}
 	if _, err := decodeMCPResponsePayload(resp.Header.Get("Content-Type"), body); err != nil {
@@ -254,38 +269,11 @@ func decodeMCPResponsePayload(contentType string, payload []byte) (Result, error
 			return Result{}, err
 		}
 	}
-	return decodeMCPResponse(payload)
-}
-
-func decodeMCPResponse(payload []byte) (Result, error) {
-	var response struct {
-		Result map[string]any `json:"result"`
-		Error  *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(payload, &response); err != nil {
-		return Result{}, fmt.Errorf("decode MCP response: %w", err)
-	}
-	if response.Error != nil {
-		return Result{}, fmt.Errorf("%s", strings.TrimSpace(response.Error.Message))
-	}
-	if content, ok := response.Result["content"].([]any); ok {
-		for _, item := range content {
-			entry, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			if text, ok := entry["text"].(string); ok && strings.TrimSpace(text) != "" {
-				return Result{Message: strings.TrimSpace(text)}, nil
-			}
-		}
-	}
-	rendered, err := json.Marshal(response.Result)
+	decoded, err := mcputil.DecodeResponse(payload)
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Message: strings.TrimSpace(string(rendered))}, nil
+	return Result{Message: decoded.Message}, nil
 }
 
 // extractSSEMessage parses a text/event-stream response and extracts data: lines.

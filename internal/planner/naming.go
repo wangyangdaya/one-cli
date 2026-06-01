@@ -40,12 +40,12 @@ func simplifyOperationID(operationID string) string {
 		return parts[0]
 	}
 	if parts[0] == "get" && len(parts) > 2 {
-		return parts[len(parts)-1]
+		return strings.Join(parts[1:], "-")
 	}
 	if isGenericVerb(parts[0]) && len(parts) > 1 {
 		return parts[0]
 	}
-	return parts[0]
+	return strings.Join(parts, "-")
 }
 
 func deriveFromMethodPath(method, path string) string {

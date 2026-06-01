@@ -3,13 +3,15 @@ package {{ groupPackageName .Group }}
 import (
 	"fmt"
 
+	"{{ .Module }}/internal/cli"
+	"{{ .Module }}/internal/output"
 	"github.com/spf13/cobra"
 )
 
 func NewCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "{{ .Group.Name }}",
-		Short: "{{ .Group.Name }} operations",
+		Short: "{{ if .Group.Description }}{{ .Group.Description }}{{ else }}{{ .Group.Name }} operations{{ end }}",
 	}
 {{- range .Group.Operations }}
 	cmd.AddCommand(new{{ .CommandName | pascal }}Command())
@@ -36,11 +38,11 @@ func new{{ .CommandName | pascal }}Command() *cobra.Command {
 {{- end }}
 	cmd := &cobra.Command{
 		Use:   "{{ .CommandName }}",
-		Short: "{{ .Method }} {{ .Path }}",
+		Short: "{{ if .Summary }}{{ .Summary }}{{ else }}{{ .Method }} {{ .Path }}{{ end }}",
 {{- if eq .BodyMode "simple-json" }}
-		Long:  "{{ .Method }} {{ .Path }}\n\nBody input: {{ bodyFlagHelp .BodyFields }}, --data, or --file",
+		Long:  "{{ if .Summary }}{{ .Summary }}{{ else }}{{ .Method }} {{ .Path }}{{ end }}\n\nBody input: {{ bodyFlagHelp .BodyFields }}, --data, or --file",
 {{- else if eq .BodyMode "file-or-data" }}
-		Long:  "{{ .Method }} {{ .Path }}\n\nBody input: --data or --file",
+		Long:  "{{ if .Summary }}{{ .Summary }}{{ else }}{{ .Method }} {{ .Path }}{{ end }}\n\nBody input: --data or --file{{ if .BodyFields }}\n\n{{ bodySchemaHint .BodyFields }}{{ end }}",
 {{- end }}
 		RunE: func(cmd *cobra.Command, args []string) error {
 			input := {{ .CommandName | pascal }}Input{
@@ -64,13 +66,21 @@ func new{{ .CommandName | pascal }}Command() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Message)
+			if cli.OutputFormat() == "json" {
+				rendered, jsonErr := output.JSON(result)
+				if jsonErr != nil {
+					return jsonErr
+				}
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), rendered)
+			} else {
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Message)
+			}
 			return err
 		},
 	}
 {{- if .BodyMode }}
 	cmd.Flags().StringVar(&bodyData, "data", "", "Raw JSON request body")
-	cmd.Flags().StringVar(&bodyFile, "file", "", "Path to JSON request body file")
+	cmd.Flags().StringVar(&bodyFile, "file", "", "Path to JSON request body file (use - for stdin)")
 {{- end }}
 {{- if operationHasHeaderParams . }}
 	cmd.Flags().StringArrayVar(&headers, "header", nil, "Request header in 'Name: Value' format; repeatable")

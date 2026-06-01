@@ -122,9 +122,9 @@ func TestGenerateFromMCPConfig(t *testing.T) {
 		t.Fatalf("read skill: %v", err)
 	}
 	for _, want := range []string{
-		"`searchcli search search-tool`",
+		"`searchcli search tool`",
 		"## Commands",
-		"### searchcli search search-tool",
+		"### searchcli search tool",
 		"`--query`",
 		"## Core Concepts",
 		"<!-- MANUAL:",
@@ -141,7 +141,7 @@ func TestGenerateFromMCPConfig(t *testing.T) {
 	for _, want := range []string{
 		"MCP Transport",
 		"tools/call",
-		"./bin/searchcli search search-tool --query",
+		"./bin/searchcli search tool --query",
 	} {
 		if !strings.Contains(string(readmeContent), want) {
 			t.Fatalf("generated README missing %q\n%s", want, string(readmeContent))
@@ -264,7 +264,7 @@ func TestGeneratedMCPCLIInvokesToolOverStreamableHTTP(t *testing.T) {
 		t.Fatalf("run generate: %v", err)
 	}
 
-	cmd := exec.Command("go", "run", "./cmd/searchcli", "search", "search-tool", "--query", "golang")
+	cmd := exec.Command("go", "run", "./cmd/searchcli", "search", "tool", "--query", "golang")
 	cmd.Dir = outDir
 	cmd.Env = append(os.Environ(),
 		"GOCACHE="+filepath.Join(tempDir, "gocache"),

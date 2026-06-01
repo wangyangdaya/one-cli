@@ -146,7 +146,7 @@ metadata:
 {{- end }}
 {{- end }}
 {{- if eq .BodyMode "file-or-data" }}
-| `--file` | no | Read request body from JSON file, mutually exclusive with `--data` |
+| `--file` | no | Read request body from JSON file (use `-` for stdin), mutually exclusive with `--data` |
 | `--data` | no | Pass request body as JSON string, mutually exclusive with `--file` |
 {{- end }}
 

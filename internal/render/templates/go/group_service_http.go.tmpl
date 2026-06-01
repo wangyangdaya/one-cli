@@ -75,6 +75,10 @@ func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (
 		return Result{}, fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		detail := strings.TrimSpace(string(payload))
+		if detail != "" {
+			return Result{}, fmt.Errorf("request failed: %s\n%s", resp.Status, detail)
+		}
 		return Result{}, fmt.Errorf("request failed: %s", resp.Status)
 	}
 	if len(bytes.TrimSpace(payload)) == 0 {
@@ -89,9 +93,12 @@ func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (
 }
 
 func build{{ .CommandName | pascal }}URL(input {{ .CommandName | pascal }}Input) (string, error) {
-	baseURL := strings.TrimSpace(config.Lookup("OPENCLI_BASE_URL"))
+	baseURL := strings.TrimSpace(config.Lookup("{{ upper $.App.Name }}_BASE_URL"))
 	if baseURL == "" {
-		return "", fmt.Errorf("missing OPENCLI_BASE_URL")
+		baseURL = strings.TrimSpace(config.Lookup("OPENCLI_BASE_URL"))
+	}
+	if baseURL == "" {
+		return "", fmt.Errorf("missing {{ upper $.App.Name }}_BASE_URL")
 	}
 
 	requestURL, err := url.Parse(strings.TrimRight(baseURL, "/") + "{{ .Path }}")
@@ -156,6 +163,9 @@ func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input
 	case hasData:
 		return []byte(input.BodyData), nil
 	case hasFile:
+		if strings.TrimSpace(input.BodyFile) == "-" {
+			return io.ReadAll(os.Stdin)
+		}
 		return os.ReadFile(input.BodyFile)
 {{- if eq .BodyMode "simple-json" }}
 	case hasFlagBody:

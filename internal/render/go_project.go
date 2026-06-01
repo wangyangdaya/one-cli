@@ -21,7 +21,7 @@ func writeGoProject(outputDir, module string, app model.App) error {
 			generatedFile{Path: filepath.Join("internal", groupDir, "command.go"), Template: "go/group_command.go.tmpl", Data: data},
 			generatedFile{Path: filepath.Join("internal", groupDir, "service.go"), Template: serviceTemplate(group), Data: data},
 			generatedFile{Path: filepath.Join("internal", groupDir, "types.go"), Template: "go/group_types.go.tmpl", Data: data},
-			generatedFile{Path: filepath.Join("skills", groupDir, "SKILL.md"), Template: "go/skill.md.tmpl", Data: data},
+			generatedFile{Path: filepath.Join("skills", groupDir, "SKILL.md"), Template: "shared/skill.md.tmpl", Data: data},
 		)
 	}
 

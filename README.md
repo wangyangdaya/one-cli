@@ -9,23 +9,26 @@
 
 ## 📖 简介
 
-`opencli` 是一个代码生成器，它读取 OpenAPI/Swagger API 文档或 MCP 服务定义，在生成时发现可用能力，并自动生成完整的、可运行的 Go CLI 项目。
+`opencli` 是一个代码生成器，它读取 OpenAPI/Swagger API 文档或 MCP 服务定义，在生成时发现可用能力，并自动生成完整的、可运行的 Go 或 Rust CLI 项目。
 
 ### 核心特性
 
+- ✅ **双语言支持** - 生成 Go（Cobra）或 Rust（Clap）CLI 项目
 - ✅ **自动生成** - 从 OpenAPI 文档或 MCP 服务一键生成完整 CLI 项目
 - ✅ **即开即用** - 生成的代码可直接编译运行，无需手动修改
 - ✅ **灵活配置** - 支持命名自定义、请求体模式配置等
-- ✅ **标准架构** - 基于 Cobra 框架，遵循 Go 最佳实践
+- ✅ **输出格式控制** - 生成的 CLI 支持 `--output json|text` 切换
+- ✅ **错误详情展示** - 服务端错误响应体直接展示，无需开启 trace 调试
+- ✅ **stdin 支持** - `--file -` 从标准输入读取请求体，支持管道操作
 - ✅ **本地/远程** - 支持本地文件和远程 URL 作为输入
-- ✅ **类型安全** - 生成强类型的 Go 代码
 - ✅ **全版本兼容** - 支持 OpenAPI 2.0（Swagger）、3.0 和 3.1
 - ✅ **复杂 Schema** - 完整的 `$ref` 解析、`allOf` 合并、`oneOf`/`anyOf` 处理
+- ✅ **智能命名** - 自动去除冗余前缀，命令名连字符分隔，冲突自动检测
 
 ### 工作流程
 
 ```
-OpenAPI 文档 / MCP 服务 → opencli → Go CLI 项目 → 编译 → 可执行的 CLI 工具
+OpenAPI 文档 / MCP 服务 → opencli → Go/Rust CLI 项目 → 编译 → 可执行的 CLI 工具
 ```
 
 ---
@@ -239,9 +242,7 @@ opencli generate \
 首版 MCP 生成支持：
 
 - Go target: `streamable_http`、`stdio`
-- Rust target: `streamable_http`
-
-Rust 目标当前不支持 `stdio`。
+- Rust target: `streamable_http`、`stdio`
 
 生成时会连接 MCP server，执行 `initialize` 和 `tools/list`，把发现到的 tools 固化为静态 CLI。生成后的 CLI 不依赖 MCP discovery，它直接按生成结果运行。
 
@@ -306,13 +307,6 @@ naming:
     listUsers: list
     createUser: create
 
-runtime:
-  # 认证头名称
-  auth_header: Authorization
-  
-  # 默认输出格式
-  default_output: pretty
-
 overrides:
   # 请求体处理模式
   body_mode:
@@ -325,7 +319,7 @@ overrides:
 
 | 模式 | 说明 | CLI 示例 |
 |------|------|----------|
-| `file-or-data` | 支持文件或直接数据 | `--file user.json` 或 `--data '{...}'` |
+| `file-or-data` | 支持文件或直接数据 | `--file user.json`、`--file -`（stdin）或 `--data '{...}'` |
 | `flags` | 展开为独立标志 | `--name John --email john@example.com` |
 
 详细配置说明请参考 [用户指南](docs/USER_GUIDE.md) 中的“配置文件”章节。
@@ -343,10 +337,11 @@ my-cli/
 │   └── mycli/
 │       └── main.go        # 主入口
 ├── internal/
-│   ├── cli/               # CLI 框架代码
-│   ├── config/            # 配置加载
-│   ├── httpx/             # HTTP 客户端
-│   ├── output/            # 输出格式化
+│   ├── cli/               # CLI 框架代码（--trace, --output）
+│   ├── config/            # 配置加载（环境变量）
+│   ├── httpx/             # HTTP 客户端（含 trace 日志）
+│   ├── mcputil/           # MCP 响应解码（MCP 项目）
+│   ├── output/            # 输出格式化（JSON/Text）
 │   └── users/             # 按 tag 分组的命令
 │       ├── command.go     # Cobra 命令定义
 │       ├── service.go     # HTTP 请求实现
@@ -368,17 +363,18 @@ OpenCLI 按照以下规则将 OpenAPI 或 MCP 元素映射到 CLI 命令：
 | OpenAPI 元素 | 生成的 CLI 元素 | 示例 |
 |-------------|----------------|------|
 | `tags` | 命令组 | `users` → `mycli users` |
-| `operationId` | 子命令 | `listUsers` → `mycli users list` |
+| `operationId` | 子命令 | `listUsers` → `mycli users list`（自动去除 group 前缀） |
 | `path parameters` | 必需标志 | `{userId}` → `--user-id` |
 | `query parameters` | 可选标志 | `?page=1` → `--page 1` |
-| `requestBody` | 文件或数据输入 | `--file body.json` |
+| `requestBody` | 文件或数据输入 | `--file body.json` 或 `--file -`（stdin） |
+| `summary` | 命令帮助文本 | `Short: "List all users"` |
 
 MCP 映射：
 
 | MCP 元素 | 生成的 CLI 元素 | 示例 |
 |---------|----------------|------|
 | `server` | 命令组 | `search` → `mycli search` |
-| `tool name` | 子命令 | `web-search` → `mycli search web-search` |
+| `tool name` | 子命令 | `web_search` → `mycli search web-search`（自动去除 group 前缀） |
 | `inputSchema` 简单字段 | CLI flags | `query` → `--query golang` |
 | `inputSchema` 复杂结构 | JSON 输入 | `--data '{"filters":[...]}'` |
 
@@ -490,6 +486,9 @@ make test
 # 构建
 make build
 
+# 端到端冒烟测试
+make smoke
+
 # 清理
 make clean
 ```
@@ -593,13 +592,18 @@ go build -o bin/petcli ./cmd/petcli
 - [x] 配置文件支持
 - [x] 命名自定义
 - [x] 多种 body 处理模式
+- [x] `--version` 标志支持
+- [x] 错误响应展示完整 body 内容
+- [x] `--output json|text` 格式控制
+- [x] `--file -` stdin 输入支持
+- [x] 命令名智能简化（去除 group 前缀、连字符分隔、冲突检测）
+- [x] Help 文本使用 OpenAPI summary
+- [x] 环境变量按 app 名称命名（`<APP>_BASE_URL`）
 
 ### 计划中 🚧
 - [ ] `opencli init` 命令实现
-- [ ] `--version` 标志支持
 - [ ] Rust 生成目标 `--trace` 支持
 - [ ] HTTP 重试机制
-- [ ] 更详细的错误消息
 - [ ] 进度指示器
 - [ ] Shell 补全支持
 - [ ] 更多 OpenAPI 特性支持（枚举、响应验证等）
@@ -612,8 +616,6 @@ go build -o bin/petcli ./cmd/petcli
 
 - `opencli init` 命令尚未实现
 - Rust 生成目标不支持 `--trace` flag（Go 目标已支持）
-- Rust 生成目标不支持 MCP `stdio` 传输
-- 生成的代码需要手动添加实际的 HTTP 请求逻辑
 
 ---
 
@@ -641,4 +643,4 @@ go build -o bin/petcli ./cmd/petcli
 
 ---
 
-**最后更新**: 2026-04-27
+**最后更新**: 2026-06-01

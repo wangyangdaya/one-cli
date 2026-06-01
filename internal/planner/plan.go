@@ -73,6 +73,12 @@ func Build(doc openapi.Document, cfg configgen.Config) (Plan, error) {
 		})
 	}
 
+	// Post-process: strip redundant group name prefix from command names
+	// and detect/resolve naming conflicts within each group.
+	for i := range app.Groups {
+		deduplicateCommandNames(&app.Groups[i])
+	}
+
 	return app, nil
 }
 
@@ -140,4 +146,64 @@ func groupName(op openapi.Operation, cfg configgen.Config) string {
 		return trimmed
 	}
 	return firstPathSegment(op.Path)
+}
+
+// deduplicateCommandNames strips redundant group name prefixes from command
+// names and resolves conflicts by keeping the full hyphenated name.
+func deduplicateCommandNames(group *model.Group) {
+	groupParts := splitIdentifier(group.Name)
+	if len(groupParts) == 0 {
+		return
+	}
+	groupPrefix := strings.ToLower(groupParts[0])
+
+	// First pass: try to strip group prefix from each command name
+	stripped := make([]string, len(group.Operations))
+	for i, op := range group.Operations {
+		parts := strings.Split(op.CommandName, "-")
+		if len(parts) > 1 && parts[0] == groupPrefix {
+			stripped[i] = strings.Join(parts[1:], "-")
+		} else {
+			stripped[i] = op.CommandName
+		}
+	}
+
+	// Second pass: detect conflicts and revert to full name where needed
+	counts := make(map[string]int)
+	for _, name := range stripped {
+		counts[name]++
+	}
+	for i, name := range stripped {
+		if counts[name] > 1 {
+			// Conflict: keep original full name
+			stripped[i] = group.Operations[i].CommandName
+		}
+	}
+
+	// Third pass: detect conflicts among final names (original names that
+	// were kept might conflict with stripped names)
+	finalCounts := make(map[string][]int)
+	for i, name := range stripped {
+		finalCounts[name] = append(finalCounts[name], i)
+	}
+	for _, indices := range finalCounts {
+		if len(indices) <= 1 {
+			continue
+		}
+		// Expand all conflicting entries to full operationID-based name
+		for _, idx := range indices {
+			opID := group.Operations[idx].RemoteName
+			if opID != "" {
+				parts := splitIdentifier(opID)
+				if len(parts) > 0 {
+					stripped[idx] = strings.Join(parts, "-")
+				}
+			}
+		}
+	}
+
+	// Apply
+	for i := range group.Operations {
+		group.Operations[i].CommandName = stripped[i]
+	}
 }
