@@ -71,8 +71,8 @@ func TestRenderProject(t *testing.T) {
 	if !strings.Contains(skillText, "version: 1.0.0") {
 		t.Fatalf("generated skill markdown missing version in frontmatter:\n%s", skillText)
 	}
-	if !strings.Contains(skillText, "## Package Files") {
-		t.Fatalf("generated skill markdown missing package file index:\n%s", skillText)
+	if !strings.Contains(skillText, "## CLI 概览") {
+		t.Fatalf("generated skill markdown missing CLI overview:\n%s", skillText)
 	}
 	if !strings.Contains(skillText, "assets/demo-request.json") {
 		t.Fatalf("generated skill markdown missing demo request reference:\n%s", skillText)
@@ -83,10 +83,10 @@ func TestRenderProject(t *testing.T) {
 	}
 	readmeText := string(readmeContent)
 	for _, want := range []string{
-		"## Version",
-		"Generated Go CLIs use `0.0.1` for `--version`.",
+		"## 版本",
+		"生成的 Go CLI 使用 `0.0.1` 作为 `--version` 返回值",
 		"./bin/one --version",
-		"## Generated Skills",
+		"## 生成的 Skills",
 		"demo-request.json",
 		"production-checklist.md",
 	} {
@@ -185,14 +185,14 @@ func TestRenderProjectSkillIncludesHeaderUsageNotes(t *testing.T) {
 	}
 	skillText := string(skillContent)
 	for _, want := range []string{
-		"## Commands",
-		"## Command Routing",
-		"## Core Concepts",
-		"## Important Notes",
-		"## Common Workflows",
+		"## CLI 概览",
+		"## 最高优先级约束",
+		"## 前置条件",
+		"## 常用工作流",
+		"## 命令详情",
 		"### one auth me",
 		`--header "authorization: <value>"`,
-		"**Parameters:**",
+		"**参数说明**：",
 		"<!-- MANUAL:",
 	} {
 		if !strings.Contains(skillText, want) {
@@ -236,10 +236,10 @@ func TestRenderProjectSkillDocumentsFileOrDataBodyFields(t *testing.T) {
 	}
 	skillText := string(skillContent)
 	for _, want := range []string{
-		"**Request Body Schema:**",
-		"| `deliveryRecId` | no | 目的地ID (integer) |",
-		"| `deliveryRecNo` | no | 目的地编号 (string) |",
-		`--data '{"deliveryRecId": 123, "deliveryRecNo": "value"}'`,
+		"**请求体字段**：",
+		"| `deliveryRecId` | 否 | 目的地ID（integer） |",
+		"| `deliveryRecNo` | 否 | 目的地编号（string） |",
+		`--data '{"deliveryRecId": 12345, "deliveryRecNo": "NO20250001"}'`,
 		"--file assets/demo-request.json",
 	} {
 		if !strings.Contains(skillText, want) {
@@ -261,8 +261,8 @@ func TestRenderProjectSkillDocumentsFileOrDataBodyFields(t *testing.T) {
 	}
 	demoText := string(demoContent)
 	for _, want := range []string{
-		`"deliveryRecId": 123`,
-		`"deliveryRecNo": "value"`,
+		`"deliveryRecId": 12345`,
+		`"deliveryRecNo": "NO20250001"`,
 	} {
 		if !strings.Contains(demoText, want) {
 			t.Fatalf("generated demo request missing %q:\n%s", want, demoText)

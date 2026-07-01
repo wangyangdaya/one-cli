@@ -1,63 +1,113 @@
-# Workflows: {{ .Group.Name }}
+# 业务流程：{{ .Group.Name }}
 
-Use this file for real business flows. API descriptions only expose single commands; product and engineering owners must define the multi-step process.
+本文件用于定义真实的跨命令业务流程。API 描述只能暴露单个命令，产品、业务和工程需要在此定义多步骤工作流。
 
-## Workflow Template
+## 工作流模板
 
-Copy this section for each high-frequency task.
+复制以下模板，为每个高频业务场景补充一个工作流。
 
-### <!-- MANUAL: workflow name -->
+### <!-- MANUAL: 工作流名称 -->
 
-- Trigger: <!-- MANUAL: user phrases that should start this workflow -->
-- Preconditions: <!-- MANUAL: auth, tenant, role, environment, required IDs -->
-- Risk: <!-- MANUAL: read-only, write, delete, bulk, irreversible -->
+- **触发场景**：<!-- MANUAL: 哪些用户说法应启动本工作流 -->
+- **前置条件**：<!-- MANUAL: 认证、权限、环境、必要 ID -->
+- **风险等级**：<!-- MANUAL: 只读 / 写入 / 批量 / 不可逆 -->
 
-Steps:
+**步骤**：
 
-1. <!-- MANUAL: first lookup or validation command -->
-2. <!-- MANUAL: command that performs the main action -->
-3. <!-- MANUAL: read-back or verification command -->
+1. <!-- MANUAL: 第一步查询或校验命令 -->
+2. <!-- MANUAL: 第二步主要操作命令 -->
+3. <!-- MANUAL: 第三步回读/验证命令 -->
 
-Return to user:
+**返回给用户**：
 
-- <!-- MANUAL: fields, URLs, status, next action -->
+- <!-- MANUAL: 关键字段、状态、下一步操作 -->
 
-Recovery:
+**异常恢复**：
 
-- <!-- MANUAL: empty result, permission denied, invalid parameter, duplicate target -->
+- <!-- MANUAL: 空结果 / 无权限 / 参数错误 / 重复提交 等处理方式 -->
 
-## Generated Command Candidates
+## 基于生成命令的候选工作流
 
-### Read Or Lookup Commands
+{{- if and (groupHasListOperation .Group) (groupHasDetailOperation .Group) (groupHasSubmitOperation .Group) }}
+
+### 查询 → 详情 → 操作
+
+适用：用户查看并处理单条记录。
+
+1. 用列表/待办命令查候选：`{{ .App.Name }} {{ .Group.Name }} <!-- MANUAL: list/page/todo-list -->`
+2. 输出列表，让用户选择序号或标题
+3. 用详情命令确认：`{{ .App.Name }} {{ .Group.Name }} <!-- MANUAL: detail/info-by-id -->`
+4. 执行操作：`{{ .App.Name }} {{ .Group.Name }} <!-- MANUAL: submit/reject/update -->`
+5. 回读结果或告知下一步
+
+{{- end }}
+{{- if groupHasListOperation .Group }}
+
+### 纯查询
+
+适用：用户只想查看数据，不做操作。
+
+1. `{{ .App.Name }} {{ .Group.Name }} <!-- MANUAL: list/page/query -->`
+2. 输出结果，必要时翻页
+
+{{- end }}
+{{- if groupHasSubmitOperation .Group }}
+
+### 直接提交
+
+适用：用户已提供完整信息。
+
+1. 校验必填字段是否齐全
+2. 如有依赖字段，先调用查询命令获取
+3. `{{ .App.Name }} {{ .Group.Name }} <!-- MANUAL: create/save/submit -->`
+4. 返回结果
+
+{{- end }}
+{{- if groupHasTimeParams .Group }}
+
+### 按时间范围查询
+
+适用：用户指定了时间条件。
+
+1. 识别时间表述（今天/本周/本月/近 N 天/自定义区间）
+2. 转换为接口要求的时间格式
+3. 调用查询命令
+4. 如需翻页，按翻页规则处理
+
+{{- end }}
+
+## 命令分类
+
+### 只读/查询命令
 
 {{- range .Group.Operations }}
 {{- if not (operationIsWriteMethod .) }}
-- `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}` — {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}
+- `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}` — {{ if .Summary }}{{ .Summary }}{{ else }}{{ generateUserIntentChinese . }}{{ end }}
 {{- end }}
 {{- end }}
 
-### Write Or Risky Commands
+### 写入/风险命令
 
 {{- range .Group.Operations }}
 {{- if operationIsWriteMethod . }}
-- `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}` — {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}
+- `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}` — {{ if .Summary }}{{ .Summary }}{{ else }}{{ generateUserIntentChinese . }}{{ end }}（{{ operationRiskLevelChinese (operationRiskLevel .) }}）
 {{- end }}
 {{- end }}
 
-## Safety Pattern For Writes
+## 写入操作安全模式
 
-Use this pattern for create, update, delete, status-change, clear, reset, import, export, and bulk operations.
+对于创建、更新、删除、状态变更、清空、导入、批量操作，统一遵循以下模式：
 
-1. Identify the target with a read command when possible.
-2. Show the user the target ID/name and intended action.
-3. Ask for explicit confirmation unless the user already gave clear permission in the current turn.
-4. Execute the command.
-5. Read back the changed resource or show the command result fields that prove success.
+1. 尽可能先用只读命令定位目标
+2. 向用户展示目标标识和即将执行的动作
+3. 请求明确确认（除非用户已在本轮明确授权）
+4. 执行命令
+5. 回读变更结果或展示成功证明字段
 
-## Top Workflows To Fill
+## 待补充的 Top 工作流
 
-| Priority | Workflow | Commands | Owner | Status |
-| --- | --- | --- | --- | --- |
-| P0 | <!-- MANUAL: most common task --> | <!-- MANUAL: command sequence --> | <!-- MANUAL --> | TODO |
-| P1 | <!-- MANUAL: second task --> | <!-- MANUAL: command sequence --> | <!-- MANUAL --> | TODO |
-| P2 | <!-- MANUAL: third task --> | <!-- MANUAL: command sequence --> | <!-- MANUAL --> | TODO |
+| 优先级 | 工作流 | 涉及命令 | 责任人 | 状态 |
+|---|---|---|---|---|
+| P0 | <!-- MANUAL: 最高频业务场景 --> | <!-- MANUAL: 命令序列 --> | <!-- MANUAL --> | TODO |
+| P1 | <!-- MANUAL: 次高频场景 --> | <!-- MANUAL: 命令序列 --> | <!-- MANUAL --> | TODO |
+| P2 | <!-- MANUAL: 第三高频场景 --> | <!-- MANUAL: 命令序列 --> | <!-- MANUAL --> | TODO |

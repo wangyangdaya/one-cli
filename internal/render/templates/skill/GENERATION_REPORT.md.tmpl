@@ -1,0 +1,40 @@
+# 生成报告：{{ .Group.Name }}
+
+本文件由 `opencli` 自动生成，记录本次生成时从 API/MCP 描述中检测到的信息缺失和潜在问题。业务方可据此定向补充 Swagger/MCP 文档或手工完善 Skill。
+
+## 生成信息
+
+- Skill 名称：`{{ .Group.Name }}`
+- 所属应用：`{{ .App.Name }}`
+- 后端类型：{{ if groupUsesMCPHTTP .Group }}MCP HTTP{{ else if groupUsesMCPStdio .Group }}MCP Stdio{{ else }}HTTP API{{ end }}
+- 命令数量：{{ len .Group.Operations }}
+
+## 检测到的问题
+
+{{- $issues := groupSwaggerIssues .Group }}
+{{- if $issues }}
+{{- range $issues }}
+- [ ] {{ . }}
+{{- end }}
+{{- else }}
+- ✅ 未检测到明显的描述缺失。
+{{- end }}
+
+## 建议补充的内容
+
+以下信息通常无法从 API 描述自动推导，需要业务方手工补充：
+
+1. **业务语义**：每个命令解决什么业务问题，典型触发场景是什么。
+2. **枚举值含义**：`status` / `type` / `state` 等字段的可取值及对应业务含义。
+3. **字段来源**：哪些字段由用户输入，哪些来自上一步命令返回。
+4. **命令依赖**：多个命令组合使用的顺序和数据传递关系。
+5. **权限与状态校验**：例如提交前是否需要 `canEdit==true`、是否仅特定状态可操作。
+6. **系统入口链接**：失败时或用户询问时，应提供哪个 Web/飞书入口。
+7. **错误处理**：常见错误码、异常场景和恢复方式。
+8. **时间/翻页/排序等特殊规则**：如果接口有非标准约定，请在 `SKILL.md` 和 `references/` 中说明。
+
+## 下一步
+
+1. 按上方列表补充 Swagger/MCP 文档，或直接在 `SKILL.md` 和 `references/` 中手工完善。
+2. 删除本报告中已修复的条目。
+3. 完成 `references/production-checklist.md` 后即可视为 production-ready。

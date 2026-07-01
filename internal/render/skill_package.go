@@ -11,5 +11,6 @@ func skillPackageFiles(groupDir string, data templateData) []generatedFile {
 		{Path: filepath.Join(base, "references", "command-routing.md"), Template: "skill/references/command-routing.md.tmpl", Data: data},
 		{Path: filepath.Join(base, "references", "workflows.md"), Template: "skill/references/workflows.md.tmpl", Data: data},
 		{Path: filepath.Join(base, "references", "production-checklist.md"), Template: "skill/references/production-checklist.md.tmpl", Data: data},
+		{Path: filepath.Join(base, "GENERATION_REPORT.md"), Template: "skill/GENERATION_REPORT.md.tmpl", Data: data},
 	}
 }

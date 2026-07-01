@@ -1,42 +1,51 @@
-# Command Routing: {{ .Group.Name }}
+# 命令路由：{{ .Group.Name }}
 
-Use this file to teach the agent how user language maps to real CLI commands.
+本文件用于教会 Agent 如何将用户的自然语言请求映射到正确的 CLI 命令。
 
-Generated API descriptions can list commands, but they cannot know which command matches a business phrase such as "my pending items", "close this case", or "clear current records". Fill the MANUAL sections before treating routing as production-ready.
+API 描述只能列出命令，但无法知道「查我的待办」、「帮我同意第一条」这类业务短语对应哪个命令。请在将本 Skill 投入生产前，填写下方的 `<!-- MANUAL -->` 部分。
 
-## Generated Commands
+## 已生成命令速查
 
-| User intent | Recommended command | Avoid | Notes |
-| --- | --- | --- | --- |
+| 用户意图 | 推荐命令 | 应避免 | 说明 |
+|---|---|---|---|
 {{- range .Group.Operations }}
-| <!-- MANUAL: add common user phrasing for {{ .CommandName }} --> | `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}` | <!-- MANUAL: similar wrong command, if any --> | {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }} |
+| {{ generateUserIntentChinese . }} | `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}` | <!-- MANUAL: 易混淆命令 --> | {{ if .Summary }}{{ .Summary }}{{ else }}{{ generateUserIntentChinese . }}{{ end }} |
 {{- end }}
 
-## Selection Rules
+## 选择规则
 
-<!-- MANUAL: Add rules for choosing between similar commands. Examples:
-- Use `list` when the user gives a scope or owner but no keyword.
-- Use `search` when the user gives a real keyword, name, code, or phrase.
-- Use `get` only when a stable ID, URL, or unique lookup result is available.
-- Use `update`, `delete`, or status-changing commands only after confirming the target.
+<!-- MANUAL: 添加在相似命令之间做选择的规则。例如：
+- 用户给出范围或时间但没有具体关键词 → 用 `page` / `list`
+- 用户给出具体 ID 或标题 → 用 `info-by-id` / `detail`
+- 用户说「第 N 条」→ 从上一轮列表映射序号，再调用详情/操作命令
+- 用户要修改/删除/审批 → 必须先查询确认目标
 -->
 
-## Terms And Synonyms
+## 常用表述映射
 
-| User term | Meaning | Command hint |
-| --- | --- | --- |
-| <!-- MANUAL: business term --> | <!-- MANUAL: canonical meaning --> | <!-- MANUAL: command or rule --> |
+| 用户表述 | 意图 | 对应命令 |
+|---|---|---|
+{{- range .Group.Operations }}
+| <!-- MANUAL: {{ .CommandName }} 的用户说法，如"查我的xxx" --> | {{ generateUserIntentChinese . }} | `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}` |
+{{- end }}
 
-## Cross-Skill Boundaries
+## 术语与同义词
 
-| User asks for | Use this skill? | Route to | Reason |
-| --- | --- | --- | --- |
-| <!-- MANUAL: out-of-scope intent --> | no | <!-- MANUAL: other skill or process --> | <!-- MANUAL: why --> |
+| 用户说法 | 标准含义 | 命令/规则提示 |
+|---|---|---|
+| <!-- MANUAL: 业务术语 --> | <!-- MANUAL: 标准含义 --> | <!-- MANUAL: 对应命令 --> |
 
-## Missing Information Rules
+## 跨 Skill 边界
 
-<!-- MANUAL: Define what to ask the user when required inputs are missing. Examples:
-- If no ID is present, list or search first instead of inventing one.
-- If multiple matches are found, ask the user to choose.
-- If the operation changes data, show the target and action before executing.
+| 用户请求 | 是否用本 Skill | 应路由到 | 原因 |
+|---|---|---|---|
+| <!-- MANUAL: 超出本 Skill 范围的意图 --> | 否 | <!-- MANUAL: 其他 Skill 或流程 --> | <!-- MANUAL: 为什么不归本 Skill 管 --> |
+
+## 信息缺失处理
+
+<!-- MANUAL: 定义缺少必填信息时应该怎么问用户。例如：
+- 没有 ID → 先 list / page / query
+- 多个匹配 → 让用户选择序号
+- 要写/删/批 → 先展示目标和影响，再请求确认
+- 缺少枚举值 → 列出可选值让用户选择
 -->
