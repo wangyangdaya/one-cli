@@ -1,46 +1,48 @@
-# Production Checklist: {{ .Group.Name }}
+# 生产上线检查清单：{{ .Group.Name }}
 
-This checklist turns the generated API scaffold into a business-ready skill.
+本清单用于把生成的 API 脚手架转变为业务可用的 Skill。上线前请逐项确认。
 
-## Product / Business
+## 产品 / 业务
 
-- [ ] `SKILL.md` description names real user intents, synonyms, and boundaries.
-- [ ] Core concepts explain business entities, IDs, URLs, states, ownership, and permissions.
-- [ ] `command-routing.md` covers common user phrases and commands to avoid.
-- [ ] `workflows.md` covers the top 3-5 business tasks.
-- [ ] Cross-skill routing is documented for out-of-scope requests.
-- [ ] User-facing output expectations are documented: fields, URLs, status, and next steps.
+- [ ] `SKILL.md` 的 description 描述了真实用户意图、边界和同义词。
+- [ ] 核心概念已说明：业务实体、ID 含义、状态、权限、数据Owner规则。
+- [ ] `command-routing.md` 覆盖了常见用户表述和应避免的错误命令。
+- [ ] `workflows.md` 覆盖了 top 3-5 真实业务流程。
+- [ ] 跨 Skill 路由已文档化：哪些请求不归本 Skill 处理。
+- [ ] 用户可见输出已说明：字段含义、状态、下一步操作、系统入口链接。
 
-## Engineering
+## 工程
 
-- [ ] `{{ .App.Name }} {{ .Group.Name }} --help` works.
+- [ ] `{{ .App.Name }} {{ .Group.Name }} --help` 可正常执行。
 {{- range .Group.Operations }}
-- [ ] `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }} --help` works.
+- [ ] `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }} --help` 可正常执行。
 {{- end }}
-- [ ] Required parameters, body fields, and header rules in `SKILL.md` match the CLI.
-- [ ] Complex JSON input documents `--data` / `--file` shape clearly.
-- [ ] Authentication, environment variables, and base URL setup are accurate.
+- [ ] `SKILL.md` 中的必填字段、参数类型、请求体格式与实际 CLI 一致。
+- [ ] `--data` / `--file` 的 JSON 形状清晰，可构造真实请求。
+- [ ] 认证、环境变量、Base URL 配置准确。
+- [ ] 返回字段说明与实际接口返回一致。
+- [ ] 时间格式、翻页逻辑、状态编码符合接口约定。
 
-## Safety
+## 安全
 
-- [ ] Write, delete, bulk, clear, reset, import, and irreversible operations require confirmation or a documented exception.
-- [ ] Missing IDs are resolved through list/search/get, not guessed.
-- [ ] Ambiguous search results require user selection.
-- [ ] Workflows include read-back verification where the API supports it.
-- [ ] Permission and tenant boundaries are documented.
+- [ ] 写入、删除、批量、清空、不可逆操作执行前需要确认或有明确例外说明。
+- [ ] 缺少 ID 时通过 list/page/query 获取，不凭空构造。
+- [ ] 模糊查询结果要求用户选择，不擅自决定。
+- [ ] 工作流包含回读验证步骤（接口支持时）。
+- [ ] 权限和租户边界已文档化。
 
 ## QA
 
-- [ ] Front matter is valid and the skill loads.
-- [ ] Every documented command exists.
-- [ ] At least one read-only example runs successfully.
-- [ ] At least one write workflow is dry-run tested or tested in a safe environment.
-- [ ] Empty result, invalid parameter, not found, and permission denied paths have recovery guidance.
-- [ ] Known limitations are listed before handoff.
+- [ ] Front matter 有效，Skill 能正常加载。
+- [ ] 文档中的每个命令都真实存在。
+- [ ] 至少一个只读查询示例可成功运行。
+- [ ] 至少一个写入/审批工作流已在安全环境测试或 dry-run。
+- [ ] 空结果、参数非法、资源不存在、权限不足等异常路径有恢复指南。
+- [ ] 已知限制已在交接前列出。
 
-## Maintenance
+## 维护
 
-- [ ] API or MCP schema changes trigger regeneration and review.
-- [ ] CLI command renames update `SKILL.md` and `references/`.
-- [ ] Business rule changes update workflow and routing docs.
-- [ ] Verification evidence is recorded in the PR or release notes.
+- [ ] API/MCP schema 变更后会触发重新生成和人工 review。
+- [ ] CLI 命令重命名会同步更新 `SKILL.md` 和 `references/`。
+- [ ] 业务规则变更会同步更新工作流和路由文档。
+- [ ] 验证证据记录在 PR 或发布说明中。
