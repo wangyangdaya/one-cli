@@ -56,8 +56,8 @@ This is a generated OpenCLI skill package. It contains API-derived facts and man
 {{- end }}
 {{- else }}
 
-- Environment variable `{{ upper .App.Name }}_BASE_URL`: API base URL
-- Environment variable `{{ upper .App.Name }}_AUTH_TOKEN`: Authentication token
+- Environment variable `OPENCLI_BASE_URL`: API base URL
+- Environment variable `OPENCLI_AUTH_TOKEN`: Authentication token
 {{- end }}
 
 <!-- MANUAL: 补充认证流程、前置命令、依赖说明等 -->
@@ -117,35 +117,35 @@ Generated APIs do not contain enough business semantics to infer real workflows.
 {{- if and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) (eq .BodyMode "simple-json") }}
 # {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（必填字段）
 {{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .BodyFields }}{{ if .Required }} \
-  --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}
+  --{{ cliFlagName $.Target .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}
 {{- if hasOptionalFields . }}
 
 # {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（含可选字段）
 {{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .BodyFields }} \
-  --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}
+  --{{ cliFlagName $.Target .Name }} "{{ exampleValue .Type .Name }}"{{ end }}
 {{- end }}
 {{- else }}
 # {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（必填字段）
 {{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .Parameters }}{{ if eq .In "path" }} \
-  --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if and (eq .In "query") .Required }} \
-  --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }}{{ if .Required }} \
-  --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ end }}{{ if eq .BodyMode "file-or-data" }} \
+  --{{ cliFlagName $.Target .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if and (eq .In "query") .Required }} \
+  --{{ cliFlagName $.Target .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }}{{ if .Required }} \
+  --{{ cliFlagName $.Target .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ end }}{{ if eq .BodyMode "file-or-data" }} \
   --file assets/demo-request.json{{ end }}{{ range .Parameters }}{{ if eq .In "header" }} \
   --header "{{ .Name }}: <value>"{{ end }}{{ end }}
 {{- if hasOptionalFields . }}
 
 # {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（含可选字段）
 {{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .Parameters }}{{ if eq .In "path" }} \
-  --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if eq .In "query" }} \
-  --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }} \
-  --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if eq .In "header" }} \
+  --{{ cliFlagName $.Target .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if eq .In "query" }} \
+  --{{ cliFlagName $.Target .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }} \
+  --{{ cliFlagName $.Target .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if eq .In "header" }} \
   --header "{{ .Name }}: <value>"{{ end }}{{ end }}
 {{- end }}
 {{- if eq .BodyMode "file-or-data" }}
 
 # 从 JSON 字符串传入
 {{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .Parameters }}{{ if eq .In "path" }} \
-  --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }} \
+  --{{ cliFlagName $.Target .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }} \
   --data '{{ exampleJSONFields .BodySchemaFields }}'
 {{- end }}
 {{- end }}
@@ -161,12 +161,12 @@ Generated APIs do not contain enough business semantics to infer real workflows.
 {{- if eq .In "header" }}
 | `--header "{{ .Name }}: <value>"` | {{ if .Required }}yes{{ else }}no{{ end }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }} header{{ end }} ({{ .In }}) |
 {{- else }}
-| `--{{ .Name }}` | {{ if .Required }}yes{{ else }}no{{ end }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }} ({{ if .Type }}{{ .Type }}{{ else }}string{{ end }}) |
+| `--{{ cliFlagName $.Target .Name }}` | {{ if .Required }}yes{{ else }}no{{ end }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }} ({{ if .Type }}{{ .Type }}{{ else }}string{{ end }}) |
 {{- end }}
 {{- end }}
 {{- if and (eq .BodyMode "simple-json") .BodyFields }}
 {{- range .BodyFields }}
-| `--{{ .Name }}` | {{ if .Required }}yes{{ else }}no{{ end }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }} ({{ if .Type }}{{ .Type }}{{ else }}string{{ end }}) |
+| `--{{ cliFlagName $.Target .Name }}` | {{ if .Required }}yes{{ else }}no{{ end }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }} ({{ if .Type }}{{ .Type }}{{ else }}string{{ end }}) |
 {{- end }}
 {{- end }}
 {{- if eq .BodyMode "file-or-data" }}

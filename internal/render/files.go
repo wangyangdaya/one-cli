@@ -17,6 +17,7 @@ type generatedFile struct {
 
 type templateData struct {
 	Module string
+	Target string
 	App    model.App
 	Group  model.Group
 }

@@ -9,13 +9,13 @@ import (
 
 func writeGoProject(outputDir, module string, app model.App) error {
 	files := []generatedFile{
-		{Path: filepath.Join("cmd", app.Name, "main.go"), Template: "go/root_main.go.tmpl", Data: templateData{Module: module, App: app}},
-		{Path: "README.md", Template: "go/readme.md.tmpl", Data: templateData{Module: module, App: app}},
-		{Path: filepath.Join("bin", app.Name), Template: "go/bin_launcher.sh.tmpl", Data: templateData{Module: module, App: app}, Mode: 0o755},
-		{Path: filepath.Join("bin", app.Name+".cmd"), Template: "go/bin_launcher.cmd.tmpl", Data: templateData{Module: module, App: app}, Mode: 0o644},
+		{Path: filepath.Join("cmd", app.Name, "main.go"), Template: "go/root_main.go.tmpl", Data: templateData{Module: module, Target: "go", App: app}},
+		{Path: "README.md", Template: "go/readme.md.tmpl", Data: templateData{Module: module, Target: "go", App: app}},
+		{Path: filepath.Join("bin", app.Name), Template: "go/bin_launcher.sh.tmpl", Data: templateData{Module: module, Target: "go", App: app}, Mode: 0o755},
+		{Path: filepath.Join("bin", app.Name+".cmd"), Template: "go/bin_launcher.cmd.tmpl", Data: templateData{Module: module, Target: "go", App: app}, Mode: 0o644},
 	}
 	for _, group := range app.Groups {
-		data := templateData{Module: module, App: app, Group: group}
+		data := templateData{Module: module, Target: "go", App: app, Group: group}
 		groupDir := groupPackageName(group)
 		files = append(files,
 			generatedFile{Path: filepath.Join("internal", groupDir, "command.go"), Template: "go/group_command.go.tmpl", Data: data},

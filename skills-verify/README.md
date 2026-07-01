@@ -48,6 +48,7 @@ Edit `skills-verify/.env`:
 - `LOG_LEVEL`: Logging level (default: `INFO`)
 - `SKILLS_VERIFY_APP_DIR`: Generated app directory (default: `tmp/openapi`)
 - `OPENCLI_BASE_URL`: Base URL for API calls (required by generated CLI)
+- `OPENCLI_AUTH_TOKEN`: Optional bearer token for generated CLI HTTP requests
 - `OPENCLI_BASE_URL_MAP`: Optional per-executable base URL mapping
 - `ALLOWED_EXECUTABLES`: Comma-separated list of allowed CLI executables
 

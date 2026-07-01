@@ -9,7 +9,7 @@
 
 ## 📖 简介
 
-`opencli` 是一个代码生成器，它读取 OpenAPI/Swagger API 文档或 MCP 服务定义，在生成时发现可用能力，并自动生成完整的、可运行的 Go CLI 项目。
+`opencli` 是一个代码生成器，它读取 OpenAPI/Swagger API 文档或 MCP 服务定义，在生成时发现可用能力，并自动生成完整的、可运行的 Go 或 Rust CLI 项目。
 
 ### 核心特性
 
@@ -19,13 +19,14 @@
 - ✅ **标准架构** - 基于 Cobra 框架，遵循 Go 最佳实践
 - ✅ **本地/远程** - 支持本地文件和远程 URL 作为输入
 - ✅ **类型安全** - 生成强类型的 Go 代码
+- ✅ **Skill 产物** - 为每个命令组生成标准化 `skills/<group>/` 工作包，包含 `SKILL.md`、说明、引用文档和 demo request
 - ✅ **全版本兼容** - 支持 OpenAPI 2.0（Swagger）、3.0 和 3.1
 - ✅ **复杂 Schema** - 完整的 `$ref` 解析、`allOf` 合并、`oneOf`/`anyOf` 处理
 
 ### 工作流程
 
 ```
-OpenAPI 文档 / MCP 服务 → opencli → Go CLI 项目 → 编译 → 可执行的 CLI 工具
+OpenAPI 文档 / MCP 服务 → opencli → Go/Rust CLI 项目 + Skill 工作包 → 编译 → 可执行的 CLI 工具
 ```
 
 ---
@@ -139,6 +140,9 @@ Rust + MCP 生成示例：
 ## 📚 文档
 
 - **[用户指南](docs/USER_GUIDE.md)** - 完整的使用说明
+- **[Skill 标准产物](docs/skills/SKILL_STANDARD_OUTPUT.md)** - 生成的 `skills/<group>/` 目录结构、文件职责和扩展规则
+- **[Skill 生产化流程](docs/skills/SKILL_PRODUCTION_WORKFLOW.md)** - 如何把生成的 API scaffold 补齐为业务可用 Skill
+- **[Skill 最佳实践样例](docs/skills/examples/skill-best-practice-demo/README.md)** - 可复制参考结构
 - **[代码审查报告](docs/CODE_REVIEW_2026-04-20.md)** - 项目代码质量分析
 - **设计文档** - 位于 `docs/superpowers/specs/`
 - **[开发指南](AGENTS.md)** - 贡献者指南和开发规范
@@ -345,6 +349,8 @@ overrides:
 
 ## 📁 生成的项目结构
 
+Go target 示例：
+
 ```
 my-cli/
 ├── bin/
@@ -364,11 +370,48 @@ my-cli/
 │       └── types.go       # 类型定义
 ├── skills/
 │   └── users/
-│       └── SKILL.md       # AI 助手技能文档
+│       ├── SKILL.md
+│       ├── README.md
+│       ├── assets/
+│       │   └── demo-request.json
+│       └── references/
+│           ├── command-routing.md
+│           ├── workflows.md
+│           └── production-checklist.md
 ├── go.mod
 ├── go.sum
 └── README.md
 ```
+
+Rust target 示例：
+
+```
+my-cli-rs/
+├── src/
+│   ├── main.rs
+│   ├── cli.rs
+│   ├── client.rs
+│   ├── output.rs
+│   ├── trace.rs
+│   ├── types.rs
+│   └── commands/
+│       ├── mod.rs
+│       └── users.rs
+├── skills/
+│   └── users/
+│       ├── SKILL.md
+│       ├── README.md
+│       ├── assets/
+│       │   └── demo-request.json
+│       └── references/
+│           ├── command-routing.md
+│           ├── workflows.md
+│           └── production-checklist.md
+├── Cargo.toml
+└── README.md
+```
+
+`skills/<group>/` 是标准化 Skill 工作包。`SKILL.md` 是 Agent 入口，`README.md` 说明交付和修改流程，`assets/demo-request.json` 是可立即用于 `--file` 示例的合法 JSON 占位文件，`references/` 用于补充命令路由、业务流程和生产验收清单。
 
 ---
 
@@ -383,6 +426,7 @@ OpenCLI 按照以下规则将 OpenAPI 或 MCP 元素映射到 CLI 命令：
 | `path parameters` | 必需标志 | `{userId}` → `--user-id` |
 | `query parameters` | 可选标志 | `?page=1` → `--page 1` |
 | `requestBody` | 文件或数据输入 | `--file body.json` |
+| `tags` 中的 `*Controller` | 优先提取 Controller 名作为命令组 | `TeMmMriCurrentController` → `te-mm-mri-current` |
 
 MCP 映射：
 
@@ -392,6 +436,12 @@ MCP 映射：
 | `tool name` | 子命令 | `web-search` → `mycli search web-search` |
 | `inputSchema` 简单字段 | CLI flags | `query` → `--query golang` |
 | `inputSchema` 复杂结构 | JSON 输入 | `--data '{"filters":[...]}'` |
+
+生成目录名规则：
+
+- CLI 命令组名保留短横线，例如 `te-mm-mri-current`。
+- Go package、Rust module、`skills/<group>/` 目录使用 package name：非字母数字压缩为 `_`，转小写，数字开头加 `group_`。
+- 例如：`te-mm-mri-current` → `te_mm_mri_current`，生成 `skills/te_mm_mri_current/`。
 
 ---
 
@@ -604,10 +654,11 @@ go build -o bin/petcli ./cmd/petcli
 - [x] 配置文件支持
 - [x] 命名自定义
 - [x] 多种 body 处理模式
+- [x] 生成项目 `--version` 支持（Go/Rust）
+- [x] 标准化 Skill 工作包生成（Go/Rust，含 `assets/demo-request.json`）
 
 ### 计划中 🚧
 - [ ] `opencli init` 命令实现
-- [ ] `--version` 标志支持
 - [ ] Rust 生成目标 `--trace` 支持
 - [ ] HTTP 重试机制
 - [ ] 更详细的错误消息
@@ -624,7 +675,7 @@ go build -o bin/petcli ./cmd/petcli
 - `opencli init` 命令尚未实现
 - Rust 生成目标不支持 `--trace` flag（Go 目标已支持）
 - Rust 生成目标不支持 MCP `stdio` 传输
-- 生成的代码需要手动添加实际的 HTTP 请求逻辑
+- 生成的 Skill 是 API scaffold，需要补充业务意图、流程和安全边界后才算生产可用
 
 ---
 
@@ -652,4 +703,4 @@ go build -o bin/petcli ./cmd/petcli
 
 ---
 
-**最后更新**: 2026-04-27
+**最后更新**: 2026-07-01

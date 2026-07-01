@@ -59,6 +59,7 @@ func renderTemplate(name string, data any) ([]byte, error) {
 			"operationHasQueryParams":  operationHasQueryParams,
 			"goAppVersion":             goAppVersion,
 			"rustAppVersion":           rustAppVersion,
+			"cliFlagName":              cliFlagName,
 			"rustFieldName":            rustFieldName,
 			"rustModuleName":           rustModuleName,
 			"rustType":                 rustType,
@@ -115,6 +116,13 @@ func bodyFlagHelp(fields []model.BodyField) string {
 		}
 	}
 	return strings.Join(parts, "/")
+}
+
+func cliFlagName(target, name string) string {
+	if strings.EqualFold(strings.TrimSpace(target), "rust") {
+		return rustFieldName(name)
+	}
+	return strings.TrimSpace(name)
 }
 
 func goType(value string) string {

@@ -17,6 +17,15 @@ pub async fn request(
 ) -> AppResult<Value> {
     let base_url = std::env::var("OPENCLI_BASE_URL")
         .map_err(|_| "missing OPENCLI_BASE_URL".to_string())?;
+    let mut headers = headers;
+    if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("Authorization")) {
+        if let Ok(token) = std::env::var("OPENCLI_AUTH_TOKEN") {
+            let token = token.trim();
+            if !token.is_empty() {
+                headers.push(("Authorization".to_string(), format!("Bearer {token}")));
+            }
+        }
+    }
     let trimmed = base_url.trim_end_matches('/');
     let mut url = reqwest::Url::parse(&format!("{trimmed}{path}")).map_err(|err| err.to_string())?;
     {
@@ -100,7 +109,12 @@ fn preview_pairs(pairs: &[(String, String)]) -> String {
 
     let mut payload = serde_json::Map::new();
     for (name, value) in pairs {
-        payload.insert(name.clone(), Value::String(value.clone()));
+        let preview = if name.eq_ignore_ascii_case("Authorization") {
+            "<redacted>"
+        } else {
+            value
+        };
+        payload.insert(name.clone(), Value::String(preview.to_string()));
     }
     preview_value(&Value::Object(payload))
 }

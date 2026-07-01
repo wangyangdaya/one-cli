@@ -270,6 +270,52 @@ func TestRenderProjectSkillDocumentsFileOrDataBodyFields(t *testing.T) {
 	}
 }
 
+func TestRenderRustProjectSkillUsesActualCliFlagNames(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name: "les",
+		Groups: []model.Group{
+			{
+				Name: "te-mm-mri-current",
+				Operations: []model.Operation{
+					{
+						CommandName: "page",
+						Method:      "GET",
+						Path:        "/les/api/teMmMriCurrent/page",
+						Summary:     "分页查询",
+						Parameters: []model.Parameter{
+							{Name: "current", In: "query", Required: true, Type: "integer"},
+							{Name: "pageSize", In: "query", Required: true, Type: "integer", Description: "页码"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := render.Project(dir, "github.com/acme/les-cli", app, "rust"); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+
+	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "te_mm_mri_current", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated skill markdown: %v", err)
+	}
+	skillText := string(skillContent)
+	for _, want := range []string{
+		`--current "1"`,
+		`--pagesize "25"`,
+		"| `--pagesize` | yes | 页码 (integer) |",
+	} {
+		if !strings.Contains(skillText, want) {
+			t.Fatalf("generated Rust SKILL.md missing %q:\n%s", want, skillText)
+		}
+	}
+	if strings.Contains(skillText, "--pageSize") {
+		t.Fatalf("generated Rust SKILL.md contains non-existent --pageSize flag:\n%s", skillText)
+	}
+}
+
 func TestRenderProjectCompilesWhenGroupNameContainsHyphen(t *testing.T) {
 	dir := t.TempDir()
 	app := model.App{
