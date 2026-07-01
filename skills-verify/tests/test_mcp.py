@@ -67,6 +67,10 @@ def test_resolve_app_dir_preserves_absolute_env_value(monkeypatch: pytest.Monkey
     assert main.resolve_app_dir(repo_root) == Path("/tmp/generated-app")
 
 
+def test_sanitize_text_replaces_surrogate_characters() -> None:
+    assert main.sanitize_text("可\udce4查看今天的\udce9\udc85配送单信息") == "可?查看今天的??配送单信息"
+
+
 def test_build_agent_uses_resolved_app_dir_for_skills_and_backend(tmp_path: Path) -> None:
     app_dir = tmp_path / "generated-app"
     skills_dir = app_dir / "skills"
@@ -90,6 +94,9 @@ def test_build_agent_uses_resolved_app_dir_for_skills_and_backend(tmp_path: Path
     previous_create_deep_agent = getattr(deepagents_module, "create_deep_agent", None)
     deepagents_module.create_deep_agent = fake_create_deep_agent
 
+    previous_langgraph = sys.modules.get("langgraph")
+    previous_langgraph_checkpoint = sys.modules.get("langgraph.checkpoint")
+    previous_langgraph_memory = sys.modules.get("langgraph.checkpoint.memory")
     memory_module = types.ModuleType("langgraph.checkpoint.memory")
     memory_module.MemorySaver = FakeMemorySaver
     sys.modules.setdefault("langgraph", types.ModuleType("langgraph"))
@@ -108,6 +115,15 @@ def test_build_agent_uses_resolved_app_dir_for_skills_and_backend(tmp_path: Path
             delattr(deepagents_module, "create_deep_agent")
         else:
             deepagents_module.create_deep_agent = previous_create_deep_agent
+        for module_name, previous_module in (
+            ("langgraph", previous_langgraph),
+            ("langgraph.checkpoint", previous_langgraph_checkpoint),
+            ("langgraph.checkpoint.memory", previous_langgraph_memory),
+        ):
+            if previous_module is None:
+                sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = previous_module
 
     assert backend_calls == [
         {"repo_root": tmp_path, "app_dir": app_dir, "executables": "openapi-cli"}
@@ -175,6 +191,38 @@ async def test_run_repl_uses_resolved_paths(monkeypatch: pytest.MonkeyPatch, tmp
         "builtins.input", side_effect=lambda _: next(inputs)
     ):
         assert await main.run_repl("demo") == 0
+
+
+@pytest.mark.anyio
+async def test_run_repl_sanitizes_user_input_before_invoking_agent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    app_dir = tmp_path / "generated-app"
+    skills_dir = app_dir / "skills"
+    skills_dir.mkdir(parents=True)
+    received_messages: list[list[dict[str, str]]] = []
+
+    class FakeAgent:
+        pass
+
+    async def fake_invoke_agent(**kwargs):
+        received_messages.append([dict(message) for message in kwargs["messages"]])
+        return {"messages": [type("Message", (), {"content": "assistant"})()]}
+
+    inputs = iter(["可\udce4查看今天的\udce9\udc85配送单信息", "quit"])
+
+    with patch.object(main, "resolve_repo_root", return_value=tmp_path), patch.object(
+        main, "resolve_app_dir", return_value=app_dir
+    ), patch.object(main, "build_agent", return_value=FakeAgent()), patch.object(
+        main, "get_all_skills", return_value={str(skills_dir / "SKILL.md"): "demo"}
+    ), patch.object(main, "invoke_agent", side_effect=fake_invoke_agent), patch(
+        "builtins.input", side_effect=lambda _: next(inputs)
+    ):
+        assert await main.run_repl("demo") == 0
+
+    assert received_messages[0] == [
+        {"role": "user", "content": "可?查看今天的??配送单信息"}
+    ]
 
 
 @pytest.mark.anyio

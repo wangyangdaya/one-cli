@@ -12,9 +12,10 @@ package integration_test
 // TestGenerateExamplesRustMCP generates a Rust CLI from examples/quark.json into
 // tmp/quark-rust and verifies `cargo build` succeeds.
 //
-// All tests write output under tmp/ (relative to the workspace root) so the
-// artefacts survive the test run for manual inspection.  The directory is
-// created if it does not exist and is NOT cleaned up automatically.
+// These tests write output under tmp/ (relative to the workspace root) so the
+// artefacts survive the test run for manual inspection. They are opt-in via
+// OPENCLI_RUN_EXAMPLE_GENERATION=1 to avoid polluting tmp/ during normal test
+// runs.
 
 import (
 	"os"
@@ -26,6 +27,13 @@ import (
 
 	"one-cli/internal/app"
 )
+
+func requireExampleGeneration(t *testing.T) {
+	t.Helper()
+	if os.Getenv("OPENCLI_RUN_EXAMPLE_GENERATION") != "1" {
+		t.Skip("set OPENCLI_RUN_EXAMPLE_GENERATION=1 to generate example projects under tmp/")
+	}
+}
 
 // workspaceRoot returns the repository root (two levels above tests/integration).
 func workspaceRoot(t *testing.T) string {
@@ -81,6 +89,7 @@ func runBinary(t *testing.T, binary string, args ...string) (string, error) {
 // ── Go + OpenAPI ──────────────────────────────────────────────────────────────
 
 func TestGenerateExamplesGoOpenAPI(t *testing.T) {
+	requireExampleGeneration(t)
 	root := workspaceRoot(t)
 	outDir := tmpDir(t, "openapi-go")
 
@@ -134,6 +143,7 @@ func TestGenerateExamplesGoOpenAPI(t *testing.T) {
 // ── Go + MCP (quark.json) ─────────────────────────────────────────────────────
 
 func TestGenerateExamplesGoMCP(t *testing.T) {
+	requireExampleGeneration(t)
 	root := workspaceRoot(t)
 	outDir := tmpDir(t, "quark-go")
 
@@ -175,6 +185,7 @@ func TestGenerateExamplesGoMCP(t *testing.T) {
 // ── Rust + OpenAPI ────────────────────────────────────────────────────────────
 
 func TestGenerateExamplesRustOpenAPI(t *testing.T) {
+	requireExampleGeneration(t)
 	if _, err := exec.LookPath("cargo"); err != nil {
 		t.Skip("cargo not installed")
 	}
@@ -262,6 +273,7 @@ func TestGenerateExamplesRustOpenAPI(t *testing.T) {
 }
 
 func TestGenerateExamplesRustLeaveMakeupAvoidsEmptyBodyMutability(t *testing.T) {
+	requireExampleGeneration(t)
 	if _, err := exec.LookPath("cargo"); err != nil {
 		t.Skip("cargo not installed")
 	}
@@ -297,6 +309,7 @@ func TestGenerateExamplesRustLeaveMakeupAvoidsEmptyBodyMutability(t *testing.T) 
 // ── Rust + MCP (quark.json) ───────────────────────────────────────────────────
 
 func TestGenerateExamplesRustMCP(t *testing.T) {
+	requireExampleGeneration(t)
 	if _, err := exec.LookPath("cargo"); err != nil {
 		t.Skip("cargo not installed")
 	}

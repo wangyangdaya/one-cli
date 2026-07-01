@@ -10,6 +10,7 @@ type Config struct {
 type AppConfig struct {
 	Binary      string `yaml:"binary"`
 	RootCommand string `yaml:"root_command"`
+	Version     string `yaml:"version"`
 }
 
 type NamingConfig struct {

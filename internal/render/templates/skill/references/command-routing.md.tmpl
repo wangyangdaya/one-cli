@@ -1,0 +1,42 @@
+# Command Routing: {{ .Group.Name }}
+
+Use this file to teach the agent how user language maps to real CLI commands.
+
+Generated API descriptions can list commands, but they cannot know which command matches a business phrase such as "my pending items", "close this case", or "clear current records". Fill the MANUAL sections before treating routing as production-ready.
+
+## Generated Commands
+
+| User intent | Recommended command | Avoid | Notes |
+| --- | --- | --- | --- |
+{{- range .Group.Operations }}
+| <!-- MANUAL: add common user phrasing for {{ .CommandName }} --> | `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}` | <!-- MANUAL: similar wrong command, if any --> | {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }} |
+{{- end }}
+
+## Selection Rules
+
+<!-- MANUAL: Add rules for choosing between similar commands. Examples:
+- Use `list` when the user gives a scope or owner but no keyword.
+- Use `search` when the user gives a real keyword, name, code, or phrase.
+- Use `get` only when a stable ID, URL, or unique lookup result is available.
+- Use `update`, `delete`, or status-changing commands only after confirming the target.
+-->
+
+## Terms And Synonyms
+
+| User term | Meaning | Command hint |
+| --- | --- | --- |
+| <!-- MANUAL: business term --> | <!-- MANUAL: canonical meaning --> | <!-- MANUAL: command or rule --> |
+
+## Cross-Skill Boundaries
+
+| User asks for | Use this skill? | Route to | Reason |
+| --- | --- | --- | --- |
+| <!-- MANUAL: out-of-scope intent --> | no | <!-- MANUAL: other skill or process --> | <!-- MANUAL: why --> |
+
+## Missing Information Rules
+
+<!-- MANUAL: Define what to ask the user when required inputs are missing. Examples:
+- If no ID is present, list or search first instead of inventing one.
+- If multiple matches are found, ask the user to choose.
+- If the operation changes data, show the target and action before executing.
+-->

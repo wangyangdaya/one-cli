@@ -9,6 +9,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi2"
 	"github.com/getkin/kin-openapi/openapi2conv"
 	"github.com/getkin/kin-openapi/openapi3"
+	yamljson "github.com/oasdiff/yaml"
 	"gopkg.in/yaml.v3"
 )
 
@@ -71,9 +72,10 @@ func detectVersion(data []byte) (string, error) {
 func loadAsOpenAPI3(data []byte, version string) (*openapi3.T, error) {
 	if version == "2.0" {
 		var doc2 openapi2.T
-		if err := yaml.Unmarshal(data, &doc2); err != nil {
+		if err := yamljson.Unmarshal(data, &doc2); err != nil {
 			return nil, fmt.Errorf("decode swagger 2.0: %w", err)
 		}
+		ensureSwagger2DefinitionRefs(&doc2)
 		doc3, err := openapi2conv.ToV3(&doc2)
 		if err != nil {
 			return nil, fmt.Errorf("convert swagger 2.0 to openapi 3.0: %w", err)
@@ -87,6 +89,103 @@ func loadAsOpenAPI3(data []byte, version string) (*openapi3.T, error) {
 		return nil, fmt.Errorf("decode openapi: %w", err)
 	}
 	return doc, nil
+}
+
+func ensureSwagger2DefinitionRefs(doc *openapi2.T) {
+	if doc == nil {
+		return
+	}
+	refs := make(map[string]struct{})
+	for _, schema := range doc.Definitions {
+		collectSwagger2SchemaRefs(schema, refs)
+	}
+	for _, param := range doc.Parameters {
+		collectSwagger2ParameterRefs(param, refs)
+	}
+	for _, response := range doc.Responses {
+		collectSwagger2ResponseRefs(response, refs)
+	}
+	for _, pathItem := range doc.Paths {
+		if pathItem == nil {
+			continue
+		}
+		for _, param := range pathItem.Parameters {
+			collectSwagger2ParameterRefs(param, refs)
+		}
+		for _, op := range pathItem.Operations() {
+			if op == nil {
+				continue
+			}
+			for _, param := range op.Parameters {
+				collectSwagger2ParameterRefs(param, refs)
+			}
+			for _, response := range op.Responses {
+				collectSwagger2ResponseRefs(response, refs)
+			}
+		}
+	}
+	if len(refs) == 0 {
+		return
+	}
+	if doc.Definitions == nil {
+		doc.Definitions = make(map[string]*openapi2.SchemaRef)
+	}
+	for name := range refs {
+		if _, ok := doc.Definitions[name]; ok {
+			continue
+		}
+		doc.Definitions[name] = &openapi2.SchemaRef{
+			Value: &openapi2.Schema{Type: &openapi3.Types{"object"}},
+		}
+	}
+}
+
+func collectSwagger2ParameterRefs(param *openapi2.Parameter, refs map[string]struct{}) {
+	if param == nil {
+		return
+	}
+	collectSwagger2SchemaRefs(param.Schema, refs)
+	collectSwagger2SchemaRefs(param.Items, refs)
+}
+
+func collectSwagger2ResponseRefs(response *openapi2.Response, refs map[string]struct{}) {
+	if response == nil {
+		return
+	}
+	collectSwagger2DefinitionRef(response.Ref, refs)
+	collectSwagger2SchemaRefs(response.Schema, refs)
+	for _, header := range response.Headers {
+		if header != nil {
+			collectSwagger2ParameterRefs(&header.Parameter, refs)
+		}
+	}
+}
+
+func collectSwagger2SchemaRefs(ref *openapi2.SchemaRef, refs map[string]struct{}) {
+	if ref == nil {
+		return
+	}
+	collectSwagger2DefinitionRef(ref.Ref, refs)
+	if ref.Value == nil {
+		return
+	}
+	schema := ref.Value
+	for _, child := range schema.AllOf {
+		collectSwagger2SchemaRefs(child, refs)
+	}
+	collectSwagger2SchemaRefs(schema.Not, refs)
+	collectSwagger2SchemaRefs(schema.Items, refs)
+	for _, child := range schema.Properties {
+		collectSwagger2SchemaRefs(child, refs)
+	}
+}
+
+func collectSwagger2DefinitionRef(ref string, refs map[string]struct{}) {
+	name, ok := strings.CutPrefix(strings.TrimSpace(ref), "#/definitions/")
+	if !ok || strings.TrimSpace(name) == "" {
+		return
+	}
+	refs[name] = struct{}{}
 }
 
 // convertDocument converts an openapi3.T into our internal Document model.
@@ -221,9 +320,50 @@ func convertRequestBody(body *openapi3.RequestBodyRef) RequestBody {
 
 	if mediaType, ok := content["application/json"]; ok && mediaType != nil && mediaType.Schema != nil && mediaType.Schema.Value != nil {
 		rb.HasJSONSchema = true
+		rb.JSONSchemaFields = collectJSONSchemaFields(mediaType.Schema.Value)
 		rb.IsSimpleJSON, rb.JSONFields = classifySimpleJSON(mediaType.Schema.Value)
 	}
 	return rb
+}
+
+func collectJSONSchemaFields(schema *openapi3.Schema) []BodyField {
+	if !schemaIsObject(schema) || len(schema.OneOf) > 0 || len(schema.AnyOf) > 0 {
+		return nil
+	}
+
+	var properties openapi3.Schemas
+	var required []string
+	if len(schema.AllOf) > 0 {
+		properties, required = flattenAllOf(schema)
+	} else {
+		properties = schema.Properties
+		required = schema.Required
+	}
+	if len(properties) == 0 {
+		return nil
+	}
+
+	requiredSet := make(map[string]bool, len(required))
+	for _, name := range required {
+		requiredSet[strings.TrimSpace(name)] = true
+	}
+
+	keys := sortedKeys(properties)
+	fields := make([]BodyField, 0, len(keys))
+	for _, key := range keys {
+		propRef := properties[key]
+		if propRef == nil || propRef.Value == nil {
+			continue
+		}
+		prop := propRef.Value
+		fields = append(fields, BodyField{
+			Name:        strings.TrimSpace(key),
+			Description: strings.TrimSpace(prop.Description),
+			Required:    requiredSet[strings.TrimSpace(key)],
+			Type:        schemaType(prop),
+		})
+	}
+	return fields
 }
 
 // flattenAllOf merges all sub-schemas in an allOf array into a single set of

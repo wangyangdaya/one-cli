@@ -1,17 +1,37 @@
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 use crate::commands;
 use crate::types::AppResult;
 
 #[derive(Parser)]
-#[command(name = "{{ .App.Name }}", about = "{{ .App.Name }} CLI")]
+#[command(
+    name = "{{ .App.Name }}",
+    about = "{{ .App.Name }} CLI",
+    long_about = r#"{{ .App.Name }} CLI
+
+USAGE:
+  {{ .App.Name }} [options] [command]
+
+EXAMPLES:
+{{- range $group := .App.Groups }}
+{{- with index $group.Operations 0 }}
+  {{ $.App.Name }} {{ $group.Name }} {{ .CommandName }}
+{{- end }}
+{{- end }}"#,
+    after_help = "More help: {{ .App.Name }} <command> --help",
+    disable_version_flag = true
+)]
 struct Cli {
+    /// Print version information
+    #[arg(long)]
+    version: bool,
+
     /// Print HTTP request and response trace logs
     #[arg(long)]
     trace: bool,
 
     #[command(subcommand)]
-    command: GroupCommand,
+    command: Option<GroupCommand>,
 }
 
 #[derive(Subcommand)]
@@ -26,10 +46,24 @@ enum GroupCommand {
 
 pub async fn run() -> AppResult<()> {
     let cli = Cli::parse();
+    if cli.version {
+        println!("{{ .App.Name }} version {}", version());
+        return Ok(());
+    }
+
     crate::trace::set_enabled(cli.trace);
     match cli.command {
 {{- range .App.Groups }}
-        GroupCommand::{{ .Name | pascal }} { command } => command.run().await,
+        Some(GroupCommand::{{ .Name | pascal }} { command }) => command.run().await,
 {{- end }}
+        None => {
+            Cli::command().print_help().map_err(|err| err.to_string())?;
+            println!();
+            Ok(())
+        }
     }
+}
+
+fn version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
 }

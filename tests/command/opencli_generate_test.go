@@ -1,6 +1,7 @@
 package command_test
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -88,6 +89,67 @@ func TestGenerateCommandAcceptsRustTargetWithOpenAPI(t *testing.T) {
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute rust generate: %v", err)
+	}
+}
+
+func TestGenerateCommandAcceptsAppVersionFlag(t *testing.T) {
+	dir := t.TempDir()
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--target", "rust",
+		"--input", filepath.Join("..", "..", "examples", "petstore.yaml"),
+		"--output", dir,
+		"--module", "petcli",
+		"--app", "petcli",
+		"--app-version", "0.0.1",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute rust generate: %v", err)
+	}
+
+	cargo, err := os.ReadFile(filepath.Join(dir, "Cargo.toml"))
+	if err != nil {
+		t.Fatalf("read Cargo.toml: %v", err)
+	}
+	if !strings.Contains(string(cargo), `version = "0.0.1"`) {
+		t.Fatalf("generated Cargo.toml missing app version:\n%s", cargo)
+	}
+}
+
+func TestGenerateCommandAppVersionFlagOverridesConfig(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "opencli.yaml")
+	if err := os.WriteFile(configPath, []byte(`app:
+  version: 0.0.1
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	outDir := filepath.Join(dir, "out")
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--target", "rust",
+		"--input", filepath.Join("..", "..", "examples", "petstore.yaml"),
+		"--output", outDir,
+		"--module", "petcli",
+		"--app", "petcli",
+		"--config", configPath,
+		"--app-version", "0.0.2",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute rust generate: %v", err)
+	}
+
+	cargo, err := os.ReadFile(filepath.Join(outDir, "Cargo.toml"))
+	if err != nil {
+		t.Fatalf("read Cargo.toml: %v", err)
+	}
+	if !strings.Contains(string(cargo), `version = "0.0.2"`) {
+		t.Fatalf("generated Cargo.toml did not prefer flag version:\n%s", cargo)
 	}
 }
 

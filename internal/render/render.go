@@ -57,12 +57,16 @@ func renderTemplate(name string, data any) ([]byte, error) {
 			"operationHasHeaderParams": operationHasHeaderParams,
 			"operationHasPathParams":   operationHasPathParams,
 			"operationHasQueryParams":  operationHasQueryParams,
+			"goAppVersion":             goAppVersion,
+			"rustAppVersion":           rustAppVersion,
 			"rustFieldName":            rustFieldName,
 			"rustModuleName":           rustModuleName,
 			"rustType":                 rustType,
 			"stringMapLiteral":         stringMapLiteral,
 			"stringSliceLiteral":       stringSliceLiteral,
 			"exampleValue":             exampleValue,
+			"exampleJSONFields":        exampleJSONFields,
+			"demoRequestJSON":          demoRequestJSON,
 			"operationIsWriteMethod":   operationIsWriteMethod,
 			"hasOptionalFields":        hasOptionalFields,
 			"upper":                    strings.ToUpper,
@@ -197,6 +201,20 @@ func appHasAnyMCP(app model.App) bool {
 	return appHasMCPHTTP(app) || appHasMCPStdio(app)
 }
 
+func goAppVersion(app model.App) string {
+	if version := strings.TrimSpace(app.Version); version != "" {
+		return version
+	}
+	return "dev"
+}
+
+func rustAppVersion(app model.App) string {
+	if version := strings.TrimSpace(app.Version); version != "" {
+		return version
+	}
+	return "0.1.0"
+}
+
 func operationHasParamsIn(operation model.Operation, location string) bool {
 	for _, parameter := range operation.Parameters {
 		if strings.TrimSpace(parameter.In) == location {
@@ -299,6 +317,42 @@ func exampleValue(fieldType, fieldName string) string {
 
 	// Default
 	return "value"
+}
+
+func exampleJSONFields(fields []model.BodyField) string {
+	if len(fields) == 0 {
+		return `{"field": "value"}`
+	}
+	parts := make([]string, 0, len(fields))
+	for _, field := range fields {
+		name := strings.TrimSpace(field.Name)
+		if name == "" {
+			continue
+		}
+		value := exampleValue(field.Type, field.Name)
+		switch strings.TrimSpace(strings.ToLower(field.Type)) {
+		case "integer", "number", "boolean":
+			parts = append(parts, fmt.Sprintf("%q: %s", name, value))
+		default:
+			parts = append(parts, fmt.Sprintf("%q: %q", name, value))
+		}
+	}
+	if len(parts) == 0 {
+		return `{"field": "value"}`
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+func demoRequestJSON(group model.Group) string {
+	for _, operation := range group.Operations {
+		if len(operation.BodySchemaFields) > 0 {
+			return exampleJSONFields(operation.BodySchemaFields)
+		}
+		if len(operation.BodyFields) > 0 {
+			return exampleJSONFields(operation.BodyFields)
+		}
+	}
+	return `{"demo": true}`
 }
 
 func operationIsWriteMethod(operation model.Operation) bool {

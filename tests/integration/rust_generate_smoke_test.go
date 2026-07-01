@@ -24,6 +24,11 @@ func TestGenerateRustOpenAPISmoke(t *testing.T) {
 		"Cargo.toml",
 		"README.md",
 		"skills/pet/SKILL.md",
+		"skills/pet/README.md",
+		"skills/pet/assets/demo-request.json",
+		"skills/pet/references/command-routing.md",
+		"skills/pet/references/workflows.md",
+		"skills/pet/references/production-checklist.md",
 		"src/main.rs",
 		"src/cli.rs",
 		"src/client.rs",
@@ -55,6 +60,100 @@ func TestGenerateRustOpenAPISmoke(t *testing.T) {
 	}
 
 	tryCargoBuild(t, dir)
+}
+
+func TestGenerateRustHTTPTraceIncludesQueryAndHeaders(t *testing.T) {
+	dir := t.TempDir()
+	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "petstore.yaml"), "", dir, "petcli", "petcli", "", "rust"); err != nil {
+		t.Fatalf("run rust generate: %v", err)
+	}
+
+	clientContent, err := os.ReadFile(filepath.Join(dir, "src", "client.rs"))
+	if err != nil {
+		t.Fatalf("read generated client: %v", err)
+	}
+	clientText := string(clientContent)
+
+	for _, want := range []string{
+		"let query_preview = preview_pairs(&query);",
+		"let headers_preview = preview_pairs(&headers);",
+		"[opencli][http] request\\n  method: {method}\\n  url: {url}\\n  query: {query_preview}\\n  headers: {headers_preview}\\n  body: {}",
+	} {
+		if !strings.Contains(clientText, want) {
+			t.Fatalf("generated Rust client missing trace fragment %q:\n%s", want, clientText)
+		}
+	}
+}
+
+func TestGenerateRustHTTPClientUsesDefaultTimeout(t *testing.T) {
+	dir := t.TempDir()
+	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "petstore.yaml"), "", dir, "petcli", "petcli", "", "rust"); err != nil {
+		t.Fatalf("run rust generate: %v", err)
+	}
+
+	clientContent, err := os.ReadFile(filepath.Join(dir, "src", "client.rs"))
+	if err != nil {
+		t.Fatalf("read generated client: %v", err)
+	}
+	clientText := string(clientContent)
+
+	for _, want := range []string{
+		"const DEFAULT_TIMEOUT_SECS: u64 = 30;",
+		"fn new_http_client() -> AppResult<reqwest::Client>",
+		".timeout(std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS))",
+		"let client = new_http_client()?;",
+	} {
+		if !strings.Contains(clientText, want) {
+			t.Fatalf("generated Rust client missing timeout fragment %q:\n%s", want, clientText)
+		}
+	}
+}
+
+func TestGenerateRustHTTPFormatsTimeoutErrors(t *testing.T) {
+	dir := t.TempDir()
+	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "petstore.yaml"), "", dir, "petcli", "petcli", "", "rust"); err != nil {
+		t.Fatalf("run rust generate: %v", err)
+	}
+
+	clientContent, err := os.ReadFile(filepath.Join(dir, "src", "client.rs"))
+	if err != nil {
+		t.Fatalf("read generated client: %v", err)
+	}
+	clientText := string(clientContent)
+
+	for _, want := range []string{
+		"let response = match req.send().await",
+		"fn format_request_error(err: reqwest::Error) -> String",
+		"if err.is_timeout()",
+		`format!("request timed out after {DEFAULT_TIMEOUT_SECS}s: {err}")`,
+	} {
+		if !strings.Contains(clientText, want) {
+			t.Fatalf("generated Rust client missing timeout error fragment %q:\n%s", want, clientText)
+		}
+	}
+}
+
+func TestGenerateRustHTTPTraceLogsRequestFailures(t *testing.T) {
+	dir := t.TempDir()
+	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "petstore.yaml"), "", dir, "petcli", "petcli", "", "rust"); err != nil {
+		t.Fatalf("run rust generate: %v", err)
+	}
+
+	clientContent, err := os.ReadFile(filepath.Join(dir, "src", "client.rs"))
+	if err != nil {
+		t.Fatalf("read generated client: %v", err)
+	}
+	clientText := string(clientContent)
+
+	for _, want := range []string{
+		"let method_label = method.as_str().to_string();",
+		"let request_url = url.to_string();",
+		`trace_log!("[opencli][http] request_failed\n  method: {method_label}\n  url: {request_url}\n  error: {message}")`,
+	} {
+		if !strings.Contains(clientText, want) {
+			t.Fatalf("generated Rust client missing request failure trace fragment %q:\n%s", want, clientText)
+		}
+	}
 }
 
 func TestGenerateRustMCPSmoke(t *testing.T) {

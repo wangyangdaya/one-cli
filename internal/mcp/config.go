@@ -114,6 +114,12 @@ func normalizeServerConfig(raw rawServerConfig) ServerConfig {
 	}
 }
 
+// expandServerConfig expands environment variables in server config values.
+// os.ExpandEnv expands both $VAR and ${VAR}; literal '$' in values will be
+// interpreted as a variable reference and replaced with the env value (or
+// empty string if unset). This is intentional for ${ENV_VAR} placeholders
+// documented in opencli.yaml; escape '$' by using '$$' when a literal '$'
+// is required.
 func expandServerConfig(server ServerConfig) ServerConfig {
 	server.Transport = os.ExpandEnv(server.Transport)
 	server.URL = os.ExpandEnv(server.URL)

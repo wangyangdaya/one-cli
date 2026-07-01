@@ -27,8 +27,9 @@ func CloneStringMap(values map[string]string) map[string]string {
 }
 
 type App struct {
-	Name   string
-	Groups []Group
+	Name    string
+	Version string
+	Groups  []Group
 }
 
 type Group struct {
@@ -45,15 +46,16 @@ type Group struct {
 }
 
 type Operation struct {
-	Method       string
-	Path         string
-	CommandName  string
-	RemoteName   string
-	Summary      string
-	BodyMode     string
-	BodyRequired bool
-	BodyFields   []BodyField
-	Parameters   []Parameter
+	Method           string
+	Path             string
+	CommandName      string
+	RemoteName       string
+	Summary          string
+	BodyMode         string
+	BodyRequired     bool
+	BodyFields       []BodyField
+	BodySchemaFields []BodyField
+	Parameters       []Parameter
 }
 
 type Parameter struct {

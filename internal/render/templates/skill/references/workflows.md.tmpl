@@ -1,0 +1,63 @@
+# Workflows: {{ .Group.Name }}
+
+Use this file for real business flows. API descriptions only expose single commands; product and engineering owners must define the multi-step process.
+
+## Workflow Template
+
+Copy this section for each high-frequency task.
+
+### <!-- MANUAL: workflow name -->
+
+- Trigger: <!-- MANUAL: user phrases that should start this workflow -->
+- Preconditions: <!-- MANUAL: auth, tenant, role, environment, required IDs -->
+- Risk: <!-- MANUAL: read-only, write, delete, bulk, irreversible -->
+
+Steps:
+
+1. <!-- MANUAL: first lookup or validation command -->
+2. <!-- MANUAL: command that performs the main action -->
+3. <!-- MANUAL: read-back or verification command -->
+
+Return to user:
+
+- <!-- MANUAL: fields, URLs, status, next action -->
+
+Recovery:
+
+- <!-- MANUAL: empty result, permission denied, invalid parameter, duplicate target -->
+
+## Generated Command Candidates
+
+### Read Or Lookup Commands
+
+{{- range .Group.Operations }}
+{{- if not (operationIsWriteMethod .) }}
+- `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}` — {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}
+{{- end }}
+{{- end }}
+
+### Write Or Risky Commands
+
+{{- range .Group.Operations }}
+{{- if operationIsWriteMethod . }}
+- `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}` — {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}
+{{- end }}
+{{- end }}
+
+## Safety Pattern For Writes
+
+Use this pattern for create, update, delete, status-change, clear, reset, import, export, and bulk operations.
+
+1. Identify the target with a read command when possible.
+2. Show the user the target ID/name and intended action.
+3. Ask for explicit confirmation unless the user already gave clear permission in the current turn.
+4. Execute the command.
+5. Read back the changed resource or show the command result fields that prove success.
+
+## Top Workflows To Fill
+
+| Priority | Workflow | Commands | Owner | Status |
+| --- | --- | --- | --- | --- |
+| P0 | <!-- MANUAL: most common task --> | <!-- MANUAL: command sequence --> | <!-- MANUAL --> | TODO |
+| P1 | <!-- MANUAL: second task --> | <!-- MANUAL: command sequence --> | <!-- MANUAL --> | TODO |
+| P2 | <!-- MANUAL: third task --> | <!-- MANUAL: command sequence --> | <!-- MANUAL --> | TODO |

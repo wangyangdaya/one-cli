@@ -96,6 +96,11 @@ func TestGenerateFromMCPConfig(t *testing.T) {
 		"internal/search/command.go",
 		"internal/search/service.go",
 		"skills/search/SKILL.md",
+		"skills/search/README.md",
+		"skills/search/assets/demo-request.json",
+		"skills/search/references/command-routing.md",
+		"skills/search/references/workflows.md",
+		"skills/search/references/production-checklist.md",
 		"README.md",
 	} {
 		if _, err := os.Stat(filepath.Join(outDir, rel)); err != nil {

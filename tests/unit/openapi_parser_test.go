@@ -367,6 +367,133 @@ paths:
 	}
 }
 
+func TestParseDocumentComplexObjectBodyKeepsJSONFieldDescriptions(t *testing.T) {
+	doc, err := openapi.Parse([]byte(`
+swagger: "2.0"
+info:
+  title: Complex Body API
+  version: "1.0"
+consumes:
+  - application/json
+paths:
+  /clear:
+    post:
+      operationId: clear
+      parameters:
+        - in: body
+          name: payload
+          required: true
+          schema:
+            $ref: "#/definitions/ClearPayload"
+      responses:
+        "200":
+          description: ok
+definitions:
+  ClearPayload:
+    type: object
+    properties:
+      deliveryRecId:
+        type: integer
+        description: 目的地ID
+      deliveryRecNo:
+        type: string
+        description: 目的地编号
+      deliverySendId:
+        type: integer
+        description: 发运地ID
+      deliverySendNo:
+        type: string
+        description: 发运地编号
+      manualCreateType:
+        type: string
+        description: 手工创建方式
+      reqQty:
+        type: integer
+        description: 需求数量
+`))
+	if err != nil {
+		t.Fatalf("parse swagger 2.0 complex body: %v", err)
+	}
+
+	body := doc.Operations[0].RequestBody
+	if !body.HasJSONSchema {
+		t.Fatal("expected body to expose JSON schema metadata")
+	}
+	if body.IsSimpleJSON {
+		t.Fatal("expected body with more than simple JSON field limit to stay file-or-data")
+	}
+	if len(body.JSONFields) != 0 {
+		t.Fatalf("complex body should not expose CLI JSON fields: %+v", body.JSONFields)
+	}
+	if len(body.JSONSchemaFields) != 6 {
+		t.Fatalf("JSONSchemaFields = %d want 6", len(body.JSONSchemaFields))
+	}
+	if body.JSONSchemaFields[0].Name != "deliveryRecId" || body.JSONSchemaFields[0].Description != "目的地ID" || body.JSONSchemaFields[0].Type != "integer" {
+		t.Fatalf("unexpected first field: %+v", body.JSONSchemaFields[0])
+	}
+}
+
+func TestParseOpenAPI3ComplexObjectBodyKeepsJSONFieldDescriptions(t *testing.T) {
+	doc, err := openapi.Parse([]byte(`
+openapi: 3.0.0
+info:
+  title: Complex Body API
+  version: "1.0"
+paths:
+  /clear:
+    post:
+      operationId: clear
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deliveryRecId:
+                  type: integer
+                  description: 目的地ID
+                deliveryRecNo:
+                  type: string
+                  description: 目的地编号
+                deliverySendId:
+                  type: integer
+                  description: 发运地ID
+                deliverySendNo:
+                  type: string
+                  description: 发运地编号
+                manualCreateType:
+                  type: string
+                  description: 手工创建方式
+                reqQty:
+                  type: integer
+                  description: 需求数量
+      responses:
+        "200":
+          description: ok
+`))
+	if err != nil {
+		t.Fatalf("parse openapi 3.0 complex body: %v", err)
+	}
+
+	body := doc.Operations[0].RequestBody
+	if !body.HasJSONSchema {
+		t.Fatal("expected body to expose JSON schema metadata")
+	}
+	if body.IsSimpleJSON {
+		t.Fatal("expected body with more than simple JSON field limit to stay file-or-data")
+	}
+	if len(body.JSONFields) != 0 {
+		t.Fatalf("complex body should not expose CLI JSON fields: %+v", body.JSONFields)
+	}
+	if len(body.JSONSchemaFields) != 6 {
+		t.Fatalf("JSONSchemaFields = %d want 6", len(body.JSONSchemaFields))
+	}
+	if body.JSONSchemaFields[0].Name != "deliveryRecId" || body.JSONSchemaFields[0].Description != "目的地ID" || body.JSONSchemaFields[0].Type != "integer" {
+		t.Fatalf("unexpected first field: %+v", body.JSONSchemaFields[0])
+	}
+}
+
 func TestParseDocumentAllOfWithRefResolvesBeforeMerging(t *testing.T) {
 	doc, err := openapi.Parse([]byte(`
 openapi: 3.0.0
@@ -678,6 +805,82 @@ parameters:
 	}
 	if op.Parameters[0].In != "query" {
 		t.Fatalf("param in = %q want query", op.Parameters[0].In)
+	}
+}
+
+func TestParseDocumentSwagger20TypedParametersParse(t *testing.T) {
+	doc, err := openapi.Parse([]byte(`{
+  "swagger": "2.0",
+  "info": {
+    "title": "Swagger Typed Param API",
+    "version": "1.0"
+  },
+  "paths": {
+    "/users/{id}": {
+      "get": {
+        "operationId": "getUser",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    }
+  }
+}`))
+	if err != nil {
+		t.Fatalf("parse swagger 2.0 typed parameter: %v", err)
+	}
+
+	if len(doc.Operations) != 1 {
+		t.Fatalf("operations = %d want 1", len(doc.Operations))
+	}
+	if got := doc.Operations[0].Parameters[0].Name; got != "id" {
+		t.Fatalf("param name = %q want id", got)
+	}
+}
+
+func TestParseDocumentSwagger20MissingResponseDefinitionRefDoesNotBlockOperations(t *testing.T) {
+	doc, err := openapi.Parse([]byte(`{
+  "swagger": "2.0",
+  "info": {
+    "title": "Swagger Missing Response Ref API",
+    "version": "1.0"
+  },
+  "paths": {
+    "/users": {
+      "get": {
+        "operationId": "listUsers",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "schema": {
+              "$ref": "#/definitions/PageDTO"
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {}
+}`))
+	if err != nil {
+		t.Fatalf("parse swagger 2.0 missing response definition ref: %v", err)
+	}
+
+	if len(doc.Operations) != 1 {
+		t.Fatalf("operations = %d want 1", len(doc.Operations))
+	}
+	if got := doc.Operations[0].OperationID; got != "listUsers" {
+		t.Fatalf("operationId = %q want listUsers", got)
 	}
 }
 

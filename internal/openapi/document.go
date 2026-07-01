@@ -37,11 +37,12 @@ type Parameter struct {
 }
 
 type RequestBody struct {
-	Required      bool
-	ContentTypes  []string
-	HasJSONSchema bool
-	IsSimpleJSON  bool
-	JSONFields    []BodyField
+	Required         bool
+	ContentTypes     []string
+	HasJSONSchema    bool
+	IsSimpleJSON     bool
+	JSONFields       []BodyField
+	JSONSchemaFields []BodyField
 }
 
 type BodyField struct {

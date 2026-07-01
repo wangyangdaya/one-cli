@@ -59,7 +59,8 @@ make build
   --input ./examples/petstore.yaml \
   --output ./my-petcli \
   --module github.com/myorg/my-petcli \
-  --app petcli
+  --app petcli \
+  --app-version 0.0.1
 
 # 3. 直接运行生成的 CLI
 cd my-petcli
@@ -69,9 +70,9 @@ cd my-petcli
 # 4. 如需分发，编译为真实二进制
 # 生成后的 bin/petcli 是启动脚本；下面会用编译产物覆盖它
 go build -o bin/petcli ./cmd/petcli
-./bin/petcli --help
+./bin/petcli --version
 
-# 5. 按目标平台生成不同二进制
+# 5. 按目标平台生成不同二进制；版本来自生成时的 --app-version
 mkdir -p dist/darwin-arm64 dist/linux-amd64 dist/windows-amd64
 GOOS=darwin GOARCH=arm64 go build -o dist/darwin-arm64/petcli ./cmd/petcli
 GOOS=linux GOARCH=amd64 go build -o dist/linux-amd64/petcli ./cmd/petcli
@@ -86,7 +87,8 @@ Rust + OpenAPI 生成示例：
   --input ./examples/petstore.yaml \
   --output ./my-petcli-rs \
   --module petcli \
-  --app petcli
+  --app petcli \
+  --app-version 0.0.1
 
 cd my-petcli-rs
 
@@ -95,6 +97,9 @@ cargo build
 
 # 发布构建
 cargo build --release
+
+# Rust CLI 的 --version 来自 Cargo.toml；--app-version 会写入 Cargo.toml
+target/release/petcli --version
 
 # 安装额外 target 后，可按目标平台构建
 rustup target add aarch64-apple-darwin x86_64-unknown-linux-gnu x86_64-pc-windows-msvc
@@ -170,6 +175,7 @@ opencli generate \
   --output ./my-cli \
   --module github.com/myorg/my-cli \
   --app mycli \
+  --app-version 0.0.1 \
   --config ./opencli.yaml  # 可选
 ```
 
@@ -181,7 +187,8 @@ opencli generate \
   --input ./api.yaml \
   --output ./my-cli-rs \
   --module mycli \
-  --app mycli
+  --app mycli \
+  --app-version 0.0.1
 ```
 
 MCP + Go：
@@ -215,9 +222,12 @@ opencli generate \
 | `--output` | ✅ | 生成项目的输出目录 |
 | `--module` | ✅ | Go target 下是 Go module 路径；Rust target 下用作 Cargo package 名称来源 |
 | `--app` | ✅ | CLI 二进制名称和根命令名 |
+| `--app-version` | ❌ | 生成出来的 CLI 项目版本；覆盖 `opencli.yaml` 的 `app.version` |
 | `--config` | ❌ | 配置文件路径（可选） |
 
 `--input` 和 `--mcp-config` 互斥，必须且只能提供一个。
+
+`--app-version` 设置的是生成出来的 CLI 项目版本；如果同时配置了 `opencli.yaml` 的 `app.version`，命令行参数优先。
 
 推荐按下面理解参数组合：
 
@@ -294,6 +304,7 @@ opencli init
 app:
   binary: mycli
   root_command: mycli
+  version: 0.0.1
 
 naming:
   # Tag 别名：重命名命令组

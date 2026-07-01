@@ -16,10 +16,7 @@ func TestBuildGroupsOperationsAndNamesCommands(t *testing.T) {
 		},
 	}
 
-	plan, err := planner.Build(doc, configgen.Config{})
-	if err != nil {
-		t.Fatalf("build plan: %v", err)
-	}
+	plan := planner.Build(doc, configgen.Config{})
 
 	if len(plan.Groups) != 1 {
 		t.Fatalf("groups = %d want 1", len(plan.Groups))
@@ -39,6 +36,23 @@ func TestBuildGroupsOperationsAndNamesCommands(t *testing.T) {
 	}
 }
 
+func TestBuildUsesConfiguredAppVersion(t *testing.T) {
+	doc := openapi.Document{
+		Title: "Pet Store",
+		Operations: []openapi.Operation{
+			{Method: "GET", Path: "/pets", Tag: "pet", OperationID: "listPets"},
+		},
+	}
+
+	plan := planner.Build(doc, configgen.Config{
+		App: configgen.AppConfig{Version: "0.0.1"},
+	})
+
+	if plan.Version != "0.0.1" {
+		t.Fatalf("app version = %q want 0.0.1", plan.Version)
+	}
+}
+
 func TestBuildUsesTagAliasAndPathFallback(t *testing.T) {
 	doc := openapi.Document{
 		Operations: []openapi.Operation{
@@ -47,14 +61,11 @@ func TestBuildUsesTagAliasAndPathFallback(t *testing.T) {
 		},
 	}
 
-	plan, err := planner.Build(doc, configgen.Config{
+	plan := planner.Build(doc, configgen.Config{
 		Naming: configgen.NamingConfig{
 			TagAlias: map[string]string{"pet-store": "pets"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("build plan: %v", err)
-	}
 
 	if len(plan.Groups) != 2 {
 		t.Fatalf("groups = %d want 2", len(plan.Groups))
@@ -70,6 +81,29 @@ func TestBuildUsesTagAliasAndPathFallback(t *testing.T) {
 	}
 	if plan.Groups[1].Operations[0].CommandName != "post-billing-invoices" {
 		t.Fatalf("fallback command = %q want %q", plan.Groups[1].Operations[0].CommandName, "post-billing-invoices")
+	}
+}
+
+func TestBuildDerivesGroupNameFromMixedLanguageControllerTag(t *testing.T) {
+	doc := openapi.Document{
+		Operations: []openapi.Operation{
+			{
+				Method:      "POST",
+				Path:        "/mri/current/clear",
+				Tag:         "物料需求信息业务临时中间-TeMmMriCurrentController",
+				OperationID: "clearUsingPOST",
+			},
+		},
+	}
+
+	plan := planner.Build(doc, configgen.Config{})
+
+	if len(plan.Groups) != 1 {
+		t.Fatalf("groups = %d want 1", len(plan.Groups))
+	}
+	if got := plan.Groups[0].Name; got != "te-mm-mri-current" {
+		t.Fatalf("group name = %q want %q", got, "te-mm-mri-current")
+		t.Fatalf("group name = %q want %q", got, "te-mm-mri-current")
 	}
 }
 
@@ -109,14 +143,11 @@ func TestBuildChoosesBodyModeConservativelyAndHonorsOverrides(t *testing.T) {
 		},
 	}
 
-	plan, err := planner.Build(doc, configgen.Config{
+	plan := planner.Build(doc, configgen.Config{
 		Overrides: configgen.OverrideConfig{
 			BodyMode: map[string]string{"custom.create": "flags"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("build plan: %v", err)
-	}
 
 	if got := plan.Groups[0].Operations[0].BodyMode; got != "file-or-data" {
 		t.Fatalf("default body mode = %q want %q", got, "file-or-data")
@@ -159,15 +190,16 @@ func TestBuildPropagatesSimpleJSONBodyFields(t *testing.T) {
 					ContentTypes:  []string{"application/json"},
 					HasJSONSchema: true,
 					IsSimpleJSON:  false,
+					JSONSchemaFields: []openapi.BodyField{
+						{Name: "lineItems", Type: "array", Description: "order lines"},
+						{Name: "note", Type: "string", Description: "order note"},
+					},
 				},
 			},
 		},
 	}
 
-	plan, err := planner.Build(doc, configgen.Config{})
-	if err != nil {
-		t.Fatalf("build plan: %v", err)
-	}
+	plan := planner.Build(doc, configgen.Config{})
 
 	login := plan.Groups[0].Operations[0]
 	if login.BodyMode != "simple-json" {
@@ -190,6 +222,12 @@ func TestBuildPropagatesSimpleJSONBodyFields(t *testing.T) {
 	if len(order.BodyFields) != 0 {
 		t.Fatalf("complex body should not expose fields: %+v", order.BodyFields)
 	}
+	if len(order.BodySchemaFields) != 2 {
+		t.Fatalf("complex body schema fields = %d want 2", len(order.BodySchemaFields))
+	}
+	if order.BodySchemaFields[0].Name != "lineItems" || order.BodySchemaFields[0].Description != "order lines" {
+		t.Fatalf("unexpected body schema fields: %+v", order.BodySchemaFields)
+	}
 }
 
 func TestBuildUsesMCPToolNameForCLICommand(t *testing.T) {
@@ -200,15 +238,48 @@ func TestBuildUsesMCPToolNameForCLICommand(t *testing.T) {
 		},
 	}
 
-	plan, err := planner.Build(doc, configgen.Config{})
-	if err != nil {
-		t.Fatalf("build plan: %v", err)
-	}
+	plan := planner.Build(doc, configgen.Config{})
 
 	if got := plan.Groups[0].Operations[0].CommandName; got != "quark-web-search" {
 		t.Fatalf("first mcp command = %q want %q", got, "quark-web-search")
 	}
 	if got := plan.Groups[1].Operations[0].CommandName; got != "search-tool" {
 		t.Fatalf("second mcp command = %q want %q", got, "search-tool")
+	}
+}
+
+func TestBuildMakesCommandNamesIdentifierSafeAndUniquePerGroup(t *testing.T) {
+	doc := openapi.Document{
+		Operations: []openapi.Operation{
+			{Method: "POST", Path: "/jobs/do-a", Tag: "jobs", OperationID: "doNormalOrgSheetUsingPOST"},
+			{Method: "POST", Path: "/jobs/do-b", Tag: "jobs", OperationID: "doEmergeOrgSheetUsingPOST"},
+			{Method: "GET", Path: "/jobs/{id}", Tag: "jobs", OperationID: "getInfoByIdUsingGET_3"},
+			{Method: "GET", Path: "/jobs/pull", Tag: "jobs", OperationID: "getPartSupplPullUsingGET"},
+			{Method: "GET", Path: "/jobs/storage", Tag: "jobs", OperationID: "getPartSupplStorageUsingGET"},
+			{Method: "GET", Path: "/jobs/time", Tag: "jobs", OperationID: "getRecRequrieTimeUsingGET"},
+			{Method: "GET", Path: "/jobs/download-kd", Tag: "jobs", OperationID: "downloadKDMriResultUsingGET"},
+			{Method: "GET", Path: "/jobs/download-sp", Tag: "jobs", OperationID: "downloadSPMriResultUsingGET"},
+			{Method: "POST", Path: "/jobs/import-kd", Tag: "jobs", OperationID: "importKDUsingPOST"},
+		},
+	}
+
+	plan := planner.Build(doc, configgen.Config{})
+
+	group := plan.Groups[0]
+	wantCommands := []string{
+		"normal",
+		"emerge",
+		"info-by-id",
+		"pull",
+		"storage",
+		"requrie-time",
+		"kd-result",
+		"sp-result",
+		"import-kd",
+	}
+	for i, want := range wantCommands {
+		if got := group.Operations[i].CommandName; got != want {
+			t.Fatalf("command %d = %q want %q", i, got, want)
+		}
 	}
 }

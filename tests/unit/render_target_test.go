@@ -29,7 +29,7 @@ func TestRenderProjectAcceptsExplicitGoTarget(t *testing.T) {
 
 func TestRenderProjectRejectsUnknownTarget(t *testing.T) {
 	err := render.Project(t.TempDir(), "github.com/acme/one-cli", model.App{Name: "one"}, "java")
-	if err == nil || !strings.Contains(err.Error(), "unsupported render target") {
-		t.Fatalf("expected unsupported render target error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "unsupported target") {
+		t.Fatalf("expected unsupported target error, got %v", err)
 	}
 }

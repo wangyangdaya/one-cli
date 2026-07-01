@@ -68,6 +68,19 @@ func convertInputSchema(schema map[string]any) (openapi.RequestBody, error) {
 		body.IsSimpleJSON = false
 		return body, nil
 	}
+	body.JSONSchemaFields = make([]openapi.BodyField, 0, len(properties))
+	for name, rawProperty := range properties {
+		property, ok := rawProperty.(map[string]any)
+		if !ok {
+			continue
+		}
+		body.JSONSchemaFields = append(body.JSONSchemaFields, openapi.BodyField{
+			Name:        strings.TrimSpace(name),
+			Description: strings.TrimSpace(asString(property["description"])),
+			Required:    required[name],
+			Type:        strings.TrimSpace(asString(property["type"])),
+		})
+	}
 
 	if len(properties) > openapi.MaxSimpleJSONFields {
 		body.IsSimpleJSON = false
@@ -140,9 +153,27 @@ func parseToolsResult(result map[string]any) ([]Tool, error) {
 			return nil, fmt.Errorf("invalid tool payload")
 		}
 
-		schema, _ := toolMap["inputSchema"].(map[string]any)
+		rawName, hasName := toolMap["name"]
+		name, ok := rawName.(string)
+		if !ok || strings.TrimSpace(name) == "" {
+			if !hasName {
+				return nil, fmt.Errorf("tool is missing required name field")
+			}
+			return nil, fmt.Errorf("tool has invalid name: expected non-empty string")
+		}
+		name = strings.TrimSpace(name)
+
+		rawInputSchema, hasSchema := toolMap["inputSchema"]
+		var schema map[string]any
+		if hasSchema {
+			ok := false
+			schema, ok = rawInputSchema.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("tool %q has invalid inputSchema: expected object", name)
+			}
+		}
 		tools = append(tools, Tool{
-			Name:        strings.TrimSpace(asString(toolMap["name"])),
+			Name:        name,
 			Description: strings.TrimSpace(asString(toolMap["description"])),
 			InputSchema: schema,
 		})

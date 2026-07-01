@@ -6,6 +6,8 @@ use serde_json::{json, Value};
 use crate::trace::trace_log;
 use crate::types::AppResult;
 
+const DEFAULT_TIMEOUT_SECS: u64 = 30;
+
 pub async fn request(
     method: &str,
     path: &str,
@@ -19,16 +21,20 @@ pub async fn request(
     let mut url = reqwest::Url::parse(&format!("{trimmed}{path}")).map_err(|err| err.to_string())?;
     {
         let mut pairs = url.query_pairs_mut();
-        for (name, value) in query {
+        for (name, value) in &query {
             pairs.append_pair(&name, &value);
         }
     }
 
-    trace_log!("[opencli][http] request\n  method: {method}\n  url: {url}\n  body: {}",
+    let query_preview = preview_pairs(&query);
+    let headers_preview = preview_pairs(&headers);
+    trace_log!("[opencli][http] request\n  method: {method}\n  url: {url}\n  query: {query_preview}\n  headers: {headers_preview}\n  body: {}",
         body.as_ref().map(|b| preview_value(b)).unwrap_or_else(|| "<empty>".into()));
 
     let method = Method::from_bytes(method.as_bytes()).map_err(|err| err.to_string())?;
-    let client = reqwest::Client::new();
+    let client = new_http_client()?;
+    let method_label = method.as_str().to_string();
+    let request_url = url.to_string();
     let mut req = client.request(method, url);
     for (name, value) in &headers {
         req = req.header(name, value);
@@ -37,7 +43,14 @@ pub async fn request(
         req = req.json(body);
     }
 
-    let response = req.send().await.map_err(|err| err.to_string())?;
+    let response = match req.send().await {
+        Ok(response) => response,
+        Err(err) => {
+            let message = format_request_error(err);
+            trace_log!("[opencli][http] request_failed\n  method: {method_label}\n  url: {request_url}\n  error: {message}");
+            return Err(message);
+        }
+    };
     let status = response.status();
     let text = response.text().await.map_err(|err| err.to_string())?;
 
@@ -80,6 +93,32 @@ fn preview_value(v: &Value) -> String {
     if s.len() > 2000 { format!("{}...(truncated)", &s[..2000]) } else { s }
 }
 
+fn preview_pairs(pairs: &[(String, String)]) -> String {
+    if pairs.is_empty() {
+        return "<empty>".into();
+    }
+
+    let mut payload = serde_json::Map::new();
+    for (name, value) in pairs {
+        payload.insert(name.clone(), Value::String(value.clone()));
+    }
+    preview_value(&Value::Object(payload))
+}
+
+fn new_http_client() -> AppResult<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS))
+        .build()
+        .map_err(|err| err.to_string())
+}
+
+fn format_request_error(err: reqwest::Error) -> String {
+    if err.is_timeout() {
+        return format!("request timed out after {DEFAULT_TIMEOUT_SECS}s: {err}");
+    }
+    err.to_string()
+}
+
 {{- if appHasAnyMCP .App }}
 
 pub async fn call_mcp_tool(
@@ -95,7 +134,7 @@ pub async fn call_mcp_tool(
 
     trace_log!("[opencli][mcp-http] initialize\n  url: {request_url}");
 
-    let client = reqwest::Client::new();
+    let client = new_http_client()?;
     let initialize = json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -150,11 +189,17 @@ async fn send_mcp_request(
         }
     }
 
-    let response = request
+    let response = match request
         .body(payload.to_string())
         .send()
-        .await
-        .map_err(|err| err.to_string())?;
+        .await {
+        Ok(response) => response,
+        Err(err) => {
+            let message = format_request_error(err);
+            trace_log!("[opencli][mcp-http] request_failed\n  url: {request_url}\n  error: {message}");
+            return Err(message);
+        }
+    };
     let status = response.status();
     let response_session = response
         .headers()

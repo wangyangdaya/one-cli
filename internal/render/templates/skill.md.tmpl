@@ -1,121 +1,225 @@
 ---
 name: {{ .Group.Name }}
-description: {{- if .Group.Description }} {{ .Group.Description }}{{- else }} Commands for the {{ .Group.Name }} group in {{ .App.Name }}{{- end }}
+version: 1.0.0
+description: "{{- if .Group.Description }}{{ .Group.Description }}{{- else }}{{ .Group.Name }} commands for {{ .App.Name }}. {{ range $i, $op := .Group.Operations }}{{ if $i }}, {{ end }}{{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}{{ end }}.{{- end }}"
+metadata:
+  requires:
+    bins: ["{{ .App.Name }}"]
+  cliHelp: "{{ .App.Name }} {{ .Group.Name }} --help"
 ---
 
-# {{ .App.Name }} {{ .Group.Name }} Skill
-
+# {{ .Group.Name }}
 {{- if .Group.Description }}
 
 {{ .Group.Description }}
 {{- end }}
 
+This is a generated OpenCLI skill package. It contains API-derived facts and manual completion points; treat it as a productionization scaffold, not a finished business workflow.
+
+## First Steps
+
+1. Run `{{ .App.Name }} {{ .Group.Name }} --help` before choosing a command.
+2. Use [references/command-routing.md](references/command-routing.md) when multiple commands look similar.
+3. Use [references/workflows.md](references/workflows.md) for multi-step work; fill its MANUAL sections before relying on business flows.
+4. For write, delete, bulk, or irreversible actions, follow the safety rules below and [references/production-checklist.md](references/production-checklist.md).
+
+## Package Files
+
+| File | Purpose |
+| --- | --- |
+| [README.md](README.md) | Explains how to edit, validate, and hand off this generated skill package. |
+| [SKILL.md](SKILL.md) | Agent entrypoint: trigger rules, prerequisites, command index, examples, and safety constraints. |
+| [assets/demo-request.json](assets/demo-request.json) | Valid placeholder JSON request file for demos, `--file` examples, and manual editing. |
+| [references/command-routing.md](references/command-routing.md) | Command selection table and manual intent mapping. |
+| [references/workflows.md](references/workflows.md) | Manual business workflow slots built from the generated command set. |
+| [references/production-checklist.md](references/production-checklist.md) | Product, engineering, QA, and maintenance checklist for making the skill production-ready. |
+
+## Prerequisites
+{{- if or (groupUsesMCPHTTP .Group) (groupUsesMCPStdio .Group) }}
+{{- if groupUsesMCPHTTP .Group }}
+
+- Endpoint: `{{ .Group.Endpoint }}`
+{{- if .Group.Headers }}
+{{- range $key, $val := .Group.Headers }}
+- Header `{{ $key }}` must be configured
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if groupUsesMCPStdio .Group }}
+
+- Command `{{ .Group.Command }}` must be available in PATH
+{{- if .Group.Env }}
+{{- range $key, $val := .Group.Env }}
+- Environment variable `{{ $key }}` {{ if $val }}(default: `{{ $val }}`){{ else }}must be set{{ end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- else }}
+
+- Environment variable `{{ upper .App.Name }}_BASE_URL`: API base URL
+- Environment variable `{{ upper .App.Name }}_AUTH_TOKEN`: Authentication token
+{{- end }}
+
+<!-- MANUAL: 补充认证流程、前置命令、依赖说明等 -->
+
+## Core Concepts
+
+<!-- MANUAL: 补充领域核心概念，帮助 Agent 理解业务实体、ID、URL、状态和权限边界。示例：
+- **Entity**: 实体描述，通过 `entity_id` 唯一标识。
+- **Identity**: 说明用户身份、应用身份、租户或权限如何影响结果。
+-->
+
+## Important Notes
+
+<!-- MANUAL: 补充 Agent 必须遵守的业务规则、选择规则和安全约束。示例：
+- 不要猜 ID；缺少 ID 时先 list/search/get。
+- 删除、批量修改、状态推进等操作执行前必须确认目标和影响。
+-->
+
+## Command Routing
+
+For generated command selection details, read [references/command-routing.md](references/command-routing.md).
+
 ## Commands
 
+| Command | Description |
+|---------|-------------|
 {{- range .Group.Operations }}
-- `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}`: {{- if or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group) }} MCP tool{{ else }} {{ .Method }} {{ .Path }}{{ end }}{{ if .Summary }} - {{ .Summary }}{{ end }}
+| `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}` | {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }} |
 {{- end }}
 
-## Usage Notes
+## Common Workflows
 
+Generated APIs do not contain enough business semantics to infer real workflows. Fill [references/workflows.md](references/workflows.md), then summarize the top 3-5 workflows here.
+
+<!-- MANUAL: 补充多命令编排的常见场景。每个流程写清触发场景、前置查询、命令顺序、上一步输出字段、确认/dry-run、回读校验和最终返回字段。 -->
+
+---
 {{- range .Group.Operations }}
 
-### `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}`
-{{- if .Summary }}
+### {{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}
 
-{{ .Summary }}
-{{- end }}
-{{- if or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group) }}
+{{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }} command.{{ end }}
 
-- MCP tool: `{{ .RemoteName }}`
-{{- if groupUsesMCPHTTP $.Group }}
-- Transport: `streamable_http`
-- Endpoint: `{{ $.Group.Endpoint }}`
-{{- end }}
-{{- if groupUsesMCPStdio $.Group }}
-- Transport: `stdio`
-- Command: `{{ $.Group.Command }}{{ range $.Group.Args }} {{ . }}{{ end }}`
-{{- end }}
-{{- else }}
+<!-- MANUAL: 补充更详细的命令说明、使用场景、注意事项 -->
+{{- if operationIsWriteMethod . }}
 
-- Method: `{{ .Method }}`
-- Path: `{{ .Path }}`
-{{- end }}
-{{- if .Parameters }}
-- Parameters:
-{{- range .Parameters }}
-  - `{{ .Name }}` (`{{ .In }}`{{ if .Type }}, `{{ .Type }}`{{ end }}){{ if .Required }} required{{ else }} optional{{ end }}{{ if .Description }} - {{ .Description }}{{ end }}
-{{- end }}
-{{- end }}
-{{- if .BodyMode }}
-- Body input: `{{ .BodyMode }}`
-{{- end }}
-{{- if and (eq .BodyMode "simple-json") .BodyFields }}
-- Body fields:
-{{- $hasRequired := false }}
-{{- $hasOptional := false }}
-{{- range .BodyFields }}
-  {{- if .Required }}{{ $hasRequired = true }}{{ end }}
-  {{- if not .Required }}{{ $hasOptional = true }}{{ end }}
-{{- end }}
-{{- if $hasRequired }}
-  - Required:
-{{- range .BodyFields }}
-{{- if .Required }}
-    - `{{ .Name }}` (`{{ .Type }}`){{ if .Description }} - {{ .Description }}{{ end }}
-{{- end }}
-{{- end }}
-{{- end }}
-{{- if $hasOptional }}
-  - Optional:
-{{- range .BodyFields }}
-{{- if not .Required }}
-    - `{{ .Name }}` (`{{ .Type }}`){{ if .Description }} - {{ .Description }}{{ end }}
-{{- end }}
-{{- end }}
-{{- end }}
-{{- end }}
-{{- if and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) .BodyFields }}
-- Flags:
-{{- range .BodyFields }}
-  - `--{{ .Name }}`{{ if .Required }} required{{ else }} optional{{ end }}
-{{- end }}
-{{- end }}
-{{- if operationHasHeaderParams . }}
-- Header input: use `--header "Name: Value"` for header parameters
-{{- end }}
-{{- if and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) .BodyMode }}
-- Input mapping: simple MCP tool fields are exposed as flags; complex input falls back to `--data` / `--file`
-{{- end }}
-{{- if or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group) }}
-- CLI alias: `{{ .CommandName }}` maps to MCP tool `{{ .RemoteName }}`
+**Safety Constraints**
+
+<!-- MANUAL: 此命令为写入操作。补充执行前的确认规则。示例：
+此操作会修改数据，执行前 **必须** 确认用户意图。
+-->
 {{- end }}
 
-**Example:**
+**Examples:**
+
 ```bash
 {{- if and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) (eq .BodyMode "simple-json") }}
-{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .BodyFields }}{{ if eq .Name "query" }} \
-  --{{ .Name }} "芜湖天气"{{ else if eq .Name "context" }} \
-  --{{ .Name }} "查询今天的天气情况"{{ else if eq .Name "days" }} \
-  --{{ .Name }} "1"{{ else if .Required }} \
+# {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（必填字段）
+{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .BodyFields }}{{ if .Required }} \
   --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}
+{{- if hasOptionalFields . }}
+
+# {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（含可选字段）
+{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .BodyFields }} \
+  --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}
+{{- end }}
 {{- else }}
+# {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（必填字段）
 {{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .Parameters }}{{ if eq .In "path" }} \
-  --{{ .Name }} "<{{ .Name }}>"{{ end }}{{ end }}{{ range .Parameters }}{{ if eq .In "query" }} \
-  --{{ .Name }} "<{{ .Name }}>"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }}{{ if .Required }} \
+  --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if and (eq .In "query") .Required }} \
+  --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }}{{ if .Required }} \
   --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ end }}{{ if eq .BodyMode "file-or-data" }} \
-  --file request.json{{ end }}{{ range .Parameters }}{{ if eq .In "header" }} \
+  --file assets/demo-request.json{{ end }}{{ range .Parameters }}{{ if eq .In "header" }} \
+  --header "{{ .Name }}: <value>"{{ end }}{{ end }}
+{{- if hasOptionalFields . }}
+
+# {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（含可选字段）
+{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .Parameters }}{{ if eq .In "path" }} \
+  --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if eq .In "query" }} \
+  --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }} \
+  --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if eq .In "header" }} \
   --header "{{ .Name }}: <value>"{{ end }}{{ end }}
 {{- end }}
-```
 {{- if eq .BodyMode "file-or-data" }}
 
-**Example request.json:**
-```json
-{
-  "field": "value"
-}
+# 从 JSON 字符串传入
+{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .Parameters }}{{ if eq .In "path" }} \
+  --{{ .Name }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }} \
+  --data '{{ exampleJSONFields .BodySchemaFields }}'
+{{- end }}
+{{- end }}
 ```
+
+<!-- MANUAL: 补充更多使用场景的示例 -->
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+{{- range .Parameters }}
+{{- if eq .In "header" }}
+| `--header "{{ .Name }}: <value>"` | {{ if .Required }}yes{{ else }}no{{ end }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }} header{{ end }} ({{ .In }}) |
+{{- else }}
+| `--{{ .Name }}` | {{ if .Required }}yes{{ else }}no{{ end }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }} ({{ if .Type }}{{ .Type }}{{ else }}string{{ end }}) |
+{{- end }}
+{{- end }}
+{{- if and (eq .BodyMode "simple-json") .BodyFields }}
+{{- range .BodyFields }}
+| `--{{ .Name }}` | {{ if .Required }}yes{{ else }}no{{ end }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }} ({{ if .Type }}{{ .Type }}{{ else }}string{{ end }}) |
+{{- end }}
+{{- end }}
+{{- if eq .BodyMode "file-or-data" }}
+| `--file` | no | Read request body from JSON file, mutually exclusive with `--data` |
+| `--data` | no | Pass request body as JSON string, mutually exclusive with `--file` |
 {{- end }}
 
+{{- if and (eq .BodyMode "file-or-data") .BodySchemaFields }}
+
+**Request Body Schema:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+{{- range .BodySchemaFields }}
+| `{{ .Name }}` | {{ if .Required }}yes{{ else }}no{{ end }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }} ({{ if .Type }}{{ .Type }}{{ else }}unknown{{ end }}) |
+{{- end }}
+{{- end }}
+
+<!-- MANUAL: 补充参数的业务约束、格式要求、取值范围等 -->
+
+**Return Value:**
+
+<!-- MANUAL: 补充典型的返回值示例和关键字段说明。示例：
+```json
+{
+  "id": "123",
+  "status": "success"
+}
+```
+-->
+
+**Errors:**
+
+<!-- MANUAL: 补充常见错误码和解决建议。示例：
+| Code | Description |
+|------|-------------|
+| `400` | 缺少必填字段 |
+| `401` | 认证失败 |
+| `404` | 资源不存在 |
+-->
+{{- if or (eq .BodyMode "file-or-data") (operationHasHeaderParams .) (and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) .BodyMode) }}
+
+**Notes:**
+{{- if eq .BodyMode "file-or-data" }}
+- `--file` and `--data` are mutually exclusive
+{{- end }}
+{{- if operationHasHeaderParams . }}
+- Use `--header "Name: Value"` for header parameters; can be specified multiple times
+{{- end }}
+{{- if and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) .BodyMode }}
+- Simple fields are exposed as individual flags; complex input falls back to `--data` / `--file`
+{{- end }}
+{{- end }}
+
+<!-- MANUAL: 补充业务相关的注意事项 -->
 {{- end }}

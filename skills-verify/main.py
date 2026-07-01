@@ -26,6 +26,10 @@ DEFAULT_SKILL_LOG_PREVIEW_CHARS = 240
 logger = logging.getLogger("skills_verify")
 
 
+def sanitize_text(value: str) -> str:
+    return value.encode("utf-8", errors="replace").decode("utf-8")
+
+
 def resolve_repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -134,7 +138,7 @@ def build_agent():
 def get_all_skills(skills_dir: Path) -> dict[str, str]:
     skills_files: dict[str, str] = {}
     for skill_file in sorted(skills_dir.rglob("SKILL.md")):
-        skills_files[str(skill_file)] = skill_file.read_text(encoding="utf-8")
+        skills_files[str(skill_file)] = sanitize_text(skill_file.read_text(encoding="utf-8"))
     return skills_files
 
 
@@ -159,11 +163,11 @@ def _to_log_text(value) -> str:
     if value is None:
         return ""
     if isinstance(value, str):
-        return value
+        return sanitize_text(value)
     try:
-        return json.dumps(value, ensure_ascii=False)
+        return sanitize_text(json.dumps(value, ensure_ascii=False))
     except TypeError:
-        return str(value)
+        return sanitize_text(str(value))
 
 
 def log_skills_content(skills_files: dict[str, str]) -> None:
@@ -288,7 +292,7 @@ async def run_repl(thread_id: str) -> int:
     messages: list[dict[str, str]] = []
     while True:
         try:
-            user_input = input("\n用户: ").strip()
+            user_input = sanitize_text(input("\n用户: ").strip())
         except EOFError:
             print("\n(EOF)", flush=True)
             logger.info("repl.eof")

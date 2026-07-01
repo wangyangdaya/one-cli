@@ -10,11 +10,14 @@ import (
 {{- end }}
 )
 
+var version = {{ printf "%q" (goAppVersion .App) }}
+
 func main() {
-	root := cli.NewRootCommand("{{ .App.Name }}", "{{ .App.Name }} CLI")
+	root := cli.NewRootCommand("{{ .App.Name }}", "{{ .App.Name }} CLI", version)
 	cli.BindTrace(httpx.SetTraceEnabled)
 {{- range .App.Groups }}
 	root.AddCommand({{ groupPackageName . }}.NewCommand())
 {{- end }}
+	cli.ApplyRootHelp(root)
 	os.Exit(cli.ExecuteRoot(root))
 }

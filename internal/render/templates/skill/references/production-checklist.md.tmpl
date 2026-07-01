@@ -1,0 +1,46 @@
+# Production Checklist: {{ .Group.Name }}
+
+This checklist turns the generated API scaffold into a business-ready skill.
+
+## Product / Business
+
+- [ ] `SKILL.md` description names real user intents, synonyms, and boundaries.
+- [ ] Core concepts explain business entities, IDs, URLs, states, ownership, and permissions.
+- [ ] `command-routing.md` covers common user phrases and commands to avoid.
+- [ ] `workflows.md` covers the top 3-5 business tasks.
+- [ ] Cross-skill routing is documented for out-of-scope requests.
+- [ ] User-facing output expectations are documented: fields, URLs, status, and next steps.
+
+## Engineering
+
+- [ ] `{{ .App.Name }} {{ .Group.Name }} --help` works.
+{{- range .Group.Operations }}
+- [ ] `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }} --help` works.
+{{- end }}
+- [ ] Required parameters, body fields, and header rules in `SKILL.md` match the CLI.
+- [ ] Complex JSON input documents `--data` / `--file` shape clearly.
+- [ ] Authentication, environment variables, and base URL setup are accurate.
+
+## Safety
+
+- [ ] Write, delete, bulk, clear, reset, import, and irreversible operations require confirmation or a documented exception.
+- [ ] Missing IDs are resolved through list/search/get, not guessed.
+- [ ] Ambiguous search results require user selection.
+- [ ] Workflows include read-back verification where the API supports it.
+- [ ] Permission and tenant boundaries are documented.
+
+## QA
+
+- [ ] Front matter is valid and the skill loads.
+- [ ] Every documented command exists.
+- [ ] At least one read-only example runs successfully.
+- [ ] At least one write workflow is dry-run tested or tested in a safe environment.
+- [ ] Empty result, invalid parameter, not found, and permission denied paths have recovery guidance.
+- [ ] Known limitations are listed before handoff.
+
+## Maintenance
+
+- [ ] API or MCP schema changes trigger regeneration and review.
+- [ ] CLI command renames update `SKILL.md` and `references/`.
+- [ ] Business rule changes update workflow and routing docs.
+- [ ] Verification evidence is recorded in the PR or release notes.

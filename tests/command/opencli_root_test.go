@@ -27,6 +27,7 @@ func TestConfigGenLoadBytesYAML(t *testing.T) {
 app:
   binary: opencli
   root_command: opencli
+  version: 0.0.1
 naming:
   tag_alias:
     pet: pets
@@ -42,6 +43,9 @@ overrides:
 
 	if cfg.App.Binary != "opencli" {
 		t.Fatalf("unexpected binary: %q", cfg.App.Binary)
+	}
+	if cfg.App.Version != "0.0.1" {
+		t.Fatalf("unexpected version: %q", cfg.App.Version)
 	}
 	if cfg.Naming.TagAlias["pet"] != "pets" {
 		t.Fatalf("unexpected tag alias: %q", cfg.Naming.TagAlias["pet"])

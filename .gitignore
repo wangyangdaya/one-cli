@@ -4,6 +4,12 @@ dist/
 tmp/
 examples/
 docs/
+!docs/
+docs/*
+!docs/examples/
+docs/examples/*
+!docs/examples/skill-best-practice-demo/
+!docs/examples/skill-best-practice-demo/**
 .tmp/
 
 # Environment and secrets

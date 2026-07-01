@@ -27,10 +27,7 @@ func TestConvertToolExpandsSimpleObjectSchema(t *testing.T) {
 		t.Fatalf("convert tools: %v", err)
 	}
 
-	plan, err := planner.Build(doc, configgen.Config{})
-	if err != nil {
-		t.Fatalf("build plan: %v", err)
-	}
+	plan := planner.Build(doc, configgen.Config{})
 
 	op := plan.Groups[0].Operations[0]
 	if op.BodyMode != "simple-json" {
@@ -60,10 +57,7 @@ func TestConvertToolFallsBackForComplexSchema(t *testing.T) {
 		t.Fatalf("convert tools: %v", err)
 	}
 
-	plan, err := planner.Build(doc, configgen.Config{})
-	if err != nil {
-		t.Fatalf("build plan: %v", err)
-	}
+	plan := planner.Build(doc, configgen.Config{})
 
 	if got := plan.Groups[0].Operations[0].BodyMode; got != "file-or-data" {
 		t.Fatalf("body mode = %q", got)

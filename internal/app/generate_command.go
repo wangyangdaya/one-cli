@@ -20,6 +20,7 @@ func NewGenerateCommand() *cobra.Command {
 	var output string
 	var module string
 	var appName string
+	var appVersion string
 	var configPath string
 	var target string
 
@@ -27,7 +28,7 @@ func NewGenerateCommand() *cobra.Command {
 		Use:   "generate",
 		Short: "Generate a Go CLI project from Swagger/OpenAPI or MCP",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunGenerate(input, mcpConfig, output, module, appName, configPath, target)
+			return RunGenerateWithVersion(input, mcpConfig, output, module, appName, appVersion, configPath, target)
 		},
 	}
 
@@ -36,6 +37,7 @@ func NewGenerateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&output, "output", "", "Output directory")
 	cmd.Flags().StringVar(&module, "module", "", "Go module path for the generated project")
 	cmd.Flags().StringVar(&appName, "app", "", "Binary/root command name for the generated project")
+	cmd.Flags().StringVar(&appVersion, "app-version", "", "Version for the generated CLI project")
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to opencli YAML config")
 	cmd.Flags().StringVar(&target, "target", "go", "Generation target: go or rust")
 	_ = cmd.MarkFlagRequired("output")
@@ -53,59 +55,21 @@ func validateGenerateSources(input, mcpConfig string) error {
 	return nil
 }
 
-func normalizeTarget(values []string) (string, error) {
-	target := "go"
-	if len(values) > 0 {
-		target = strings.TrimSpace(values[0])
-	}
-
-	switch strings.ToLower(target) {
-	case "", "go":
-		return "go", nil
-	case "rust":
-		return "rust", nil
-	default:
-		return "", fmt.Errorf("unsupported target %q: expected go or rust", target)
-	}
-}
-
-func validateRustMCPConfig(path string) error {
-	raw, err := loaders.Load(strings.TrimSpace(path))
-	if err != nil {
-		return err
-	}
-
-	cfg, err := mcp.LoadConfig(raw)
-	if err != nil {
-		return err
-	}
-
-	for name, server := range cfg.Servers {
-		if strings.TrimSpace(server.Transport) != "streamable_http" {
-			return fmt.Errorf("rust target only supports MCP streamable_http transport; server %q uses %q", name, server.Transport)
-		}
-	}
-
-	return nil
-}
-
 func RunGenerate(input, mcpConfig, output, module, appName, configPath string, targets ...string) error {
-	target, err := normalizeTarget(targets)
-	if err != nil {
-		return err
-	}
+	return RunGenerateWithVersion(input, mcpConfig, output, module, appName, "", configPath, targets...)
+}
 
+func RunGenerateWithVersion(input, mcpConfig, output, module, appName, appVersion, configPath string, targets ...string) error {
 	if err := validateGenerateSources(input, mcpConfig); err != nil {
 		return err
-	}
-
-	if target == "rust" && strings.TrimSpace(mcpConfig) != "" {
-		// Rust target now supports both streamable_http and stdio MCP transports.
 	}
 
 	cfg, err := configgen.Load(strings.TrimSpace(configPath))
 	if err != nil {
 		return err
+	}
+	if trimmed := strings.TrimSpace(appVersion); trimmed != "" {
+		cfg.App.Version = trimmed
 	}
 
 	var doc openapi.Document
@@ -126,10 +90,7 @@ func RunGenerate(input, mcpConfig, output, module, appName, configPath string, t
 		}
 	}
 
-	plan, err := planner.Build(doc, cfg)
-	if err != nil {
-		return err
-	}
+	plan := planner.Build(doc, cfg)
 	plan.Name = strings.TrimSpace(appName)
-	return render.Project(strings.TrimSpace(output), strings.TrimSpace(module), plan, target)
+	return render.Project(strings.TrimSpace(output), strings.TrimSpace(module), plan, targets...)
 }
