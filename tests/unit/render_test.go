@@ -55,6 +55,7 @@ func TestRenderProject(t *testing.T) {
 		"skills/leave/references/command-routing.md",
 		"skills/leave/references/workflows.md",
 		"skills/leave/references/production-checklist.md",
+		"skills/leave/generation-report.md",
 	} {
 		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
 			t.Fatalf("missing generated skill package file %s: %v", rel, err)
@@ -89,6 +90,7 @@ func TestRenderProject(t *testing.T) {
 		"## Generated Skills",
 		"demo-request.json",
 		"production-checklist.md",
+		"generation-report.md",
 	} {
 		if !strings.Contains(readmeText, want) {
 			t.Fatalf("generated README missing %q:\n%s", want, readmeText)
@@ -151,6 +153,75 @@ func TestRenderProject(t *testing.T) {
 		if !strings.Contains(helpText, want) {
 			t.Fatalf("generated project --help missing %q:\n%s", want, helpText)
 		}
+	}
+}
+
+func TestRenderProjectCanGenerateChineseSkillPackage(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name: "one",
+		Groups: []model.Group{
+			{
+				Name: "leave",
+				Operations: []model.Operation{
+					{
+						CommandName: "request",
+						Method:      "POST",
+						Path:        "/leaves",
+						Parameters: []model.Parameter{
+							{Name: "userId", In: "query", Required: true, Type: "string"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := render.Project(dir, "github.com/acme/one-cli", app, "go", "zh"); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+
+	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "leave", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated skill markdown: %v", err)
+	}
+	skillText := string(skillContent)
+	for _, want := range []string{
+		"## 包文件",
+		"## 前置条件",
+		"## 命令",
+		"**参数：**",
+		"| `--userId` | 是 | userId（string） |",
+		"| `one leave request` | request | 写入 |",
+		"generation-report.md",
+		"OPENCLI_BASE_URL",
+	} {
+		if !strings.Contains(skillText, want) {
+			t.Fatalf("generated Chinese SKILL.md missing %q:\n%s", want, skillText)
+		}
+	}
+
+	reportContent, err := os.ReadFile(filepath.Join(dir, "skills", "leave", "generation-report.md"))
+	if err != nil {
+		t.Fatalf("read generated report: %v", err)
+	}
+	reportText := string(reportContent)
+	for _, want := range []string{
+		"# 生成报告：leave",
+		"`leave` 缺少分组描述",
+		"`request` 的参数 `userId` 缺少说明",
+	} {
+		if !strings.Contains(reportText, want) {
+			t.Fatalf("generated Chinese report missing %q:\n%s", want, reportText)
+		}
+	}
+
+	demoContent, err := os.ReadFile(filepath.Join(dir, "skills", "leave", "assets", "demo-request.json"))
+	if err != nil {
+		t.Fatalf("read generated demo request: %v", err)
+	}
+	if !strings.Contains(string(demoContent), `"demo": true`) {
+		t.Fatalf("generated Chinese demo request missing fallback JSON:\n%s", demoContent)
 	}
 }
 

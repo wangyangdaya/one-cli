@@ -69,6 +69,8 @@ func renderTemplate(name string, data any) ([]byte, error) {
 			"exampleJSONFields":        exampleJSONFields,
 			"demoRequestJSON":          demoRequestJSON,
 			"operationIsWriteMethod":   operationIsWriteMethod,
+			"operationRiskLabel":       operationRiskLabel,
+			"groupDocumentationIssues": groupDocumentationIssues,
 			"hasOptionalFields":        hasOptionalFields,
 			"upper":                    strings.ToUpper,
 		}).Parse(string(raw))
@@ -371,6 +373,88 @@ func operationIsWriteMethod(operation model.Operation) bool {
 	default:
 		return false
 	}
+}
+
+func operationRiskLevel(operation model.Operation) string {
+	switch strings.ToUpper(strings.TrimSpace(operation.Method)) {
+	case "GET", "HEAD", "OPTIONS":
+		return "read"
+	case "DELETE":
+		return "destructive"
+	case "POST", "PUT", "PATCH":
+		return "write"
+	default:
+		return "unknown"
+	}
+}
+
+func operationRiskLabel(operation model.Operation, lang string) string {
+	zh := strings.EqualFold(strings.TrimSpace(lang), "zh")
+	switch operationRiskLevel(operation) {
+	case "read":
+		if zh {
+			return "只读"
+		}
+		return "read"
+	case "destructive":
+		if zh {
+			return "高风险"
+		}
+		return "destructive"
+	case "write":
+		if zh {
+			return "写入"
+		}
+		return "write"
+	default:
+		if zh {
+			return "未知"
+		}
+		return "unknown"
+	}
+}
+
+func groupDocumentationIssues(group model.Group, lang string) []string {
+	zh := strings.EqualFold(strings.TrimSpace(lang), "zh")
+	issue := func(en, cn string) string {
+		if zh {
+			return cn
+		}
+		return en
+	}
+
+	var issues []string
+	if strings.TrimSpace(group.Description) == "" {
+		issues = append(issues, issue(
+			"`"+group.Name+"` is missing a group description",
+			"`"+group.Name+"` 缺少分组描述",
+		))
+	}
+	for _, op := range group.Operations {
+		if strings.TrimSpace(op.Summary) == "" {
+			issues = append(issues, issue(
+				"`"+op.CommandName+"` is missing a command summary",
+				"`"+op.CommandName+"` 缺少命令摘要",
+			))
+		}
+		for _, param := range op.Parameters {
+			if strings.TrimSpace(param.Description) == "" {
+				issues = append(issues, issue(
+					"`"+op.CommandName+"` parameter `"+param.Name+"` is missing a description",
+					"`"+op.CommandName+"` 的参数 `"+param.Name+"` 缺少说明",
+				))
+			}
+		}
+		for _, field := range op.BodySchemaFields {
+			if strings.TrimSpace(field.Description) == "" {
+				issues = append(issues, issue(
+					"`"+op.CommandName+"` request body field `"+field.Name+"` is missing a description",
+					"`"+op.CommandName+"` 的请求体字段 `"+field.Name+"` 缺少说明",
+				))
+			}
+		}
+	}
+	return issues
 }
 
 func hasOptionalFields(operation model.Operation) bool {

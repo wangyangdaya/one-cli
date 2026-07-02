@@ -1,0 +1,34 @@
+# 生成报告：{{ .Group.Name }}
+
+本文件由 `opencli` 根据 API/MCP 输入自动生成，用于判断哪些内容应回补到源文档，哪些内容应在 Skill 包内手工补齐。
+
+## 生成来源
+
+- Skill：`{{ .Group.Name }}`
+- 应用：`{{ .App.Name }}`
+- 后端：{{ if groupUsesMCPHTTP .Group }}MCP HTTP{{ else if groupUsesMCPStdio .Group }}MCP Stdio{{ else }}HTTP API{{ end }}
+- 命令数量：{{ len .Group.Operations }}
+
+## 检测到的缺口
+
+{{- $issues := groupDocumentationIssues .Group .SkillLang }}
+{{- if $issues }}
+{{- range $issues }}
+- [ ] {{ . }}
+{{- end }}
+{{- else }}
+- 未检测到明显的文档缺口。
+{{- end }}
+
+## 需要人工补充
+
+API 描述通常无法提供这些业务细节：
+
+1. 用户意图、同义词和能力边界。
+2. `status`、`type`、`state` 等枚举字段的业务含义。
+3. 哪些字段来自用户输入，哪些字段来自上一步命令输出。
+4. 多命令工作流顺序和数据传递关系。
+5. 权限、租户和状态校验。
+6. 常见错误恢复方式。
+7. 时间、翻页、排序和筛选约定。
+

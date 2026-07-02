@@ -1,0 +1,57 @@
+# {{ .Group.Name }} Skill 包
+
+由 `opencli` 为 `{{ .App.Name }} {{ .Group.Name }}` 自动生成。
+
+本目录用于交给产品、业务、工程和 QA 共同完善。生成文件包含来自 API/MCP 描述的 CLI 事实；真实业务流程、枚举含义和跨命令规则仍需人工补充。
+
+## 目录
+
+```text
+skills/{{ groupPackageName .Group }}/
+├── SKILL.md
+├── README.md
+├── assets/
+│   └── demo-request.json
+├── references/
+│   ├── command-routing.md
+│   ├── workflows.md
+│   └── production-checklist.md
+└── generation-report.md
+```
+
+## 文件用途
+
+| 文件 | 责任人 | 用途 |
+| --- | --- | --- |
+| `SKILL.md` | Skill 维护者 | Agent 入口。保留触发规则、硬性安全规则、命令索引和短工作流摘要。 |
+| `README.md` | 所有人 | 说明包结构和交接流程。 |
+| `assets/demo-request.json` | 工程 + QA | 支持 `--file` 示例、演示和手工编辑请求体的有效占位 JSON 文件。 |
+| `references/command-routing.md` | 产品 + Skill 维护者 | 把用户意图映射到正确的生成 CLI 命令。生产使用前必须补全。 |
+| `references/workflows.md` | 产品 + 工程 + QA | 定义真实的多命令业务流程，包括确认和回读校验。 |
+| `references/production-checklist.md` | QA + 维护者 | Skill 被视为生产可用前的验收清单。 |
+| `generation-report.md` | Skill 维护者 | 列出源 API/MCP 输入中检测到的描述缺口。 |
+
+## 完成顺序
+
+1. 运行 `{{ .App.Name }} {{ .Group.Name }} --help` 和每个命令的 `--help`，验证生成的命令表面。
+2. 对照 `generation-report.md`，决定修复源 API/MCP 描述，还是在 Skill 中手工补充。
+3. 对支持 `--file` 的命令，用 `assets/demo-request.json` 作为请求体起点。
+4. 在 `references/command-routing.md` 中补充常见用户请求、同义词和容易误用的命令。
+5. 在 `references/workflows.md` 中补充最常用的 3-5 个业务流程。
+6. 只把最短、最重要的路由和工作流规则写回 `SKILL.md`。
+7. 用 `references/production-checklist.md` 验收。
+
+## 生成命令表面
+
+| 命令 | 说明 | 风险 |
+| --- | --- | --- |
+{{- range .Group.Operations }}
+| `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}` | {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }} | {{ operationRiskLabel . $.SkillLang }} |
+{{- end }}
+
+## 不要跳过
+
+- 替换或完善 `SKILL.md` front matter 中的 `description`，让它描述真实用户意图和边界。
+- 不要仅根据 API 名称编造业务流程。
+- 不要移除写入、删除、批量或不可逆操作的安全检查。
+- 长示例、schema 和恢复说明放在 `references/`；`SKILL.md` 保持短小，便于 Agent 快速加载。

@@ -1,0 +1,64 @@
+# 工作流：{{ .Group.Name }}
+
+用本文件定义真实业务流程。API 描述只能暴露单个命令；产品和工程负责人需要在这里定义多步骤过程。
+
+## 工作流模板
+
+为每个高频任务复制本节。
+
+### <!-- MANUAL: 工作流名称 -->
+
+- 触发场景：<!-- MANUAL: 哪些用户说法会触发本流程 -->
+- 前置条件：<!-- MANUAL: 认证、租户、角色、环境、必要 ID -->
+- 风险：<!-- MANUAL: 只读、写入、删除、批量、不可逆 -->
+
+步骤：
+
+1. <!-- MANUAL: 第一个查询或校验命令 -->
+2. <!-- MANUAL: 执行主要动作的命令 -->
+3. <!-- MANUAL: 回读或验证命令 -->
+
+返回给用户：
+
+- <!-- MANUAL: 字段、URL、状态、下一步动作 -->
+
+异常恢复：
+
+- <!-- MANUAL: 空结果、权限拒绝、参数非法、重复目标 -->
+
+## 生成命令候选
+
+### 读取或查询命令
+
+{{- range .Group.Operations }}
+{{- if not (operationIsWriteMethod .) }}
+- `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}` - {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}
+{{- end }}
+{{- end }}
+
+### 写入或风险命令
+
+{{- range .Group.Operations }}
+{{- if operationIsWriteMethod . }}
+- `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}` - {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}
+{{- end }}
+{{- end }}
+
+## 写入安全模式
+
+创建、更新、删除、状态变更、清空、重置、导入、导出和批量操作统一使用本模式。
+
+1. 尽可能用读取命令确认目标。
+2. 向用户展示目标 ID/名称和将执行的动作。
+3. 请求明确确认，除非用户已在当前轮次给出清晰授权。
+4. 执行命令。
+5. 回读变更资源，或展示能证明成功的命令返回字段。
+
+## 待补充的 Top 工作流
+
+| 优先级 | 工作流 | 命令 | 责任人 | 状态 |
+| --- | --- | --- | --- | --- |
+| P0 | <!-- MANUAL: 最常见任务 --> | <!-- MANUAL: 命令序列 --> | <!-- MANUAL --> | TODO |
+| P1 | <!-- MANUAL: 第二个任务 --> | <!-- MANUAL: 命令序列 --> | <!-- MANUAL --> | TODO |
+| P2 | <!-- MANUAL: 第三个任务 --> | <!-- MANUAL: 命令序列 --> | <!-- MANUAL --> | TODO |
+

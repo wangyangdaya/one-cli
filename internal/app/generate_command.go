@@ -23,12 +23,13 @@ func NewGenerateCommand() *cobra.Command {
 	var appVersion string
 	var configPath string
 	var target string
+	var skillLang string
 
 	cmd := &cobra.Command{
 		Use:   "generate",
 		Short: "Generate a Go CLI project from Swagger/OpenAPI or MCP",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunGenerateWithVersion(input, mcpConfig, output, module, appName, appVersion, configPath, target)
+			return RunGenerateWithVersionAndSkillLang(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang, target)
 		},
 	}
 
@@ -40,6 +41,7 @@ func NewGenerateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&appVersion, "app-version", "", "Version for the generated CLI project")
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to opencli YAML config")
 	cmd.Flags().StringVar(&target, "target", "go", "Generation target: go or rust")
+	cmd.Flags().StringVar(&skillLang, "skill-lang", "en", "Generated skill language: en or zh")
 	_ = cmd.MarkFlagRequired("output")
 	_ = cmd.MarkFlagRequired("module")
 	_ = cmd.MarkFlagRequired("app")
@@ -60,6 +62,10 @@ func RunGenerate(input, mcpConfig, output, module, appName, configPath string, t
 }
 
 func RunGenerateWithVersion(input, mcpConfig, output, module, appName, appVersion, configPath string, targets ...string) error {
+	return RunGenerateWithVersionAndSkillLang(input, mcpConfig, output, module, appName, appVersion, configPath, "en", targets...)
+}
+
+func RunGenerateWithVersionAndSkillLang(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang string, targets ...string) error {
 	if err := validateGenerateSources(input, mcpConfig); err != nil {
 		return err
 	}
@@ -92,5 +98,9 @@ func RunGenerateWithVersion(input, mcpConfig, output, module, appName, appVersio
 
 	plan := planner.Build(doc, cfg)
 	plan.Name = strings.TrimSpace(appName)
-	return render.Project(strings.TrimSpace(output), strings.TrimSpace(module), plan, targets...)
+	target := "go"
+	if len(targets) > 0 {
+		target = strings.TrimSpace(targets[0])
+	}
+	return render.Project(strings.TrimSpace(output), strings.TrimSpace(module), plan, target, strings.TrimSpace(skillLang))
 }

@@ -17,11 +17,24 @@ func Project(outputDir, module string, app model.App, targets ...string) error {
 	if len(targets) > 0 {
 		target = strings.TrimSpace(targets[0])
 	}
+	skillLang := "en"
+	if len(targets) > 1 {
+		skillLang = strings.TrimSpace(targets[1])
+	}
+	if skillLang == "" {
+		skillLang = "en"
+	}
+	switch strings.ToLower(skillLang) {
+	case "en", "zh":
+		skillLang = strings.ToLower(skillLang)
+	default:
+		return fmt.Errorf("unsupported skill language %q: expected en or zh", skillLang)
+	}
 	switch strings.ToLower(target) {
 	case "", "go":
-		return writeGoProject(outputDir, module, app)
+		return writeGoProject(outputDir, module, app, skillLang)
 	case "rust":
-		return writeRustProject(outputDir, module, app)
+		return writeRustProject(outputDir, module, app, skillLang)
 	default:
 		return fmt.Errorf("unsupported target %q: expected go or rust", target)
 	}

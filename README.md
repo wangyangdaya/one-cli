@@ -19,7 +19,7 @@
 - ✅ **标准架构** - 基于 Cobra 框架，遵循 Go 最佳实践
 - ✅ **本地/远程** - 支持本地文件和远程 URL 作为输入
 - ✅ **类型安全** - 生成强类型的 Go 代码
-- ✅ **Skill 产物** - 为每个命令组生成标准化 `skills/<group>/` 工作包，包含 `SKILL.md`、说明、引用文档和 demo request
+- ✅ **Skill 产物** - 为每个命令组生成标准化 `skills/<group>/` 工作包，支持英文/中文模板，包含 `SKILL.md`、说明、引用文档、demo request 和生成报告
 - ✅ **全版本兼容** - 支持 OpenAPI 2.0（Swagger）、3.0 和 3.1
 - ✅ **复杂 Schema** - 完整的 `$ref` 解析、`allOf` 合并、`oneOf`/`anyOf` 处理
 
@@ -61,7 +61,8 @@ make build
   --output ./my-petcli \
   --module github.com/myorg/my-petcli \
   --app petcli \
-  --app-version 0.0.1
+  --app-version 0.0.1 \
+  --skill-lang zh
 
 # 3. 直接运行生成的 CLI
 cd my-petcli
@@ -180,6 +181,7 @@ opencli generate \
   --module github.com/myorg/my-cli \
   --app mycli \
   --app-version 0.0.1 \
+  --skill-lang zh \
   --config ./opencli.yaml  # 可选
 ```
 
@@ -227,11 +229,14 @@ opencli generate \
 | `--module` | ✅ | Go target 下是 Go module 路径；Rust target 下用作 Cargo package 名称来源 |
 | `--app` | ✅ | CLI 二进制名称和根命令名 |
 | `--app-version` | ❌ | 生成出来的 CLI 项目版本；覆盖 `opencli.yaml` 的 `app.version` |
+| `--skill-lang` | ❌ | 生成的 Skill 文档语言：`en` 或 `zh`，默认 `en` |
 | `--config` | ❌ | 配置文件路径（可选） |
 
 `--input` 和 `--mcp-config` 互斥，必须且只能提供一个。
 
 `--app-version` 设置的是生成出来的 CLI 项目版本；如果同时配置了 `opencli.yaml` 的 `app.version`，命令行参数优先。
+
+`--skill-lang zh` 会生成中文 `skills/<group>/` 文档；不传时默认生成英文文档。生成出来的文件名保持不变，例如 `SKILL.md`、`README.md`、`generation-report.md`。
 
 推荐按下面理解参数组合：
 
@@ -374,10 +379,11 @@ my-cli/
 │       ├── README.md
 │       ├── assets/
 │       │   └── demo-request.json
-│       └── references/
-│           ├── command-routing.md
-│           ├── workflows.md
-│           └── production-checklist.md
+│       ├── references/
+│       │   ├── command-routing.md
+│       │   ├── workflows.md
+│       │   └── production-checklist.md
+│       └── generation-report.md
 ├── go.mod
 ├── go.sum
 └── README.md
@@ -403,15 +409,18 @@ my-cli-rs/
 │       ├── README.md
 │       ├── assets/
 │       │   └── demo-request.json
-│       └── references/
-│           ├── command-routing.md
-│           ├── workflows.md
-│           └── production-checklist.md
+│       ├── references/
+│       │   ├── command-routing.md
+│       │   ├── workflows.md
+│       │   └── production-checklist.md
+│       └── generation-report.md
 ├── Cargo.toml
 └── README.md
 ```
 
-`skills/<group>/` 是标准化 Skill 工作包。`SKILL.md` 是 Agent 入口，`README.md` 说明交付和修改流程，`assets/demo-request.json` 是可立即用于 `--file` 示例的合法 JSON 占位文件，`references/` 用于补充命令路由、业务流程和生产验收清单。
+`skills/<group>/` 是标准化 Skill 工作包。`SKILL.md` 是 Agent 入口，`README.md` 说明交付和修改流程，`assets/demo-request.json` 是可立即用于 `--file` 示例的合法 JSON 占位文件，`references/` 用于补充命令路由、业务流程和生产验收清单，`generation-report.md` 用于列出 API/MCP 输入中缺失的 group、命令、参数或请求体字段描述。
+
+中文 Skill 文档可通过 `--skill-lang zh` 生成。风险等级按 HTTP 方法轻量标注：`GET/HEAD/OPTIONS` 为只读，`POST/PUT/PATCH` 为写入，`DELETE` 为高风险；不会按命令名猜测业务语义。
 
 ---
 
@@ -655,7 +664,7 @@ go build -o bin/petcli ./cmd/petcli
 - [x] 命名自定义
 - [x] 多种 body 处理模式
 - [x] 生成项目 `--version` 支持（Go/Rust）
-- [x] 标准化 Skill 工作包生成（Go/Rust，含 `assets/demo-request.json`）
+- [x] 标准化 Skill 工作包生成（Go/Rust，含 `assets/demo-request.json`、`generation-report.md`，支持 `--skill-lang en|zh`）
 
 ### 计划中 🚧
 - [ ] `opencli init` 命令实现

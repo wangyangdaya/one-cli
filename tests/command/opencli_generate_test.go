@@ -41,6 +41,31 @@ func TestGenerateCommandWithSimpleJSONBodySpec(t *testing.T) {
 	}
 }
 
+func TestGenerateCommandAcceptsChineseSkillLanguage(t *testing.T) {
+	dir := t.TempDir()
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--input", filepath.Join("..", "..", "examples", "petstore.yaml"),
+		"--output", dir,
+		"--module", "github.com/acme/generated",
+		"--app", "petcli",
+		"--skill-lang", "zh",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute generate: %v", err)
+	}
+
+	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "pet", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated skill: %v", err)
+	}
+	if !strings.Contains(string(skillContent), "## 包文件") {
+		t.Fatalf("generated skill is not Chinese:\n%s", skillContent)
+	}
+}
+
 func TestGenerateCommandRequiresExactlyOneSource(t *testing.T) {
 	dir := t.TempDir()
 	cmd := app.NewRootCommand()

@@ -12,10 +12,11 @@ skills/{{ groupPackageName .Group }}/
 ├── README.md
 ├── assets/
 │   └── demo-request.json
-└── references/
-    ├── command-routing.md
-    ├── workflows.md
-    └── production-checklist.md
+├── references/
+│   ├── command-routing.md
+│   ├── workflows.md
+│   └── production-checklist.md
+└── generation-report.md
 ```
 
 ## File Purposes
@@ -28,15 +29,17 @@ skills/{{ groupPackageName .Group }}/
 | `references/command-routing.md` | Product + skill maintainer | Maps user intent to the correct generated CLI command. Fill this before relying on natural-language routing. |
 | `references/workflows.md` | Product + engineering + QA | Defines real multi-command business flows, including confirmation and read-back checks. |
 | `references/production-checklist.md` | QA + maintainer | Acceptance checklist before the skill is treated as production-ready. |
+| `generation-report.md` | Skill maintainer | Lists missing descriptions detected in the source API/MCP input. |
 
 ## Completion Order
 
 1. Run `{{ .App.Name }} {{ .Group.Name }} --help` and each command `--help` to verify the generated command surface.
 2. Use `assets/demo-request.json` as the starting request body for commands that support `--file`.
-3. Fill `references/command-routing.md` with common user requests, synonyms, and commands to avoid.
-4. Fill `references/workflows.md` with the top 3-5 business workflows.
-5. Move only the shortest, most important routing and workflow rules back into `SKILL.md`.
-6. Validate with `references/production-checklist.md`.
+3. Review `generation-report.md` and decide whether to fix the source API/MCP description or fill the skill manually.
+4. Fill `references/command-routing.md` with common user requests, synonyms, and commands to avoid.
+5. Fill `references/workflows.md` with the top 3-5 business workflows.
+6. Move only the shortest, most important routing and workflow rules back into `SKILL.md`.
+7. Validate with `references/production-checklist.md`.
 
 ## Generated Command Surface
 

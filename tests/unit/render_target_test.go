@@ -33,3 +33,10 @@ func TestRenderProjectRejectsUnknownTarget(t *testing.T) {
 		t.Fatalf("expected unsupported target error, got %v", err)
 	}
 }
+
+func TestRenderProjectRejectsUnknownSkillLanguage(t *testing.T) {
+	err := render.Project(t.TempDir(), "github.com/acme/one-cli", model.App{Name: "one"}, "go", "fr")
+	if err == nil || !strings.Contains(err.Error(), "unsupported skill language") {
+		t.Fatalf("expected unsupported skill language error, got %v", err)
+	}
+}

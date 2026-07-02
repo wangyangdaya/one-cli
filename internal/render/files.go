@@ -16,10 +16,11 @@ type generatedFile struct {
 }
 
 type templateData struct {
-	Module string
-	Target string
-	App    model.App
-	Group  model.Group
+	Module    string
+	Target    string
+	SkillLang string
+	App       model.App
+	Group     model.Group
 }
 
 func readTemplate(name string) ([]byte, error) {
