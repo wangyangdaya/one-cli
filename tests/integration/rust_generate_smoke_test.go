@@ -85,6 +85,32 @@ func TestGenerateRustHTTPTraceIncludesQueryAndHeaders(t *testing.T) {
 	}
 }
 
+func TestGenerateRustIncludesJSONOutputMode(t *testing.T) {
+	dir := t.TempDir()
+	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "petstore.yaml"), "", dir, "petcli", "petcli", "", "rust"); err != nil {
+		t.Fatalf("run rust generate: %v", err)
+	}
+
+	for _, check := range []struct {
+		path string
+		want string
+	}{
+		{path: filepath.Join("src", "cli.rs"), want: "json: bool"},
+		{path: filepath.Join("src", "cli.rs"), want: "crate::output::set_json_enabled(cli.json);"},
+		{path: filepath.Join("src", "output.rs"), want: "SuccessEnvelope"},
+		{path: filepath.Join("src", "output.rs"), want: "ErrorEnvelope"},
+		{path: filepath.Join("src", "commands", "pet.rs"), want: `output::print_output("petcli pet list"`},
+	} {
+		content, err := os.ReadFile(filepath.Join(dir, check.path))
+		if err != nil {
+			t.Fatalf("read generated %s: %v", check.path, err)
+		}
+		if !strings.Contains(string(content), check.want) {
+			t.Fatalf("generated %s missing %q:\n%s", check.path, check.want, content)
+		}
+	}
+}
+
 func TestGenerateRustHTTPClientUsesDefaultTimeout(t *testing.T) {
 	dir := t.TempDir()
 	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "petstore.yaml"), "", dir, "petcli", "petcli", "", "rust"); err != nil {

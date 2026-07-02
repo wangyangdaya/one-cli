@@ -30,6 +30,10 @@ struct Cli {
     #[arg(long)]
     trace: bool,
 
+    /// Print command output as JSON
+    #[arg(long)]
+    json: bool,
+
     #[command(subcommand)]
     command: Option<GroupCommand>,
 }
@@ -37,7 +41,8 @@ struct Cli {
 #[derive(Subcommand)]
 enum GroupCommand {
 {{- range .App.Groups }}
-    {{ .Name | pascal }} {
+    #[command(name = "{{ .Name }}")]
+    {{ rustTypeName (rustModuleName .) }} {
         #[command(subcommand)]
         command: commands::{{ rustModuleName . }}::Command,
     },
@@ -47,14 +52,21 @@ enum GroupCommand {
 pub async fn run() -> AppResult<()> {
     let cli = Cli::parse();
     if cli.version {
+        if cli.json {
+            crate::output::set_json_enabled(true);
+            let data = serde_json::json!({ "version": version() });
+            crate::output::print_output("{{ .App.Name }} version", &data)?;
+            return Ok(());
+        }
         println!("{{ .App.Name }} version {}", version());
         return Ok(());
     }
 
     crate::trace::set_enabled(cli.trace);
+    crate::output::set_json_enabled(cli.json);
     match cli.command {
 {{- range .App.Groups }}
-        Some(GroupCommand::{{ .Name | pascal }} { command }) => command.run().await,
+        Some(GroupCommand::{{ rustTypeName (rustModuleName .) }} { command }) => command.run().await,
 {{- end }}
         None => {
             Cli::command().print_help().map_err(|err| err.to_string())?;

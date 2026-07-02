@@ -225,6 +225,94 @@ func TestRenderProjectCanGenerateChineseSkillPackage(t *testing.T) {
 	}
 }
 
+func TestRenderRustDisambiguatesIdentifiers(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name:    "one",
+		Version: "0.0.1",
+		Groups: []model.Group{
+			{
+				Name:        "过点车辆定时任务(线边、sps)",
+				PackageName: "default",
+				Operations: []model.Operation{
+					{
+						CommandName: "update",
+						Method:      "PUT",
+						Path:        "/items/{id}",
+						Parameters: []model.Parameter{
+							{Name: "id", In: "path", Required: true, Type: "string"},
+						},
+						BodyMode: model.BodyModeSimpleJSON,
+						BodyFields: []model.BodyField{
+							{Name: "id", Type: "string"},
+						},
+					},
+				},
+			},
+			{
+				Name:        "另一个分组",
+				PackageName: "default",
+				Operations: []model.Operation{
+					{CommandName: "list", Method: "GET", Path: "/items"},
+				},
+			},
+		},
+	}
+
+	if err := render.Project(dir, "github.com/acme/one-cli", app, "rust"); err != nil {
+		t.Fatalf("render rust: %v", err)
+	}
+
+	cliContent, err := os.ReadFile(filepath.Join(dir, "src", "cli.rs"))
+	if err != nil {
+		t.Fatalf("read generated cli.rs: %v", err)
+	}
+	cliText := string(cliContent)
+	for _, want := range []string{
+		`#[command(name = "过点车辆定时任务(线边、sps)")]`,
+		"Default {",
+		"Default2 {",
+	} {
+		if !strings.Contains(cliText, want) {
+			t.Fatalf("generated cli.rs missing %q:\n%s", want, cliText)
+		}
+	}
+	if strings.Contains(cliText, "过点车辆定时任务(线边、sps) {") {
+		t.Fatalf("generated cli.rs used display name as Rust variant:\n%s", cliText)
+	}
+
+	modContent, err := os.ReadFile(filepath.Join(dir, "src", "commands", "mod.rs"))
+	if err != nil {
+		t.Fatalf("read generated commands/mod.rs: %v", err)
+	}
+	modText := string(modContent)
+	for _, want := range []string{
+		"pub mod default;",
+		"pub mod default_2;",
+	} {
+		if !strings.Contains(modText, want) {
+			t.Fatalf("generated commands/mod.rs missing %q:\n%s", want, modText)
+		}
+	}
+
+	commandContent, err := os.ReadFile(filepath.Join(dir, "src", "commands", "default.rs"))
+	if err != nil {
+		t.Fatalf("read generated command: %v", err)
+	}
+	commandText := string(commandContent)
+	for _, want := range []string{
+		`#[arg(long = "id")]`,
+		"pub id: String,",
+		`#[arg(long = "body-id")]`,
+		"pub body_id: Option<String>,",
+		`payload.insert("id".to_string()`,
+	} {
+		if !strings.Contains(commandText, want) {
+			t.Fatalf("generated command missing %q:\n%s", want, commandText)
+		}
+	}
+}
+
 func TestRenderProjectSkillIncludesHeaderUsageNotes(t *testing.T) {
 	dir := t.TempDir()
 	app := model.App{

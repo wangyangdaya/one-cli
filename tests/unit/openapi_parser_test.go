@@ -884,6 +884,52 @@ func TestParseDocumentSwagger20MissingResponseDefinitionRefDoesNotBlockOperation
 	}
 }
 
+func TestParseDocumentSwagger20ToleratesMultipleBodyParameters(t *testing.T) {
+	doc, err := openapi.Parse([]byte(`
+swagger: "2.0"
+info:
+  title: Multi Body API
+  version: "1.0"
+paths:
+  /import:
+    post:
+      operationId: importFile
+      tags: [imports]
+      parameters:
+        - in: body
+          name: file
+          required: true
+          schema:
+            type: string
+            format: binary
+        - in: body
+          name: isSelf
+          required: true
+          schema:
+            type: string
+        - in: body
+          name: importNo
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+`))
+	if err != nil {
+		t.Fatalf("expected swagger 2.0 with exported multiple body parameters to parse, got: %v", err)
+	}
+	if len(doc.Operations) != 1 {
+		t.Fatalf("operations = %d want 1", len(doc.Operations))
+	}
+	if !doc.Operations[0].RequestBody.Required || len(doc.Operations[0].RequestBody.ContentTypes) == 0 {
+		t.Fatalf("expected first body parameter to become request body: %+v", doc.Operations[0].RequestBody)
+	}
+	if len(doc.Operations[0].Parameters) != 2 {
+		t.Fatalf("parameters = %+v, want extra body parameters preserved as parameters", doc.Operations[0].Parameters)
+	}
+}
+
 func TestParseDocumentSwagger20BasePathAndOperations(t *testing.T) {
 	doc, err := openapi.Parse([]byte(`
 swagger: "2.0"

@@ -8,7 +8,26 @@ import (
 )
 
 func rustModuleName(group model.Group) string {
-	return groupPackageName(group)
+	return rustFieldName(groupPackageName(group))
+}
+
+func rustTypeName(value string) string {
+	fieldName := rustFieldName(value)
+	parts := strings.FieldsFunc(fieldName, func(r rune) bool {
+		return r == '_'
+	})
+	if len(parts) == 0 {
+		return "Value"
+	}
+	for i, part := range parts {
+		runes := []rune(part)
+		if len(runes) == 0 {
+			continue
+		}
+		runes[0] = unicode.ToUpper(runes[0])
+		parts[i] = string(runes)
+	}
+	return strings.Join(parts, "")
 }
 
 func rustFieldName(value string) string {
@@ -46,6 +65,38 @@ func rustFieldName(value string) string {
 	default:
 		return result
 	}
+}
+
+func rustParamFieldName(parameter model.Parameter) string {
+	if trimmed := strings.TrimSpace(parameter.FieldName); trimmed != "" {
+		return trimmed
+	}
+	return rustFieldName(parameter.Name)
+}
+
+func rustParamFlagName(parameter model.Parameter) string {
+	if trimmed := strings.TrimSpace(parameter.FlagName); trimmed != "" {
+		return trimmed
+	}
+	return rustFlagName(parameter.Name)
+}
+
+func rustBodyFieldName(field model.BodyField) string {
+	if trimmed := strings.TrimSpace(field.FieldName); trimmed != "" {
+		return trimmed
+	}
+	return rustFieldName(field.Name)
+}
+
+func rustBodyFlagName(field model.BodyField) string {
+	if trimmed := strings.TrimSpace(field.FlagName); trimmed != "" {
+		return trimmed
+	}
+	return rustFlagName(field.Name)
+}
+
+func rustFlagName(value string) string {
+	return strings.ReplaceAll(rustFieldName(value), "_", "-")
 }
 
 func rustType(value string) string {

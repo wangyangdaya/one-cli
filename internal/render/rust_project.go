@@ -7,6 +7,7 @@ import (
 )
 
 func writeRustProject(outputDir, module string, app model.App, skillLang string) error {
+	app = normalizeRustApp(app)
 	files := []generatedFile{
 		{Path: "Cargo.toml", Template: "rust/Cargo.toml.tmpl", Data: templateData{Module: module, Target: "rust", SkillLang: skillLang, App: app}},
 		{Path: "README.md", Template: "rust/readme.md.tmpl", Data: templateData{Module: module, Target: "rust", SkillLang: skillLang, App: app}},

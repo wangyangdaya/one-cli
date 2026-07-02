@@ -1,8 +1,10 @@
-package cli
+package app
 
 import (
 	"fmt"
 	"os"
+
+	"one-cli/internal/output"
 
 	"github.com/spf13/cobra"
 )
@@ -10,13 +12,13 @@ import (
 func ExecuteRoot(cmd *cobra.Command) int {
 	if err := cmd.Execute(); err != nil {
 		if JSONEnabled() {
-			rendered, renderErr := JSONError(cmd.CommandPath(), "command_error", err.Error())
+			rendered, renderErr := output.JSONError(cmd.CommandPath(), "command_error", err.Error())
 			if renderErr == nil {
-				_, _ = fmt.Fprintln(os.Stderr, rendered)
+				fmt.Fprintln(os.Stderr, rendered)
 				return 1
 			}
 		}
-		_, _ = fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}
 	return 0

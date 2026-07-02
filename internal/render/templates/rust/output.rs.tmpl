@@ -1,9 +1,76 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::types::AppResult;
 
-pub fn print_output(value: &Value) -> AppResult<()> {
+static JSON_OUTPUT: AtomicBool = AtomicBool::new(false);
+
+#[derive(Serialize)]
+struct SuccessEnvelope<'a> {
+    ok: bool,
+    command: &'a str,
+    message: &'a str,
+    data: &'a Value,
+}
+
+#[derive(Serialize)]
+struct ErrorEnvelope<'a> {
+    ok: bool,
+    command: &'a str,
+    error: ErrorBody<'a>,
+}
+
+#[derive(Serialize)]
+struct ErrorBody<'a> {
+    code: &'a str,
+    message: &'a str,
+}
+
+pub fn set_json_enabled(enabled: bool) {
+    JSON_OUTPUT.store(enabled, Ordering::Relaxed);
+}
+
+pub fn json_enabled() -> bool {
+    JSON_OUTPUT.load(Ordering::Relaxed)
+}
+
+pub fn print_output(command: &str, value: &Value) -> AppResult<()> {
+    if json_enabled() {
+        let message = value
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("ok");
+        let rendered = serde_json::to_string(&SuccessEnvelope {
+            ok: true,
+            command,
+            message,
+            data: value,
+        })
+        .map_err(|err| err.to_string())?;
+        println!("{rendered}");
+        return Ok(());
+    }
+
     let rendered = serde_json::to_string_pretty(value).map_err(|err| err.to_string())?;
     println!("{rendered}");
     Ok(())
+}
+
+pub fn print_error(command: &str, message: &str) {
+    if json_enabled() {
+        if let Ok(rendered) = serde_json::to_string(&ErrorEnvelope {
+            ok: false,
+            command,
+            error: ErrorBody {
+                code: "command_error",
+                message,
+            },
+        }) {
+            eprintln!("{rendered}");
+            return;
+        }
+    }
+    eprintln!("{message}");
 }

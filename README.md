@@ -141,6 +141,7 @@ Rust + MCP 生成示例：
 ## 📚 文档
 
 - **[用户指南](docs/USER_GUIDE.md)** - 完整的使用说明
+- **[Swagger 外部修复链路](docs/SWAGGER_EXTERNAL_FIX.md)** - 使用 `swagger2openapi` 和 `openapi-generator-cli validate` 修复/校验脏 Swagger 输入
 - **[Skill 标准产物](docs/skills/SKILL_STANDARD_OUTPUT.md)** - 生成的 `skills/<group>/` 目录结构、文件职责和扩展规则
 - **[Skill 生产化流程](docs/skills/SKILL_PRODUCTION_WORKFLOW.md)** - 如何把生成的 API scaffold 补齐为业务可用 Skill
 - **[Skill 最佳实践样例](docs/skills/examples/skill-best-practice-demo/README.md)** - 可复制参考结构

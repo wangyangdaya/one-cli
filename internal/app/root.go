@@ -3,6 +3,7 @@ package app
 import "github.com/spf13/cobra"
 
 func NewRootCommand() *cobra.Command {
+	jsonOutput = false
 	cmd := &cobra.Command{
 		Use:           "opencli",
 		Short:         "Generate CLI projects from OpenAPI/Swagger or MCP (Go & Rust)",
@@ -16,6 +17,8 @@ func NewRootCommand() *cobra.Command {
 	cmd.AddCommand(NewInitCommand())
 	cmd.AddCommand(NewInspectCommand())
 	cmd.AddCommand(NewGenerateCommand())
+
+	cmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "Print command output as JSON")
 
 	return cmd
 }

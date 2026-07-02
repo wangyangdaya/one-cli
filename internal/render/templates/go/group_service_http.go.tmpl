@@ -63,6 +63,7 @@ func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (
 		return Result{}, err
 	}
 {{- end }}
+	applyAuthToken(req)
 
 	resp, err := httpx.NewClient().Do(req)
 	if err != nil {
@@ -83,6 +84,10 @@ func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (
 
 	var result Result
 	if err := json.Unmarshal(payload, &result); err == nil && strings.TrimSpace(result.Message) != "" {
+		var raw map[string]any
+		if rawErr := json.Unmarshal(payload, &raw); rawErr == nil {
+			result.Raw = raw
+		}
 		return result, nil
 	}
 	return Result{Message: strings.TrimSpace(string(payload))}, nil
@@ -212,6 +217,18 @@ func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input
 {{- end }}
 }
 {{ end -}}
+
+func applyAuthToken(req *http.Request) {
+	if req.Header.Get("Authorization") != "" {
+		return
+	}
+	token := strings.TrimSpace(config.Lookup("OPENCLI_AUTH_TOKEN"))
+	if token == "" {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+}
+
 {{- if groupHasHeaderParams .Group }}
 
 func applyHeaders(req *http.Request, headers []string) error {

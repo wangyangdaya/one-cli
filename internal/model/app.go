@@ -60,6 +60,8 @@ type Operation struct {
 
 type Parameter struct {
 	Name        string
+	FieldName   string
+	FlagName    string
 	In          string
 	Required    bool
 	Description string
@@ -68,6 +70,8 @@ type Parameter struct {
 
 type BodyField struct {
 	Name        string
+	FieldName   string
+	FlagName    string
 	Description string
 	Required    bool
 	Type        string

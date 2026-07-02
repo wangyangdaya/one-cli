@@ -137,7 +137,7 @@ func TestRuntimeHTTPTraceEnabledLogsAndRedactsAuthorization(t *testing.T) {
 	_ = resp.Body.Close()
 
 	output := logs.String()
-	for _, want := range []string{"[opencli][http] request", "method: POST", "[opencli][http] response", `"verbose": "true"`, `"Content-Type": "application/json"`} {
+	for _, want := range []string{"[opencli][http] request", "method: POST", "[opencli][http] response", `"verbose":"true"`, `"Content-Type":"application/json"`, `"Authorization":"<redacted>"`} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("missing trace fragment %q in %s", want, output)
 		}

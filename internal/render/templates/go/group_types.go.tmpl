@@ -2,4 +2,5 @@ package {{ groupPackageName .Group }}
 
 type Result struct {
 	Message string `json:"message"`
+	Raw     any    `json:"raw,omitempty"`
 }

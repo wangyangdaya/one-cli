@@ -8,7 +8,7 @@ mod types;
 #[tokio::main]
 async fn main() {
     if let Err(err) = cli::run().await {
-        eprintln!("{err}");
+        output::print_error(env!("CARGO_PKG_NAME"), &err);
         std::process::exit(1);
     }
 }

@@ -86,7 +86,7 @@ func previewValues(values url.Values) string {
 		}
 	}
 
-	data, err := json.Marshal(payload)
+	data, err := marshalPreviewJSON(payload)
 	if err != nil {
 		return values.Encode()
 	}
@@ -115,7 +115,7 @@ func previewHeaders(headers http.Header) string {
 		}
 	}
 
-	data, err := json.Marshal(payload)
+	data, err := marshalPreviewJSON(payload)
 	if err != nil {
 		return "<unavailable>"
 	}
@@ -142,10 +142,7 @@ func redactToken(value string) string {
 	if trimmed == "" {
 		return ""
 	}
-	if len(trimmed) <= 8 {
-		return "***"
-	}
-	return trimmed[:4] + "***" + trimmed[len(trimmed)-2:]
+	return "<redacted>"
 }
 
 func preview(body []byte) string {
@@ -154,9 +151,9 @@ func preview(body []byte) string {
 	}
 
 	if json.Valid(body) {
-		var pretty bytes.Buffer
-		if err := json.Indent(&pretty, body, "", "  "); err == nil {
-			text := pretty.String()
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, body); err == nil {
+			text := compact.String()
 			if len(text) > previewLimit {
 				return fmt.Sprintf("%s...(truncated,len=%d)", text[:previewLimit], len(text))
 			}
@@ -169,4 +166,14 @@ func preview(body []byte) string {
 		return fmt.Sprintf("%s...(truncated,len=%d)", text[:previewLimit], len(text))
 	}
 	return text
+}
+
+func marshalPreviewJSON(value any) ([]byte, error) {
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSpace(buf.Bytes()), nil
 }

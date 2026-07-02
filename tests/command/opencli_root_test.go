@@ -1,6 +1,7 @@
 package command_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -19,6 +20,25 @@ func TestOpenCLIHelp(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected help output to mention %q, got: %s", want, output)
 		}
+	}
+}
+
+func TestInitCommandJSONOutput(t *testing.T) {
+	cmd := newGoRunCommand(t, "./cmd/opencli", "--json", "init")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected init --json to succeed, got error: %v, output: %s", err, string(out))
+	}
+
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal(out, &envelope); err != nil {
+		t.Fatalf("expected JSON output, got error %v output=%s", err, out)
+	}
+	if !envelope.OK || envelope.Command != "opencli init" {
+		t.Fatalf("unexpected JSON envelope: %+v", envelope)
 	}
 }
 

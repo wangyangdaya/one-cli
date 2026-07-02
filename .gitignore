@@ -6,6 +6,7 @@ examples/
 docs/
 !docs/
 docs/*
+!docs/SWAGGER_EXTERNAL_FIX.md
 !docs/examples/
 docs/examples/*
 !docs/examples/skill-best-practice-demo/

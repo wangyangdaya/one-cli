@@ -75,6 +75,7 @@ func loadAsOpenAPI3(data []byte, version string) (*openapi3.T, error) {
 		if err := yamljson.Unmarshal(data, &doc2); err != nil {
 			return nil, fmt.Errorf("decode swagger 2.0: %w", err)
 		}
+		normalizeSwagger2MultipleBodyParameters(&doc2)
 		ensureSwagger2DefinitionRefs(&doc2)
 		doc3, err := openapi2conv.ToV3(&doc2)
 		if err != nil {
@@ -89,6 +90,58 @@ func loadAsOpenAPI3(data []byte, version string) (*openapi3.T, error) {
 		return nil, fmt.Errorf("decode openapi: %w", err)
 	}
 	return doc, nil
+}
+
+func normalizeSwagger2MultipleBodyParameters(doc *openapi2.T) {
+	if doc == nil {
+		return
+	}
+	for _, pathItem := range doc.Paths {
+		if pathItem == nil {
+			continue
+		}
+		for _, op := range pathItem.Operations() {
+			if op == nil {
+				continue
+			}
+			seenBody := false
+			for _, param := range op.Parameters {
+				if param == nil || strings.TrimSpace(param.In) != "body" {
+					continue
+				}
+				if !seenBody {
+					seenBody = true
+					continue
+				}
+				param.In = "query"
+				copySwagger2SchemaToParameter(param)
+				param.Schema = nil
+			}
+		}
+	}
+}
+
+func copySwagger2SchemaToParameter(param *openapi2.Parameter) {
+	if param == nil || param.Schema == nil || param.Schema.Value == nil {
+		return
+	}
+	schema := param.Schema.Value
+	if schema.Type != nil {
+		param.Type = schema.Type
+	}
+	param.Format = schema.Format
+	param.Default = schema.Default
+	param.Enum = append([]any(nil), schema.Enum...)
+	param.Items = schema.Items
+	param.Pattern = schema.Pattern
+	param.MultipleOf = schema.MultipleOf
+	param.Minimum = schema.Min
+	param.Maximum = schema.Max
+	param.MinLength = schema.MinLength
+	param.MaxLength = schema.MaxLength
+	param.MinItems = schema.MinItems
+	param.MaxItems = schema.MaxItems
+	param.UniqueItems = schema.UniqueItems
 }
 
 func ensureSwagger2DefinitionRefs(doc *openapi2.T) {

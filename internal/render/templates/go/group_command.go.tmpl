@@ -3,6 +3,8 @@ package {{ groupPackageName .Group }}
 import (
 	"fmt"
 
+	"{{ .Module }}/internal/cli"
+
 	"github.com/spf13/cobra"
 )
 
@@ -62,6 +64,14 @@ func new{{ .CommandName | pascal }}Command() *cobra.Command {
 			}
 			result, err := Invoke{{ .CommandName | pascal }}(input)
 			if err != nil {
+				return err
+			}
+			if cli.JSONEnabled() {
+				rendered, err := cli.JSONSuccess(cmd.CommandPath(), result.Message, result)
+				if err != nil {
+					return err
+				}
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), rendered)
 				return err
 			}
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), result.Message)

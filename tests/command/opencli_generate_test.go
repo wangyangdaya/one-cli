@@ -1,6 +1,8 @@
 package command_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +24,45 @@ func TestGenerateCommand(t *testing.T) {
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute generate: %v", err)
+	}
+}
+
+func TestGenerateCommandJSONOutput(t *testing.T) {
+	dir := t.TempDir()
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"--json",
+		"generate",
+		"--input", filepath.Join("..", "..", "examples", "petstore.yaml"),
+		"--output", dir,
+		"--module", "github.com/acme/generated",
+		"--app", "petcli",
+	})
+
+	var out strings.Builder
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute generate: %v output=%s", err, out.String())
+	}
+
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Message string `json:"message"`
+		Data    struct {
+			Output string `json:"output"`
+			Module string `json:"module"`
+			App    string `json:"app"`
+			Target string `json:"target"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out.String()), &envelope); err != nil {
+		t.Fatalf("expected JSON output, got error %v output=%s", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "opencli generate" || envelope.Data.Output != dir || envelope.Data.Target != "go" {
+		t.Fatalf("unexpected JSON envelope: %+v", envelope)
 	}
 }
 
@@ -79,6 +120,30 @@ func TestGenerateCommandRequiresExactlyOneSource(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "exactly one of --input or --mcp-config is required") {
 		t.Fatalf("expected source selection error, got %v", err)
+	}
+}
+
+func TestGenerateCommandJSONErrorOutput(t *testing.T) {
+	cmd := newGoRunCommand(t, "./cmd/opencli", "--json", "generate", "--output", t.TempDir(), "--module", "github.com/acme/generated", "--app", "generated")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected generate to fail, got output=%s", out)
+	}
+
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Error   struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	line := bytes.SplitN(bytes.TrimSpace(out), []byte("\n"), 2)[0]
+	if err := json.Unmarshal(line, &envelope); err != nil {
+		t.Fatalf("expected JSON error output, got error %v output=%s", err, out)
+	}
+	if envelope.OK || envelope.Error.Code != "command_error" || !strings.Contains(envelope.Error.Message, "exactly one of --input or --mcp-config is required") {
+		t.Fatalf("unexpected JSON error envelope: %+v", envelope)
 	}
 }
 

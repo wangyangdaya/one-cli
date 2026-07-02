@@ -12,7 +12,8 @@ use crate::types::AppResult;
 #[derive(Subcommand)]
 pub enum Command {
 {{- range .Group.Operations }}
-    {{ .CommandName | pascal }}({{ .CommandName | pascal }}Args),
+    #[command(name = "{{ .CommandName }}")]
+    {{ rustTypeName .CommandName }}({{ rustTypeName .CommandName }}Args),
 {{- end }}
 }
 
@@ -20,7 +21,7 @@ impl Command {
     pub async fn run(self) -> AppResult<()> {
         match self {
 {{- range .Group.Operations }}
-            Command::{{ .CommandName | pascal }}(args) => run_{{ rustFieldName .CommandName }}(args).await,
+            Command::{{ rustTypeName .CommandName }}(args) => run_{{ rustFieldName .CommandName }}(args).await,
 {{- end }}
         }
     }
@@ -28,15 +29,15 @@ impl Command {
 
 {{- range .Group.Operations }}
 #[derive(Args)]
-pub struct {{ .CommandName | pascal }}Args {
+pub struct {{ rustTypeName .CommandName }}Args {
 {{- range .Parameters }}
 {{- if eq .In "path" }}
-    #[arg(long)]
-    pub {{ rustFieldName .Name }}: {{ if .Required }}{{ rustType .Type }}{{ else }}Option<{{ rustType .Type }}>{{ end }},
+    #[arg(long = "{{ rustParamFlagName . }}")]
+    pub {{ rustParamFieldName . }}: {{ if .Required }}{{ rustType .Type }}{{ else }}Option<{{ rustType .Type }}>{{ end }},
 {{- end }}
 {{- if eq .In "query" }}
-    #[arg(long)]
-    pub {{ rustFieldName .Name }}: {{ if .Required }}{{ rustType .Type }}{{ else }}Option<{{ rustType .Type }}>{{ end }},
+    #[arg(long = "{{ rustParamFlagName . }}")]
+    pub {{ rustParamFieldName . }}: {{ if .Required }}{{ rustType .Type }}{{ else }}Option<{{ rustType .Type }}>{{ end }},
 {{- end }}
 {{- end }}
 {{- if operationHasHeaderParams . }}
@@ -50,12 +51,12 @@ pub struct {{ .CommandName | pascal }}Args {
     pub body_file: Option<String>,
 {{- end }}
 {{- range .BodyFields }}
-    #[arg(long)]
-    pub {{ rustFieldName .Name }}: Option<{{ rustType .Type }}>,
+    #[arg(long = "{{ rustBodyFlagName . }}")]
+    pub {{ rustBodyFieldName . }}: Option<{{ rustType .Type }}>,
 {{- end }}
 }
 
-async fn run_{{ rustFieldName .CommandName }}(args: {{ .CommandName | pascal }}Args) -> AppResult<()> {
+async fn run_{{ rustFieldName .CommandName }}(args: {{ rustTypeName .CommandName }}Args) -> AppResult<()> {
 {{- if groupUsesMCPStdio $.Group }}
     let arguments = build_{{ rustFieldName .CommandName }}_body(&args)?.unwrap_or_else(|| Value::Object(Map::new()));
     let response = client::call_mcp_stdio_tool(
@@ -93,7 +94,7 @@ async fn run_{{ rustFieldName .CommandName }}(args: {{ .CommandName | pascal }}A
 {{- end }}
 {{- range .Parameters }}
 {{- if eq .In "path" }}
-    path = path.replace("{{ printf "{%s}" .Name }}", &args.{{ rustFieldName .Name }}.to_string());
+    path = path.replace("{{ printf "{%s}" .Name }}", &args.{{ rustParamFieldName . }}.to_string());
 {{- end }}
 {{- end }}
 
@@ -105,9 +106,9 @@ async fn run_{{ rustFieldName .CommandName }}(args: {{ .CommandName | pascal }}A
 {{- range .Parameters }}
 {{- if eq .In "query" }}
 {{- if .Required }}
-    query.push(("{{ .Name }}".to_string(), args.{{ rustFieldName .Name }}.to_string()));
+    query.push(("{{ .Name }}".to_string(), args.{{ rustParamFieldName . }}.to_string()));
 {{- else }}
-    if let Some(value) = &args.{{ rustFieldName .Name }} {
+    if let Some(value) = &args.{{ rustParamFieldName . }} {
         query.push(("{{ .Name }}".to_string(), value.to_string()));
     }
 {{- end }}
@@ -122,10 +123,10 @@ async fn run_{{ rustFieldName .CommandName }}(args: {{ .CommandName | pascal }}A
     let body = build_{{ rustFieldName .CommandName }}_body(&args)?;
     let response = client::request("{{ .Method }}", &path, query, headers, body).await?;
 {{- end }}
-    output::print_output(&response)
+    output::print_output("{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}", &response)
 }
 
-fn build_{{ rustFieldName .CommandName }}_body(args: &{{ .CommandName | pascal }}Args) -> AppResult<Option<Value>> {
+fn build_{{ rustFieldName .CommandName }}_body(args: &{{ rustTypeName .CommandName }}Args) -> AppResult<Option<Value>> {
 {{- if not .BodyMode }}
     let _ = args;
     Ok(None)
@@ -150,7 +151,7 @@ fn build_{{ rustFieldName .CommandName }}_body(args: &{{ .CommandName | pascal }
     let mut payload = Map::new();
     let mut has_flag_body = false;
 {{- range .BodyFields }}
-    if let Some(value) = &args.{{ rustFieldName .Name }} {
+    if let Some(value) = &args.{{ rustBodyFieldName . }} {
         payload.insert("{{ .Name }}".to_string(), serde_json::json!(value));
         has_flag_body = true;
     }
@@ -159,7 +160,7 @@ fn build_{{ rustFieldName .CommandName }}_body(args: &{{ .CommandName | pascal }
     if has_flag_body {
 {{- range .BodyFields }}
 {{- if .Required }}
-        if args.{{ rustFieldName .Name }}.is_none() {
+        if args.{{ rustBodyFieldName . }}.is_none() {
             return Err("missing required body field: {{ .Name }}".to_string());
         }
 {{- end }}

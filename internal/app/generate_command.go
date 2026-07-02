@@ -8,6 +8,7 @@ import (
 	"one-cli/internal/loaders"
 	"one-cli/internal/mcp"
 	"one-cli/internal/openapi"
+	outjson "one-cli/internal/output"
 	"one-cli/internal/planner"
 	"one-cli/internal/render"
 
@@ -29,7 +30,27 @@ func NewGenerateCommand() *cobra.Command {
 		Use:   "generate",
 		Short: "Generate a Go CLI project from Swagger/OpenAPI or MCP",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunGenerateWithVersionAndSkillLang(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang, target)
+			if err := RunGenerateWithVersionAndSkillLang(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang, target); err != nil {
+				return err
+			}
+			if JSONEnabled() {
+				selectedTarget := strings.TrimSpace(target)
+				if selectedTarget == "" {
+					selectedTarget = "go"
+				}
+				rendered, err := outjson.JSONSuccess(cmd.CommandPath(), "generated project", map[string]string{
+					"output": strings.TrimSpace(output),
+					"module": strings.TrimSpace(module),
+					"app":    strings.TrimSpace(appName),
+					"target": selectedTarget,
+				})
+				if err != nil {
+					return err
+				}
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), rendered)
+				return err
+			}
+			return nil
 		},
 	}
 
