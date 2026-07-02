@@ -24,7 +24,7 @@ func Build(doc openapi.Document, cfg configgen.Config) Plan {
 		groupDescriptions[strings.TrimSpace(tag.Name)] = strings.TrimSpace(tag.Description)
 	}
 	for _, op := range doc.Operations {
-		groupName := groupName(op, cfg)
+		groupName := groupName(op, cfg, groupDescriptions)
 		commandName := uniqueCommandName(commandName(op, cfg), groupName, groupCommandCounts)
 
 		plannedOp := model.Operation{
@@ -169,7 +169,7 @@ func appName(doc openapi.Document, cfg configgen.Config) string {
 	return "app"
 }
 
-func groupName(op openapi.Operation, cfg configgen.Config) string {
+func groupName(op openapi.Operation, cfg configgen.Config, descriptions map[string]string) string {
 	if alias, ok := cfg.Naming.TagAlias[strings.TrimSpace(op.Tag)]; ok {
 		if trimmed := strings.TrimSpace(alias); trimmed != "" {
 			return trimmed
@@ -179,9 +179,56 @@ func groupName(op openapi.Operation, cfg configgen.Config) string {
 		if controllerName, ok := controllerGroupName(trimmed); ok {
 			return controllerName
 		}
+		if !isCLIIdentifier(trimmed) {
+			if descName, ok := controllerGroupName(descriptions[trimmed]); ok {
+				return descName
+			}
+			if pathName := pathResourceGroupName(op.Path); pathName != "" {
+				return pathName
+			}
+		}
 		return trimmed
 	}
 	return firstPathSegment(op.Path)
+}
+
+func isCLIIdentifier(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			continue
+		case r == '-' || r == '_':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func pathResourceGroupName(path string) string {
+	var candidates [][]string
+	for _, segment := range strings.Split(strings.TrimSpace(path), "/") {
+		segment = strings.TrimSpace(segment)
+		if segment == "" || strings.EqualFold(segment, "api") || strings.EqualFold(segment, "les") {
+			continue
+		}
+		parts := splitIdentifier(strings.Trim(segment, "{}"))
+		if len(parts) > 0 {
+			candidates = append(candidates, parts)
+		}
+	}
+	if len(candidates) == 0 {
+		return ""
+	}
+	if len(candidates[0]) == 1 && len(candidates[0][0]) <= 3 && len(candidates) > 1 {
+		return strings.Join(append(append([]string{}, candidates[0]...), candidates[1]...), "-")
+	}
+	return strings.Join(candidates[0], "-")
 }
 
 func controllerGroupName(tag string) (string, bool) {

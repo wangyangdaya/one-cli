@@ -49,7 +49,7 @@ func TestGeneratedCLITraceFlagControlsHTTPLogging(t *testing.T) {
 		t.Fatalf("trace command failed: %v output=%s", withTraceErr, withTraceOut)
 	}
 	text := string(withTraceOut)
-	for _, want := range []string{"[opencli][http] request", "[opencli][http] response", `"password": "secret"`} {
+	for _, want := range []string{"[opencli][http] request", "[opencli][http] response", `"password":"secret"`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing trace fragment %q in %s", want, text)
 		}

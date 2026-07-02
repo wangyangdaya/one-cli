@@ -103,7 +103,54 @@ func TestBuildDerivesGroupNameFromMixedLanguageControllerTag(t *testing.T) {
 	}
 	if got := plan.Groups[0].Name; got != "te-mm-mri-current" {
 		t.Fatalf("group name = %q want %q", got, "te-mm-mri-current")
-		t.Fatalf("group name = %q want %q", got, "te-mm-mri-current")
+	}
+}
+
+func TestBuildDerivesASCIIGroupNameFromNonASCIIBusinessTag(t *testing.T) {
+	doc := openapi.Document{
+		Tags: []openapi.Tag{
+			{Name: "TMS-物料需求", Description: "Tms Mri Current Controller"},
+			{Name: "TMS-配送单", Description: "Tms Sheet Controller"},
+			{Name: "包装存储关系Api", Description: "Tr Bas Package Storage Controller"},
+			{Name: "告警定时任务", Description: "Warning Schedule Controller"},
+		},
+		Operations: []openapi.Operation{
+			{
+				Method:      "GET",
+				Path:        "/les/api/tms/mriCurrent/getMriCurrentlist",
+				Tag:         "TMS-物料需求",
+				OperationID: "getMriCurrentlistUsingGET",
+			},
+			{
+				Method:      "POST",
+				Path:        "/les/api/tms/sheet/updateTmsSheetList",
+				Tag:         "TMS-配送单",
+				OperationID: "updateTmsSheetListUsingPOST",
+			},
+			{
+				Method:      "DELETE",
+				Path:        "/les/api/trBasPackageStorage/deleteBatchIds",
+				Tag:         "包装存储关系Api",
+				OperationID: "deleteBatchIdsUsingDELETE_46",
+			},
+			{
+				Method:      "POST",
+				Path:        "/les/api/warningSchedule/doSheetWarningJob",
+				Tag:         "告警定时任务",
+				OperationID: "doSheetWarningJobUsingPOST",
+			},
+		},
+	}
+
+	plan := planner.Build(doc, configgen.Config{})
+
+	if len(plan.Groups) != 4 {
+		t.Fatalf("groups = %d want 4", len(plan.Groups))
+	}
+	for i, want := range []string{"tms-mri-current", "tms-sheet", "tr-bas-package-storage", "warning-schedule"} {
+		if got := plan.Groups[i].Name; got != want {
+			t.Fatalf("group[%d] name = %q want %q", i, got, want)
+		}
 	}
 }
 

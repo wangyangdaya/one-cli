@@ -475,6 +475,61 @@ func TestRenderRustProjectSkillUsesActualCliFlagNames(t *testing.T) {
 	}
 }
 
+func TestRenderRustProjectSkillFlagNamesMatchCodeForUnderscoreNames(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name: "les",
+		Groups: []model.Group{
+			{
+				Name: "orders",
+				Operations: []model.Operation{
+					{
+						CommandName: "create",
+						Method:      "POST",
+						Path:        "/orders",
+						BodyMode:    model.BodyModeSimpleJSON,
+						Parameters: []model.Parameter{
+							{Name: "user_id", In: "query", Required: true, Type: "string"},
+							{Name: "delivery-rec", In: "query", Required: false, Type: "string"},
+						},
+						BodyFields: []model.BodyField{
+							{Name: "ref_no", Type: "string", Description: "单据编号"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := render.Project(dir, "github.com/acme/les-cli", app, "rust"); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+
+	skillText, err := os.ReadFile(filepath.Join(dir, "skills", "orders", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated skill markdown: %v", err)
+	}
+	codeText, err := os.ReadFile(filepath.Join(dir, "src", "commands", "orders.rs"))
+	if err != nil {
+		t.Fatalf("read generated rust command: %v", err)
+	}
+
+	for _, flag := range []string{"--user-id", "--delivery-rec", "--ref-no"} {
+		if !strings.Contains(string(skillText), flag) {
+			t.Fatalf("generated Rust SKILL.md missing %q:\n%s", flag, skillText)
+		}
+		if !strings.Contains(string(codeText), `long = "`+strings.TrimPrefix(flag, "--")+`"`) {
+			t.Fatalf("generated Rust code missing flag %q:\n%s", flag, codeText)
+		}
+	}
+
+	for _, stale := range []string{"--user_id", "--delivery_rec", "--ref_no"} {
+		if strings.Contains(string(skillText), stale) {
+			t.Fatalf("generated Rust SKILL.md contains underscore flag %q that clap will not accept:\n%s", stale, skillText)
+		}
+	}
+}
+
 func TestRenderProjectCompilesWhenGroupNameContainsHyphen(t *testing.T) {
 	dir := t.TempDir()
 	app := model.App{

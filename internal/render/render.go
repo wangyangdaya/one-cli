@@ -60,6 +60,8 @@ func renderTemplate(name string, data any) ([]byte, error) {
 			"goAppVersion":             goAppVersion,
 			"rustAppVersion":           rustAppVersion,
 			"cliFlagName":              cliFlagName,
+			"cliParamFlagName":         cliParamFlagName,
+			"cliBodyFlagName":          cliBodyFlagName,
 			"rustFieldName":            rustFieldName,
 			"rustTypeName":             rustTypeName,
 			"rustParamFieldName":       rustParamFieldName,
@@ -130,6 +132,20 @@ func cliFlagName(target, name string) string {
 		return rustFieldName(name)
 	}
 	return strings.TrimSpace(name)
+}
+
+func cliParamFlagName(target string, parameter model.Parameter) string {
+	if strings.EqualFold(strings.TrimSpace(target), "rust") {
+		return rustParamFlagName(parameter)
+	}
+	return strings.TrimSpace(parameter.Name)
+}
+
+func cliBodyFlagName(target string, field model.BodyField) string {
+	if strings.EqualFold(strings.TrimSpace(target), "rust") {
+		return rustBodyFlagName(field)
+	}
+	return strings.TrimSpace(field.Name)
 }
 
 func goType(value string) string {
