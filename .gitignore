@@ -2,11 +2,16 @@
 bin/
 dist/
 tmp/
-examples/
+examples/*
+!examples/supplier.opencli.yaml
 docs/
 !docs/
 docs/*
 !docs/SWAGGER_EXTERNAL_FIX.md
+!docs/skills/
+docs/skills/*
+!docs/skills/swagger-config/
+!docs/skills/swagger-config/SKILL.md
 !docs/examples/
 docs/examples/*
 !docs/examples/skill-best-practice-demo/

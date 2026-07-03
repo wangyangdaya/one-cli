@@ -43,6 +43,21 @@ export OPENCLI_BASE_URL='http://127.0.0.1:8000'
 ```
 {{- end }}
 
+{{- if appUsesAKSK .App }}
+## AK/SK Auth
+
+This CLI signs HTTP requests internally. Set credentials before running commands:
+
+```bash
+export OPENCLI_AK='your-access-key'
+export OPENCLI_SK='your-secret-key'
+```
+
+Requests include `appKey`, `sign`, `timestamp`, and `nonce` headers. Signer profile: `{{ appSignerProfile .App }}`.
+
+The `supplier_edi` profile uses the supplier `sha512Hex` canonical string: `method`, `/v2...` path, `appKey`, `appSecret`, `timestamp`, `nonce`, and compact `jsonBody`.
+{{- end }}
+
 ## Body Input
 
 Simple JSON body endpoints accept top-level flags plus raw JSON input modes:

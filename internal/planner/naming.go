@@ -9,9 +9,11 @@ import (
 )
 
 func commandName(op openapi.Operation, cfg configgen.Config) string {
-	if alias, ok := cfg.Naming.OperationAlias[strings.TrimSpace(op.OperationID)]; ok {
-		if trimmed := strings.TrimSpace(alias); trimmed != "" {
-			return trimmed
+	for _, key := range operationAliasKeys(op) {
+		if alias, ok := cfg.Naming.OperationAlias[key]; ok {
+			if trimmed := strings.TrimSpace(alias); trimmed != "" {
+				return trimmed
+			}
 		}
 	}
 	if trimmed := strings.TrimSpace(op.OperationID); trimmed != "" {
@@ -21,6 +23,19 @@ func commandName(op openapi.Operation, cfg configgen.Config) string {
 		return simplifyOperationID(trimmed)
 	}
 	return deriveFromMethodPath(op.Method, op.Path)
+}
+
+func operationAliasKeys(op openapi.Operation) []string {
+	method := strings.ToUpper(strings.TrimSpace(op.Method))
+	path := strings.TrimSpace(op.Path)
+	keys := []string{strings.TrimSpace(op.OperationID)}
+	if method != "" && path != "" {
+		keys = append(keys, method+" "+path)
+	}
+	if path != "" {
+		keys = append(keys, path)
+	}
+	return filterEmptySegments(keys)
 }
 
 func mcpToolCommandName(operationID string) string {

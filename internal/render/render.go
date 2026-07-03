@@ -53,10 +53,17 @@ func renderTemplate(name string, data any) ([]byte, error) {
 			"appHasMCPHTTP":            appHasMCPHTTP,
 			"appHasMCPStdio":           appHasMCPStdio,
 			"appHasAnyMCP":             appHasAnyMCP,
+			"appUsesAKSK":              appUsesAKSK,
+			"appSignerProfile":         appSignerProfile,
+			"appSigner":                appSigner,
+			"goString":                 goString,
+			"rustString":               rustString,
 			"groupPackageName":         groupPackageName,
 			"operationHasHeaderParams": operationHasHeaderParams,
+			"operationHasUserHeaders":  operationHasUserHeaders,
 			"operationHasPathParams":   operationHasPathParams,
 			"operationHasQueryParams":  operationHasQueryParams,
+			"isHiddenAuthHeader":       isHiddenAuthHeader,
 			"goAppVersion":             goAppVersion,
 			"rustAppVersion":           rustAppVersion,
 			"cliFlagName":              cliFlagName,
@@ -68,12 +75,14 @@ func renderTemplate(name string, data any) ([]byte, error) {
 			"rustParamFlagName":        rustParamFlagName,
 			"rustBodyFieldName":        rustBodyFieldName,
 			"rustBodyFlagName":         rustBodyFlagName,
+			"rustBodyFieldsForSigner":  rustBodyFieldsForSigner,
 			"rustModuleName":           rustModuleName,
 			"rustType":                 rustType,
 			"stringMapLiteral":         stringMapLiteral,
 			"stringSliceLiteral":       stringSliceLiteral,
 			"exampleValue":             exampleValue,
 			"exampleJSONFields":        exampleJSONFields,
+			"bodyRequiredLabel":        bodyRequiredLabel,
 			"demoRequestJSON":          demoRequestJSON,
 			"operationIsWriteMethod":   operationIsWriteMethod,
 			"operationRiskLabel":       operationRiskLabel,
@@ -94,6 +103,25 @@ func renderTemplate(name string, data any) ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
+}
+
+func bodyRequiredLabel(field model.BodyField, lang string) string {
+	if field.RequiredUnknown {
+		if lang == "zh" {
+			return "未声明"
+		}
+		return "unspecified"
+	}
+	if field.Required {
+		if lang == "zh" {
+			return "是"
+		}
+		return "yes"
+	}
+	if lang == "zh" {
+		return "否"
+	}
+	return "no"
 }
 
 func pascal(value string) string {
@@ -232,6 +260,45 @@ func appHasAnyMCP(app model.App) bool {
 	return appHasMCPHTTP(app) || appHasMCPStdio(app)
 }
 
+func appUsesAKSK(app model.App) bool {
+	return strings.TrimSpace(app.Auth.Type) == model.AuthTypeAKSK
+}
+
+func appSignerProfile(app model.App) string {
+	if profile := strings.TrimSpace(app.Auth.Signer.Profile); profile != "" {
+		return profile
+	}
+	if profile := strings.TrimSpace(app.Auth.SignerProfile); profile != "" {
+		return profile
+	}
+	if appUsesAKSK(app) {
+		return model.SignerProfileSupplierEDI
+	}
+	return ""
+}
+
+func appSigner(app model.App) model.Signer {
+	return app.Auth.Signer
+}
+
+func goString(value string) string {
+	return fmt.Sprintf("%q", value)
+}
+
+func rustString(value string) string {
+	return fmt.Sprintf("%q", value)
+}
+
+func rustBodyFieldsForSigner(app model.App, fields []model.BodyField) []model.BodyField {
+	ordered := append([]model.BodyField(nil), fields...)
+	if strings.EqualFold(strings.TrimSpace(app.Auth.Signer.BodyOrder), "alpha") {
+		sort.SliceStable(ordered, func(i, j int) bool {
+			return strings.ToLower(strings.TrimSpace(ordered[i].Name)) < strings.ToLower(strings.TrimSpace(ordered[j].Name))
+		})
+	}
+	return ordered
+}
+
 func goAppVersion(app model.App) string {
 	if version := strings.TrimSpace(app.Version); version != "" {
 		return version
@@ -257,6 +324,27 @@ func operationHasParamsIn(operation model.Operation, location string) bool {
 
 func operationHasHeaderParams(operation model.Operation) bool {
 	return operationHasParamsIn(operation, "header")
+}
+
+func operationHasUserHeaders(app model.App, operation model.Operation) bool {
+	for _, parameter := range operation.Parameters {
+		if strings.TrimSpace(parameter.In) == "header" && !isHiddenAuthHeader(app, parameter) {
+			return true
+		}
+	}
+	return false
+}
+
+func isHiddenAuthHeader(app model.App, parameter model.Parameter) bool {
+	if !appUsesAKSK(app) || strings.TrimSpace(parameter.In) != "header" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(parameter.Name)) {
+	case "appkey", "sign", "timestamp", "nonce":
+		return true
+	default:
+		return false
+	}
 }
 
 func operationHasPathParams(operation model.Operation) bool {

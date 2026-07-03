@@ -1,0 +1,137 @@
+package auth
+
+import (
+	"crypto/rand"
+	"crypto/sha512"
+	"encoding/hex"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"{{ .Module }}/internal/config"
+)
+
+const signerProfile = "{{ appSignerProfile .App }}"
+{{- $signer := appSigner .App }}
+const signerAlgorithm = {{ goString $signer.Algorithm }}
+const accessKeyHeader = {{ goString $signer.AccessKeyHeader }}
+const signatureHeader = {{ goString $signer.SignatureHeader }}
+const timestampHeader = {{ goString $signer.TimestampHeader }}
+const nonceHeader = {{ goString $signer.NonceHeader }}
+const pathStripPrefix = {{ goString $signer.PathStripPrefix }}
+const canonicalTemplate = {{ goString $signer.CanonicalTemplate }}
+
+type SigningRequest struct {
+	AccessKey string
+	SecretKey string
+	Method    string
+	Path      string
+	Body      []byte
+	Timestamp string
+	Nonce     string
+}
+
+type SigningResult struct {
+	Headers map[string]string
+}
+
+type Signer interface {
+	Sign(SigningRequest) (SigningResult, error)
+}
+
+func ApplyAKSK(req *http.Request, method string, path string, body []byte) error {
+	ak := strings.TrimSpace(config.Lookup("OPENCLI_AK"))
+	sk := strings.TrimSpace(config.Lookup("OPENCLI_SK"))
+	if ak == "" || sk == "" {
+		return fmt.Errorf("missing AK/SK: set OPENCLI_AK and OPENCLI_SK")
+	}
+
+	timestamp := fmt.Sprint(time.Now().UnixMilli())
+	nonce := newNonce()
+	signer, err := signerForProfile(signerProfile)
+	if err != nil {
+		return err
+	}
+	result, err := signer.Sign(SigningRequest{
+		AccessKey: ak,
+		SecretKey: sk,
+		Method:    method,
+		Path:      path,
+		Body:      body,
+		Timestamp: timestamp,
+		Nonce:     nonce,
+	})
+	if err != nil {
+		return err
+	}
+
+	for name, value := range result.Headers {
+		req.Header.Set(name, value)
+	}
+	return nil
+}
+
+func signerForProfile(profile string) (Signer, error) {
+	if strings.TrimSpace(profile) == "" {
+		return nil, fmt.Errorf("missing signer profile")
+	}
+	return configuredSigner{}, nil
+}
+
+type configuredSigner struct{}
+
+func (configuredSigner) Sign(request SigningRequest) (SigningResult, error) {
+	signature, err := sign(request.AccessKey, request.SecretKey, request.Method, request.Path, request.Body, request.Timestamp, request.Nonce)
+	if err != nil {
+		return SigningResult{}, err
+	}
+	return SigningResult{Headers: map[string]string{
+		accessKeyHeader: request.AccessKey,
+		signatureHeader: signature,
+		timestampHeader: request.Timestamp,
+		nonceHeader:     request.Nonce,
+	}}, nil
+}
+
+func sign(accessKey, secretKey, method, path string, body []byte, timestamp, nonce string) (string, error) {
+	payload := canonicalTemplate
+	replacements := map[string]string{
+		"{method}":     strings.ToUpper(strings.TrimSpace(method)),
+		"{path}":       signPath(path),
+		"{access_key}": accessKey,
+		"{secret_key}": secretKey,
+		"{timestamp}":  timestamp,
+		"{nonce}":      nonce,
+		"{json_body}":  string(body),
+	}
+	for placeholder, value := range replacements {
+		payload = strings.ReplaceAll(payload, placeholder, value)
+	}
+	switch strings.TrimSpace(signerAlgorithm) {
+	case "sha512_hex":
+	default:
+		return "", fmt.Errorf("unsupported signer algorithm %q", signerAlgorithm)
+	}
+	sum := sha512.Sum512([]byte(payload))
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func signPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return path
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return strings.TrimPrefix(path, pathStripPrefix)
+}
+
+func newNonce() string {
+	var bytes [16]byte
+	if _, err := rand.Read(bytes[:]); err == nil {
+		return hex.EncodeToString(bytes[:])
+	}
+	return fmt.Sprint(time.Now().UnixNano())
+}

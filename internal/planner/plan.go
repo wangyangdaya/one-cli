@@ -41,20 +41,23 @@ func Build(doc openapi.Document, cfg configgen.Config) Plan {
 		}
 		for _, field := range op.RequestBody.JSONFields {
 			plannedOp.BodyFields = append(plannedOp.BodyFields, model.BodyField{
-				Name:        field.Name,
-				Description: field.Description,
-				Required:    field.Required,
-				Type:        field.Type,
+				Name:            field.Name,
+				Description:     field.Description,
+				Required:        field.Required,
+				RequiredUnknown: field.RequiredUnknown,
+				Type:            field.Type,
 			})
 		}
 		for _, field := range op.RequestBody.JSONSchemaFields {
 			plannedOp.BodySchemaFields = append(plannedOp.BodySchemaFields, model.BodyField{
-				Name:        field.Name,
-				Description: field.Description,
-				Required:    field.Required,
-				Type:        field.Type,
+				Name:            field.Name,
+				Description:     field.Description,
+				Required:        field.Required,
+				RequiredUnknown: field.RequiredUnknown,
+				Type:            field.Type,
 			})
 		}
+		applyBodyFieldOverrides(op, groupName, commandName, cfg, &plannedOp)
 		for _, parameter := range op.Parameters {
 			plannedOp.Parameters = append(plannedOp.Parameters, model.Parameter{
 				Name:        parameter.Name,
@@ -86,6 +89,50 @@ func Build(doc openapi.Document, cfg configgen.Config) Plan {
 	}
 
 	return app
+}
+
+func applyBodyFieldOverrides(op openapi.Operation, groupName, commandName string, cfg configgen.Config, plannedOp *model.Operation) {
+	for _, key := range overrideCandidates(op, groupName, commandName) {
+		fields := cfg.Overrides.BodyFields[key]
+		if len(fields) == 0 {
+			continue
+		}
+		plannedOp.BodyFields = applyFieldOverrides(plannedOp.BodyFields, fields)
+		plannedOp.BodySchemaFields = applyFieldOverrides(plannedOp.BodySchemaFields, fields)
+		return
+	}
+}
+
+func applyFieldOverrides(fields []model.BodyField, overrides []configgen.BodyField) []model.BodyField {
+	index := make(map[string]int, len(fields))
+	for i, field := range fields {
+		index[strings.TrimSpace(field.Name)] = i
+	}
+	for _, override := range overrides {
+		name := strings.TrimSpace(override.Name)
+		if name == "" {
+			continue
+		}
+		field := model.BodyField{Name: name}
+		if i, ok := index[name]; ok {
+			field = fields[i]
+		} else {
+			index[name] = len(fields)
+			fields = append(fields, field)
+		}
+		if override.Description != "" {
+			field.Description = strings.TrimSpace(override.Description)
+		}
+		if override.Required != nil {
+			field.Required = *override.Required
+			field.RequiredUnknown = false
+		}
+		if override.Type != "" {
+			field.Type = strings.TrimSpace(override.Type)
+		}
+		fields[index[name]] = field
+	}
+	return fields
 }
 
 func uniqueCommandName(value, groupName string, counts map[string]map[string]int) string {

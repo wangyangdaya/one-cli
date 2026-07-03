@@ -15,9 +15,22 @@ pub async fn request(
     headers: Vec<(String, String)>,
     body: Option<Value>,
 ) -> AppResult<Value> {
+    request_json_text(method, path, query, headers, body.map(|value| value.to_string())).await
+}
+
+pub async fn request_json_text(
+    method: &str,
+    path: &str,
+    query: Vec<(String, String)>,
+    headers: Vec<(String, String)>,
+    body: Option<String>,
+) -> AppResult<Value> {
     let base_url = std::env::var("OPENCLI_BASE_URL")
         .map_err(|_| "missing OPENCLI_BASE_URL".to_string())?;
     let mut headers = headers;
+{{- if appUsesAKSK .App }}
+    crate::auth::apply_aksk(&mut headers, method, path, body.as_deref())?;
+{{- else }}
     if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("Authorization")) {
         if let Ok(token) = std::env::var("OPENCLI_AUTH_TOKEN") {
             let token = token.trim();
@@ -26,6 +39,7 @@ pub async fn request(
             }
         }
     }
+{{- end }}
     let trimmed = base_url.trim_end_matches('/');
     let mut url = reqwest::Url::parse(&format!("{trimmed}{path}")).map_err(|err| err.to_string())?;
     {
@@ -38,7 +52,7 @@ pub async fn request(
     let query_preview = preview_pairs(&query);
     let headers_preview = preview_pairs(&headers);
     trace_log!("[opencli][http] request\n  method: {method}\n  url: {url}\n  query: {query_preview}\n  headers: {headers_preview}\n  body: {}",
-        body.as_ref().map(|b| preview_value(b)).unwrap_or_else(|| "<empty>".into()));
+        body.as_ref().map(|b| preview(b).to_string()).unwrap_or_else(|| "<empty>".into()));
 
     let method = Method::from_bytes(method.as_bytes()).map_err(|err| err.to_string())?;
     let client = new_http_client()?;
@@ -49,7 +63,7 @@ pub async fn request(
         req = req.header(name, value);
     }
     if let Some(ref body) = body {
-        req = req.json(body);
+        req = req.header("Content-Type", "application/json").body(body.clone());
     }
 
     let response = match req.send().await {

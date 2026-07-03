@@ -144,6 +144,7 @@ Rust + MCP 生成示例：
 - **[Swagger 外部修复链路](docs/SWAGGER_EXTERNAL_FIX.md)** - 使用 `swagger2openapi` 和 `openapi-generator-cli validate` 修复/校验脏 Swagger 输入
 - **[Skill 标准产物](docs/skills/SKILL_STANDARD_OUTPUT.md)** - 生成的 `skills/<group>/` 目录结构、文件职责和扩展规则
 - **[Skill 生产化流程](docs/skills/SKILL_PRODUCTION_WORKFLOW.md)** - 如何把生成的 API scaffold 补齐为业务可用 Skill
+- **[Swagger Config Skill](docs/skills/swagger-config/SKILL.md)** - 如何根据 Swagger/OpenAPI 文档产出 `opencli.yaml`，再用于生成可读 CLI
 - **[Skill 最佳实践样例](docs/skills/examples/skill-best-practice-demo/README.md)** - 可复制参考结构
 - **[代码审查报告](docs/CODE_REVIEW_2026-04-20.md)** - 项目代码质量分析
 - **设计文档** - 位于 `docs/superpowers/specs/`
@@ -230,6 +231,8 @@ opencli generate \
 | `--module` | ✅ | Go target 下是 Go module 路径；Rust target 下用作 Cargo package 名称来源 |
 | `--app` | ✅ | CLI 二进制名称和根命令名 |
 | `--app-version` | ❌ | 生成出来的 CLI 项目版本；覆盖 `opencli.yaml` 的 `app.version` |
+| `--auth` | ❌ | 生成认证模式：`token` 保持现状，`ak_sk` 生成 AK/SK 签名支持 |
+| `--signer` | ❌ | AK/SK 签名 profile；当前支持 `supplier_edi` |
 | `--skill-lang` | ❌ | 生成的 Skill 文档语言：`en` 或 `zh`，默认 `en` |
 | `--config` | ❌ | 配置文件路径（可选） |
 
@@ -238,6 +241,44 @@ opencli generate \
 `--app-version` 设置的是生成出来的 CLI 项目版本；如果同时配置了 `opencli.yaml` 的 `app.version`，命令行参数优先。
 
 `--skill-lang zh` 会生成中文 `skills/<group>/` 文档；不传时默认生成英文文档。生成出来的文件名保持不变，例如 `SKILL.md`、`README.md`、`generation-report.md`。
+
+AK/SK 接口可以显式生成内置签名逻辑：
+
+```bash
+opencli generate \
+  --input ./supplier.json \
+  --output ./supplier-cli \
+  --module github.com/myorg/supplier-cli \
+  --app supplier \
+  --auth ak_sk \
+  --signer supplier_edi
+
+export OPENCLI_AK='your-access-key'
+export OPENCLI_SK='your-secret-key'
+```
+
+也可以放在 `opencli.yaml`：
+
+```yaml
+auth:
+  type: ak_sk
+  signer:
+    profile: supplier_edi
+    algorithm: sha512_hex
+    headers:
+      access_key: appKey
+      signature: sign
+      timestamp: timestamp
+      nonce: nonce
+    path:
+      strip_prefix: /api-apply
+    body:
+      order: spec   # spec 保持文档/example 顺序；alpha 按字段名首字母排序
+    canonical:
+      template: "method={method}&path={path}&appKey={access_key}&appSecret={secret_key}&timestamp={timestamp}&nonce={nonce}&jsonBody={json_body}"
+```
+
+`--auth token` 不改变现有 token 行为；生成后的 CLI 继续读取 `OPENCLI_AUTH_TOKEN`。`--auth ak_sk` 会读取 `OPENCLI_AK` / `OPENCLI_SK`。`--signer` 可以覆盖 `auth.signer.profile`；`supplier_edi` 会补齐上面的默认规则。其它 API 可以写自己的 profile、header 名、path 处理、body 顺序和 canonical template；当前算法支持 `sha512_hex`。
 
 推荐按下面理解参数组合：
 
@@ -340,6 +381,19 @@ overrides:
     users.create: file-or-data    # 支持 --file 和 --data
     users.update: file-or-data
     posts.create: flags            # 展开为 CLI 标志
+
+  # 当 Swagger 导出只保留 raw-json example、丢失 body 字段必传/说明时，可在这里补齐。
+  # key 匹配顺序同 body_mode：group.command、tag.command、command、operationId、"method /path"、/path。
+  body_fields:
+    supplier.kanban-delivery:
+      - name: date
+        required: true
+        type: string
+        description: 拉取日期，格式 yyyy-MM-dd
+      - name: pageSize
+        required: true
+        type: integer
+        description: 每次数量，最大 1000
 ```
 
 ### Body Mode 说明

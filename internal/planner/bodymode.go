@@ -32,15 +32,7 @@ func bodyMode(op openapi.Operation, groupName, commandName string, cfg configgen
 }
 
 func bodyModeOverride(op openapi.Operation, groupName, commandName string, cfg configgen.Config) (string, bool) {
-	candidates := []string{
-		strings.TrimSpace(groupName) + "." + strings.TrimSpace(commandName),
-		strings.TrimSpace(op.Tag) + "." + strings.TrimSpace(commandName),
-		strings.TrimSpace(commandName),
-		strings.TrimSpace(op.OperationID),
-		strings.ToLower(strings.TrimSpace(op.Method)) + " " + strings.TrimSpace(op.Path),
-		strings.TrimSpace(op.Path),
-	}
-	for _, key := range candidates {
+	for _, key := range overrideCandidates(op, groupName, commandName) {
 		if key == "" {
 			continue
 		}
@@ -51,4 +43,15 @@ func bodyModeOverride(op openapi.Operation, groupName, commandName string, cfg c
 		}
 	}
 	return "", false
+}
+
+func overrideCandidates(op openapi.Operation, groupName, commandName string) []string {
+	return []string{
+		strings.TrimSpace(groupName) + "." + strings.TrimSpace(commandName),
+		strings.TrimSpace(op.Tag) + "." + strings.TrimSpace(commandName),
+		strings.TrimSpace(commandName),
+		strings.TrimSpace(op.OperationID),
+		strings.ToLower(strings.TrimSpace(op.Method)) + " " + strings.TrimSpace(op.Path),
+		strings.TrimSpace(op.Path),
+	}
 }

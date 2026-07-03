@@ -305,7 +305,7 @@ func TestRenderRustDisambiguatesIdentifiers(t *testing.T) {
 		"pub id: String,",
 		`#[arg(long = "body-id")]`,
 		"pub body_id: Option<String>,",
-		`payload.insert("id".to_string()`,
+		`parts.push(format!("\"id\":{value}"));`,
 	} {
 		if !strings.Contains(commandText, want) {
 			t.Fatalf("generated command missing %q:\n%s", want, commandText)

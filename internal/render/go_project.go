@@ -14,6 +14,9 @@ func writeGoProject(outputDir, module string, app model.App, skillLang string) e
 		{Path: filepath.Join("bin", app.Name), Template: "go/bin_launcher.sh.tmpl", Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}, Mode: 0o755},
 		{Path: filepath.Join("bin", app.Name+".cmd"), Template: "go/bin_launcher.cmd.tmpl", Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}, Mode: 0o644},
 	}
+	if appUsesAKSK(app) {
+		files = append(files, generatedFile{Path: filepath.Join("internal", "auth", "aksk.go"), Template: "go/auth_aksk.go.tmpl", Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}})
+	}
 	for _, group := range app.Groups {
 		data := templateData{Module: module, Target: "go", SkillLang: skillLang, App: app, Group: group}
 		groupDir := groupPackageName(group)

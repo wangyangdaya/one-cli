@@ -49,6 +49,8 @@ Edit `skills-verify/.env`:
 - `SKILLS_VERIFY_APP_DIR`: Generated app directory (default: `tmp/openapi`)
 - `OPENCLI_BASE_URL`: Base URL for API calls (required by generated CLI)
 - `OPENCLI_AUTH_TOKEN`: Optional bearer token for generated CLI HTTP requests
+- `OPENCLI_AK`: Optional AK/SK access key for generated AK/SK CLIs
+- `OPENCLI_SK`: Optional AK/SK secret key for generated AK/SK CLIs
 - `OPENCLI_BASE_URL_MAP`: Optional per-executable base URL mapping
 - `ALLOWED_EXECUTABLES`: Comma-separated list of allowed CLI executables
 
@@ -72,6 +74,16 @@ When different CLI commands should call different backends, set `OPENCLI_BASE_UR
 ```bash
 OPENCLI_BASE_URL=https://fallback.example.com
 OPENCLI_BASE_URL_MAP=openapi-cli=https://api.a.example.com,petcli=https://api.b.example.com
+```
+
+For AK/SK generated CLIs such as supplier:
+
+```bash
+SKILLS_VERIFY_APP_DIR=tmp/supplier-cli
+ALLOWED_EXECUTABLES=supplier-cli
+OPENCLI_BASE_URL=https://ediuat.mychery.com/prod-api
+OPENCLI_AK=your-access-key
+OPENCLI_SK=your-secret-key
 ```
 
 Resolution order at execution time:

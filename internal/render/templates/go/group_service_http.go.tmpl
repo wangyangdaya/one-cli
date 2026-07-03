@@ -11,12 +11,15 @@ import (
 	"os"
 {{- end }}
 	"strings"
+{{- if appUsesAKSK .App }}
 
+	"{{ .Module }}/internal/auth"
+{{- end }}
 	"{{ .Module }}/internal/config"
 	"{{ .Module }}/internal/httpx"
 )
 
-{{- range .Group.Operations }}
+{{ range .Group.Operations -}}
 type {{ .CommandName | pascal }}Input struct {
 {{- range .Parameters }}
 {{- if or (eq .In "path") (eq .In "query") }}
@@ -63,7 +66,13 @@ func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (
 		return Result{}, err
 	}
 {{- end }}
+{{- if appUsesAKSK $.App }}
+	if err := auth.ApplyAKSK(req, "{{ .Method }}", "{{ .Path }}", body); err != nil {
+		return Result{}, err
+	}
+{{- else }}
 	applyAuthToken(req)
+{{- end }}
 
 	resp, err := httpx.NewClient().Do(req)
 	if err != nil {
@@ -185,27 +194,43 @@ func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input
 {{- end }}
 {{- end }}
 {{- end }}
-		payload := map[string]any{}
+		var parts []string
 {{- range .BodyFields }}
 {{- if eq (goType .Type) "string" }}
 		if strings.TrimSpace(input.{{ .Name | pascal }}) != "" {
-			payload["{{ .Name }}"] = input.{{ .Name | pascal }}
+			value, err := json.Marshal(input.{{ .Name | pascal }})
+			if err != nil {
+				return nil, fmt.Errorf("encode body field {{ .Name }}: %w", err)
+			}
+			parts = append(parts, {{ printf "%q" (printf "\"%s\":" .Name) }}+string(value))
 		}
 {{- else if eq (goType .Type) "int" }}
 		if input.{{ .Name | pascal }} != 0 {
-			payload["{{ .Name }}"] = input.{{ .Name | pascal }}
+			value, err := json.Marshal(input.{{ .Name | pascal }})
+			if err != nil {
+				return nil, fmt.Errorf("encode body field {{ .Name }}: %w", err)
+			}
+			parts = append(parts, {{ printf "%q" (printf "\"%s\":" .Name) }}+string(value))
 		}
 {{- else if eq (goType .Type) "float64" }}
 		if input.{{ .Name | pascal }} != 0 {
-			payload["{{ .Name }}"] = input.{{ .Name | pascal }}
+			value, err := json.Marshal(input.{{ .Name | pascal }})
+			if err != nil {
+				return nil, fmt.Errorf("encode body field {{ .Name }}: %w", err)
+			}
+			parts = append(parts, {{ printf "%q" (printf "\"%s\":" .Name) }}+string(value))
 		}
 {{- else if eq (goType .Type) "bool" }}
 		if input.{{ .Name | pascal }} {
-			payload["{{ .Name }}"] = input.{{ .Name | pascal }}
+			value, err := json.Marshal(input.{{ .Name | pascal }})
+			if err != nil {
+				return nil, fmt.Errorf("encode body field {{ .Name }}: %w", err)
+			}
+			parts = append(parts, {{ printf "%q" (printf "\"%s\":" .Name) }}+string(value))
 		}
 {{- end }}
 {{- end }}
-		return json.Marshal(payload)
+		return []byte("{" + strings.Join(parts, ",") + "}"), nil
 {{- end }}
 	default:
 {{- if .BodyRequired }}
@@ -218,6 +243,7 @@ func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input
 }
 {{ end -}}
 
+{{- if not (appUsesAKSK .App) }}
 func applyAuthToken(req *http.Request) {
 	if req.Header.Get("Authorization") != "" {
 		return
@@ -228,6 +254,7 @@ func applyAuthToken(req *http.Request) {
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 }
+{{- end }}
 
 {{- if groupHasHeaderParams .Group }}
 

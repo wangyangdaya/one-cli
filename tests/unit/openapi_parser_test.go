@@ -157,6 +157,62 @@ paths:
 	}
 }
 
+func TestParseDocumentInfersSimpleJSONBodyFieldsFromExample(t *testing.T) {
+	doc, err := openapi.Parse([]byte(`
+openapi: 3.0.0
+info:
+  title: Supplier API
+  version: "1.0"
+paths:
+  /api-apply/v2/get/supplierDelState:
+    post:
+      summary: 看板配送单.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+            example: |
+              {
+                "date": "2026-06-01",
+                "pageSize": 1000,
+                "pageNum": 1,
+                "isForce": false
+              }
+      responses:
+        "200":
+          description: ok
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	body := doc.Operations[0].RequestBody
+	if !body.HasJSONSchema {
+		t.Fatal("expected body to expose JSON schema")
+	}
+	if !body.IsSimpleJSON {
+		t.Fatal("expected example object body to be classified as simple JSON")
+	}
+	if len(body.JSONFields) != 4 {
+		t.Fatalf("fields = %d want 4: %+v", len(body.JSONFields), body.JSONFields)
+	}
+	wantTypes := map[string]string{
+		"date":     "string",
+		"pageNum":  "integer",
+		"pageSize": "integer",
+		"isForce":  "boolean",
+	}
+	for _, field := range body.JSONFields {
+		if wantTypes[field.Name] != field.Type {
+			t.Fatalf("field %q type = %q want %q", field.Name, field.Type, wantTypes[field.Name])
+		}
+		if !field.RequiredUnknown {
+			t.Fatalf("field %q required should be unknown when inferred from example: %+v", field.Name, field)
+		}
+	}
+}
+
 func TestParseDocumentResolvesReferencedJSONBodySchema(t *testing.T) {
 	doc, err := openapi.Parse([]byte(`
 openapi: 3.0.0

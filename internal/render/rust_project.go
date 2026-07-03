@@ -19,6 +19,9 @@ func writeRustProject(outputDir, module string, app model.App, skillLang string)
 		{Path: filepath.Join("src", "types.rs"), Template: "rust/types.rs.tmpl", Data: templateData{Module: module, Target: "rust", SkillLang: skillLang, App: app}},
 		{Path: filepath.Join("src", "commands", "mod.rs"), Template: "rust/commands_mod.rs.tmpl", Data: templateData{Module: module, Target: "rust", SkillLang: skillLang, App: app}},
 	}
+	if appUsesAKSK(app) {
+		files = append(files, generatedFile{Path: filepath.Join("src", "auth.rs"), Template: "rust/auth.rs.tmpl", Data: templateData{Module: module, Target: "rust", SkillLang: skillLang, App: app}})
+	}
 
 	for _, group := range app.Groups {
 		files = append(files, generatedFile{

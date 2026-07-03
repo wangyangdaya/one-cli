@@ -2,7 +2,9 @@ package openapi
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -375,8 +377,125 @@ func convertRequestBody(body *openapi3.RequestBodyRef) RequestBody {
 		rb.HasJSONSchema = true
 		rb.JSONSchemaFields = collectJSONSchemaFields(mediaType.Schema.Value)
 		rb.IsSimpleJSON, rb.JSONFields = classifySimpleJSON(mediaType.Schema.Value)
+		if len(rb.JSONSchemaFields) == 0 {
+			if fields := inferJSONFieldsFromExample(mediaType.Example); len(fields) > 0 {
+				rb.JSONSchemaFields = fields
+				rb.IsSimpleJSON = true
+				rb.JSONFields = fields
+			}
+		}
 	}
 	return rb
+}
+
+func inferJSONFieldsFromExample(example any) []BodyField {
+	values := exampleObjectFields(example)
+	if len(values) == 0 || len(values) > MaxSimpleJSONFields {
+		return nil
+	}
+
+	fields := make([]BodyField, 0, len(values))
+	for _, value := range values {
+		fieldType := exampleValueType(value.Value)
+		if fieldType == "" {
+			return nil
+		}
+		fields = append(fields, BodyField{
+			Name:            strings.TrimSpace(value.Name),
+			RequiredUnknown: true,
+			Type:            fieldType,
+		})
+	}
+	return fields
+}
+
+type exampleField struct {
+	Name  string
+	Value any
+}
+
+func exampleObjectFields(example any) []exampleField {
+	switch value := example.(type) {
+	case string:
+		return exampleObjectStringFields(value)
+	case map[string]any:
+		keys := sortedKeys(value)
+		fields := make([]exampleField, 0, len(keys))
+		for _, key := range keys {
+			fields = append(fields, exampleField{Name: key, Value: value[key]})
+		}
+		return fields
+	default:
+		return nil
+	}
+}
+
+func exampleObjectStringFields(raw string) []exampleField {
+	decoder := json.NewDecoder(strings.NewReader(strings.TrimSpace(raw)))
+	decoder.UseNumber()
+
+	token, err := decoder.Token()
+	if err != nil {
+		return nil
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != '{' {
+		return nil
+	}
+
+	var fields []exampleField
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return nil
+		}
+		name, ok := token.(string)
+		if !ok {
+			return nil
+		}
+		var value any
+		if err := decoder.Decode(&value); err != nil {
+			return nil
+		}
+		fields = append(fields, exampleField{Name: name, Value: value})
+	}
+
+	token, err = decoder.Token()
+	if err != nil {
+		return nil
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != '}' {
+		return nil
+	}
+	return fields
+}
+
+func exampleValueType(value any) string {
+	switch v := value.(type) {
+	case string:
+		return "string"
+	case bool:
+		return "boolean"
+	case json.Number:
+		if _, err := v.Int64(); err == nil {
+			return "integer"
+		}
+		if _, err := v.Float64(); err == nil {
+			return "number"
+		}
+	case float64:
+		if math.Trunc(v) == v {
+			return "integer"
+		}
+		return "number"
+	case float32:
+		if math.Trunc(float64(v)) == float64(v) {
+			return "integer"
+		}
+		return "number"
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return "integer"
+	}
+	return ""
 }
 
 func collectJSONSchemaFields(schema *openapi3.Schema) []BodyField {

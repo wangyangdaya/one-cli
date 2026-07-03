@@ -7,6 +7,18 @@ const (
 	BackendMCPStdio = "mcp-stdio"
 )
 
+// Auth type constants identify generated runtime authentication behavior.
+const (
+	AuthTypeNone  = ""
+	AuthTypeToken = "token"
+	AuthTypeAKSK  = "ak_sk"
+)
+
+// Signer profile constants identify concrete AK/SK signing contracts.
+const (
+	SignerProfileSupplierEDI = "supplier_edi"
+)
+
 // BodyMode constants identify how request bodies are rendered.
 const (
 	BodyModeSimpleJSON = "simple-json"
@@ -29,7 +41,26 @@ func CloneStringMap(values map[string]string) map[string]string {
 type App struct {
 	Name    string
 	Version string
+	Auth    Auth
 	Groups  []Group
+}
+
+type Auth struct {
+	Type          string
+	SignerProfile string
+	Signer        Signer
+}
+
+type Signer struct {
+	Profile           string
+	Algorithm         string
+	AccessKeyHeader   string
+	SignatureHeader   string
+	TimestampHeader   string
+	NonceHeader       string
+	PathStripPrefix   string
+	BodyOrder         string
+	CanonicalTemplate string
 }
 
 type Group struct {
@@ -69,10 +100,11 @@ type Parameter struct {
 }
 
 type BodyField struct {
-	Name        string
-	FieldName   string
-	FlagName    string
-	Description string
-	Required    bool
-	Type        string
+	Name            string
+	FieldName       string
+	FlagName        string
+	Description     string
+	Required        bool
+	RequiredUnknown bool
+	Type            string
 }

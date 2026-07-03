@@ -58,7 +58,14 @@ metadata:
 {{- else }}
 
 - 环境变量 `OPENCLI_BASE_URL`：API 基础地址
+{{- if appUsesAKSK .App }}
+- 环境变量 `OPENCLI_AK`：AK/SK Access Key
+- 环境变量 `OPENCLI_SK`：AK/SK Secret Key
+- 签名 profile：`{{ appSignerProfile .App }}`
+- AK/SK 请求头由 CLI 自动生成：`appKey`、`sign`、`timestamp`、`nonce`
+{{- else }}
 - 环境变量 `OPENCLI_AUTH_TOKEN`：认证令牌
+{{- end }}
 {{- end }}
 
 <!-- MANUAL: 补充认证流程、前置命令、依赖说明等。 -->
@@ -131,7 +138,7 @@ metadata:
   --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if and (eq .In "query") .Required }} \
   --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }}{{ if .Required }} \
   --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ end }}{{ if eq .BodyMode "file-or-data" }} \
-  --file assets/demo-request.json{{ end }}{{ range .Parameters }}{{ if eq .In "header" }} \
+  --file assets/demo-request.json{{ end }}{{ range .Parameters }}{{ if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }} \
   --header "{{ .Name }}: <value>"{{ end }}{{ end }}
 {{- if hasOptionalFields . }}
 
@@ -139,7 +146,7 @@ metadata:
 {{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .Parameters }}{{ if eq .In "path" }} \
   --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if eq .In "query" }} \
   --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }} \
-  --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if eq .In "header" }} \
+  --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }} \
   --header "{{ .Name }}: <value>"{{ end }}{{ end }}
 {{- end }}
 {{- if eq .BodyMode "file-or-data" }}
@@ -159,15 +166,15 @@ metadata:
 | 参数 | 必填 | 说明 |
 |-----------|----------|-------------|
 {{- range .Parameters }}
-{{- if eq .In "header" }}
+{{- if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }}
 | `--header "{{ .Name }}: <value>"` | {{ if .Required }}是{{ else }}否{{ end }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }} 请求头{{ end }}（{{ .In }}） |
-{{- else }}
+{{- else if ne .In "header" }}
 | `--{{ cliParamFlagName $.Target . }}` | {{ if .Required }}是{{ else }}否{{ end }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }}（{{ if .Type }}{{ .Type }}{{ else }}string{{ end }}） |
 {{- end }}
 {{- end }}
 {{- if and (eq .BodyMode "simple-json") .BodyFields }}
 {{- range .BodyFields }}
-| `--{{ cliBodyFlagName $.Target . }}` | {{ if .Required }}是{{ else }}否{{ end }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }}（{{ if .Type }}{{ .Type }}{{ else }}string{{ end }}） |
+| `--{{ cliBodyFlagName $.Target . }}` | {{ bodyRequiredLabel . $.SkillLang }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }}（{{ if .Type }}{{ .Type }}{{ else }}string{{ end }}） |
 {{- end }}
 {{- end }}
 {{- if eq .BodyMode "file-or-data" }}
@@ -182,7 +189,7 @@ metadata:
 | 字段 | 必填 | 说明 |
 |-------|----------|-------------|
 {{- range .BodySchemaFields }}
-| `{{ .Name }}` | {{ if .Required }}是{{ else }}否{{ end }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }}（{{ if .Type }}{{ .Type }}{{ else }}unknown{{ end }}） |
+| `{{ .Name }}` | {{ bodyRequiredLabel . $.SkillLang }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }}（{{ if .Type }}{{ .Type }}{{ else }}unknown{{ end }}） |
 {{- end }}
 {{- end }}
 
@@ -201,13 +208,13 @@ metadata:
 | `401` | 认证失败 |
 | `404` | 资源不存在 |
 -->
-{{- if or (eq .BodyMode "file-or-data") (operationHasHeaderParams .) (and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) .BodyMode) }}
+{{- if or (eq .BodyMode "file-or-data") (operationHasUserHeaders $.App .) (and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) .BodyMode) }}
 
 **注意事项：**
 {{- if eq .BodyMode "file-or-data" }}
 - `--file` 和 `--data` 互斥
 {{- end }}
-{{- if operationHasHeaderParams . }}
+{{- if operationHasUserHeaders $.App . }}
 - 使用 `--header "Name: Value"` 传入请求头参数，可指定多次
 {{- end }}
 {{- if and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) .BodyMode }}

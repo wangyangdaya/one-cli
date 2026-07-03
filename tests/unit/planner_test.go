@@ -84,6 +84,40 @@ func TestBuildUsesTagAliasAndPathFallback(t *testing.T) {
 	}
 }
 
+func TestBuildUsesOperationAliasByMethodPathAndPath(t *testing.T) {
+	doc := openapi.Document{
+		Operations: []openapi.Operation{
+			{Method: "POST", Path: "/api-apply/v2/get/supplierMrpMonth", Tag: "计划物流."},
+			{Method: "POST", Path: "/api-apply/v2/get/supplierPo", Tag: "计划物流."},
+		},
+	}
+
+	plan := planner.Build(doc, configgen.Config{
+		Naming: configgen.NamingConfig{
+			TagAlias: map[string]string{
+				"计划物流.": "supplier",
+			},
+			OperationAlias: map[string]string{
+				"POST /api-apply/v2/get/supplierMrpMonth": "mrp-month",
+				"/api-apply/v2/get/supplierPo":            "purchase-order",
+			},
+		},
+	})
+
+	if len(plan.Groups) != 1 {
+		t.Fatalf("groups = %d want 1", len(plan.Groups))
+	}
+	if plan.Groups[0].Name != "supplier" {
+		t.Fatalf("group = %q want supplier", plan.Groups[0].Name)
+	}
+	if got := plan.Groups[0].Operations[0].CommandName; got != "mrp-month" {
+		t.Fatalf("method path alias command = %q want mrp-month", got)
+	}
+	if got := plan.Groups[0].Operations[1].CommandName; got != "purchase-order" {
+		t.Fatalf("path alias command = %q want purchase-order", got)
+	}
+}
+
 func TestBuildDerivesGroupNameFromMixedLanguageControllerTag(t *testing.T) {
 	doc := openapi.Document{
 		Operations: []openapi.Operation{
@@ -274,6 +308,50 @@ func TestBuildPropagatesSimpleJSONBodyFields(t *testing.T) {
 	}
 	if order.BodySchemaFields[0].Name != "lineItems" || order.BodySchemaFields[0].Description != "order lines" {
 		t.Fatalf("unexpected body schema fields: %+v", order.BodySchemaFields)
+	}
+}
+
+func TestBuildAppliesBodyFieldOverrides(t *testing.T) {
+	required := true
+	doc := openapi.Document{
+		Operations: []openapi.Operation{
+			{
+				Method:      "POST",
+				Path:        "/api-apply/v2/get/supplierDelState",
+				Tag:         "计划物流.",
+				OperationID: "POST /api-apply/v2/get/supplierDelState",
+				RequestBody: openapi.RequestBody{
+					ContentTypes:  []string{"application/json"},
+					HasJSONSchema: true,
+					IsSimpleJSON:  true,
+					JSONFields: []openapi.BodyField{
+						{Name: "date", RequiredUnknown: true, Type: "string"},
+					},
+					JSONSchemaFields: []openapi.BodyField{
+						{Name: "date", RequiredUnknown: true, Type: "string"},
+					},
+				},
+			},
+		},
+	}
+
+	plan := planner.Build(doc, configgen.Config{
+		Naming: configgen.NamingConfig{
+			TagAlias:       map[string]string{"计划物流.": "supplier"},
+			OperationAlias: map[string]string{"POST /api-apply/v2/get/supplierDelState": "kanban-delivery"},
+		},
+		Overrides: configgen.OverrideConfig{
+			BodyFields: map[string][]configgen.BodyField{
+				"supplier.kanban-delivery": {
+					{Name: "date", Required: &required, Description: "拉取日期", Type: "string"},
+				},
+			},
+		},
+	})
+
+	field := plan.Groups[0].Operations[0].BodyFields[0]
+	if field.Name != "date" || !field.Required || field.RequiredUnknown || field.Description != "拉取日期" {
+		t.Fatalf("unexpected body field override: %+v", field)
 	}
 }
 

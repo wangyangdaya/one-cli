@@ -1,3 +1,6 @@
+{{- if appUsesAKSK .App }}
+mod auth;
+{{- end }}
 mod cli;
 mod client;
 mod commands;

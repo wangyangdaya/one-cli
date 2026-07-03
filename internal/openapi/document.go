@@ -46,8 +46,9 @@ type RequestBody struct {
 }
 
 type BodyField struct {
-	Name        string
-	Description string
-	Required    bool
-	Type        string
+	Name            string
+	Description     string
+	Required        bool
+	RequiredUnknown bool
+	Type            string
 }

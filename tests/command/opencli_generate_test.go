@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -179,6 +180,329 @@ func TestGenerateCommandAcceptsRustTargetWithOpenAPI(t *testing.T) {
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute rust generate: %v", err)
+	}
+}
+
+func TestGenerateCommandAcceptsAKSKAuthForGo(t *testing.T) {
+	dir := t.TempDir()
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--auth", "ak_sk",
+		"--signer", "supplier_edi",
+		"--input", filepath.Join("..", "..", "examples", "petstore.yaml"),
+		"--output", dir,
+		"--module", "github.com/acme/generated",
+		"--app", "petcli",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute generate: %v", err)
+	}
+
+	authContent, err := os.ReadFile(filepath.Join(dir, "internal", "auth", "aksk.go"))
+	if err != nil {
+		t.Fatalf("read generated aksk auth: %v", err)
+	}
+	content := string(authContent)
+	for _, want := range []string{"OPENCLI_AK", "OPENCLI_SK", "supplier_edi", "Signer interface", "appKey", "sign", "timestamp", "nonce"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("generated AK/SK auth missing %q:\n%s", want, content)
+		}
+	}
+
+	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "pet", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated skill: %v", err)
+	}
+	skillText := string(skillContent)
+	for _, want := range []string{"OPENCLI_AK", "OPENCLI_SK", "AK/SK", "appKey", "sign", "timestamp", "nonce"} {
+		if !strings.Contains(skillText, want) {
+			t.Fatalf("generated AK/SK skill missing %q:\n%s", want, skillText)
+		}
+	}
+}
+
+func TestGenerateCommandAcceptsAKSKAuthForRust(t *testing.T) {
+	dir := t.TempDir()
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--target", "rust",
+		"--auth", "ak_sk",
+		"--signer", "supplier_edi",
+		"--input", filepath.Join("..", "..", "examples", "petstore.yaml"),
+		"--output", dir,
+		"--module", "petcli",
+		"--app", "petcli",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute rust generate: %v", err)
+	}
+
+	authContent, err := os.ReadFile(filepath.Join(dir, "src", "auth.rs"))
+	if err != nil {
+		t.Fatalf("read generated aksk auth: %v", err)
+	}
+	content := string(authContent)
+	for _, want := range []string{"OPENCLI_AK", "OPENCLI_SK", "SIGNER_PROFILE", "supplier_edi", "appKey", "sign", "timestamp", "nonce"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("generated AK/SK auth missing %q:\n%s", want, content)
+		}
+	}
+
+	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "pet", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated skill: %v", err)
+	}
+	skillText := string(skillContent)
+	for _, want := range []string{"OPENCLI_AK", "OPENCLI_SK", "AK/SK", "appKey", "sign", "timestamp", "nonce"} {
+		if !strings.Contains(skillText, want) {
+			t.Fatalf("generated AK/SK skill missing %q:\n%s", want, skillText)
+		}
+	}
+}
+
+func TestGenerateCommandSupplierAKSKSkillDocumentsBodyExampleFields(t *testing.T) {
+	dir := t.TempDir()
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--input", filepath.Join("..", "..", "examples", "supplier.json"),
+		"--config", filepath.Join("..", "..", "examples", "supplier.opencli.yaml"),
+		"--output", dir,
+		"--module", "github.com/acme/supplier-cli",
+		"--app", "supplier-cli",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute supplier generate: %v", err)
+	}
+
+	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "supplier", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated skill: %v", err)
+	}
+	skillText := string(skillContent)
+	for _, want := range []string{"--date", "--pageSize", "--pageNum", "--isForce"} {
+		if !strings.Contains(skillText, want) {
+			t.Fatalf("generated supplier skill missing body flag %q:\n%s", want, skillText)
+		}
+	}
+	for _, unwanted := range []string{`--header "appKey: <value>"`, `--header "sign: <value>"`, `--header "timestamp: <value>"`, `--header "nonce: <value>"`} {
+		if strings.Contains(skillText, unwanted) {
+			t.Fatalf("generated supplier AK/SK skill should not ask for auth header %q:\n%s", unwanted, skillText)
+		}
+	}
+}
+
+func TestGenerateCommandSupplierAKSKMatchesGatewaySigningExample(t *testing.T) {
+	dir := t.TempDir()
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--input", filepath.Join("..", "..", "examples", "supplier.json"),
+		"--config", filepath.Join("..", "..", "examples", "supplier.opencli.yaml"),
+		"--output", dir,
+		"--module", "github.com/acme/supplier-cli",
+		"--app", "supplier-cli",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute supplier generate: %v", err)
+	}
+
+	authTest := `package auth
+
+import "testing"
+
+func TestSupplierSignMatchesGatewayExample(t *testing.T) {
+	body := []byte(` + "`" + `{"date":"2026-04-21","pageSize":25,"pageNum":25,"isForce":true}` + "`" + `)
+	got, err := sign("0AA14a7757576434d7", "cc637052aebe4687ac1b5c5d4a509485", "POST", "/api-apply/v2/get/supplierDelState", body, "1783046918568", "18bea7b9b71c1778")
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	want := "fc748c543a3645b5c07c104f6ba92b83945466bf74548f52416c2afa48495993e5fef62e798f5646442539251f51c8c98d83d4fec4743b77efa94d7192f738e8"
+	if got != want {
+		t.Fatalf("sign mismatch: got %s want %s", got, want)
+	}
+}
+
+func TestSupplierSignMatchesOfficialDocumentExample(t *testing.T) {
+	body := []byte(` + "`" + `{"batchNo":"fasdfsd202506090084","total":1,"pageSize":1,"pageNum":1,"list":[{"supplierCode":"TS","supplierName":"测试","plantId":"测试1","plantName":"测试2","vendorProductNo":"201034AA","vendorProductName":"电动转向管","cheryProductNo":"20104AA","manufactureNum":"2000.00","manufactureInputNum":1764,"actualBeginTime":"2025-06-06 08:27:05","actualEndTime":""}]}` + "`" + `)
+	got, err := sign("8e79ac36fcce490", "e1231387b0bd684ac7a27dde792e836785", "POST", "/api-apply/v2/push/supplierProMaterialStock", body, "1747386804000", "1747382356599Hd")
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	want := "594b2a0b2583befc29b34017b2371c5dd1b1721b5d87040fcdb3216a4b2319ad8b71d1e27d797b4fb10646abed8b43643b0b2c6a2e836f08d2ef2a6e13757657"
+	if got != want {
+		t.Fatalf("sign mismatch: got %s want %s", got, want)
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "internal", "auth", "aksk_test.go"), []byte(authTest), 0o644); err != nil {
+		t.Fatalf("write auth test: %v", err)
+	}
+
+	supplierTest := `package supplier
+
+import "testing"
+
+func TestKanbanDeliveryBodyMatchesGatewayExampleOrder(t *testing.T) {
+	body, err := buildKanbanDeliveryBody(KanbanDeliveryInput{
+		Date: "2026-04-21",
+		Pagesize: 25,
+		Pagenum: 25,
+		Isforce: true,
+	})
+	if err != nil {
+		t.Fatalf("build body: %v", err)
+	}
+	want := ` + "`" + `{"date":"2026-04-21","pageSize":25,"pageNum":25,"isForce":true}` + "`" + `
+	if string(body) != want {
+		t.Fatalf("body mismatch: got %s want %s", body, want)
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "internal", "supplier", "supplier_test.go"), []byte(supplierTest), 0o644); err != nil {
+		t.Fatalf("write supplier test: %v", err)
+	}
+
+	testCmd := exec.Command("go", "test", "./internal/auth", "./internal/supplier")
+	testCmd.Dir = dir
+	testCmd.Env = append(os.Environ(), "GOCACHE="+filepath.Join(t.TempDir(), "gocache"))
+	if output, err := testCmd.CombinedOutput(); err != nil {
+		t.Fatalf("generated supplier tests failed: %v\n%s", err, output)
+	}
+}
+
+func TestGenerateCommandSupplierRustAKSKPreservesBodyOrder(t *testing.T) {
+	dir := t.TempDir()
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--target", "rust",
+		"--input", filepath.Join("..", "..", "examples", "supplier.json"),
+		"--config", filepath.Join("..", "..", "examples", "supplier.opencli.yaml"),
+		"--output", dir,
+		"--module", "supplier-cli",
+		"--app", "supplier-cli",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute supplier rust generate: %v", err)
+	}
+
+	commandContent, err := os.ReadFile(filepath.Join(dir, "src", "commands", "supplier.rs"))
+	if err != nil {
+		t.Fatalf("read generated supplier command: %v", err)
+	}
+	commandText := string(commandContent)
+	for _, want := range []string{
+		`let body = build_kanban_delivery_http_body(&args)?;`,
+		`client::request_json_text("POST", &path, query, headers, body).await?;`,
+		`parts.push(format!("\"date\":{value}"));`,
+		`parts.push(format!("\"pageSize\":{value}"));`,
+		`parts.push(format!("\"pageNum\":{value}"));`,
+		`parts.push(format!("\"isForce\":{value}"));`,
+	} {
+		if !strings.Contains(commandText, want) {
+			t.Fatalf("generated supplier rust command missing %q:\n%s", want, commandText)
+		}
+	}
+	dateIdx := strings.Index(commandText, `parts.push(format!("\"date\":{value}"));`)
+	pageSizeIdx := strings.Index(commandText, `parts.push(format!("\"pageSize\":{value}"));`)
+	pageNumIdx := strings.Index(commandText, `parts.push(format!("\"pageNum\":{value}"));`)
+	isForceIdx := strings.Index(commandText, `parts.push(format!("\"isForce\":{value}"));`)
+	if !(dateIdx < pageSizeIdx && pageSizeIdx < pageNumIdx && pageNumIdx < isForceIdx) {
+		t.Fatalf("generated supplier rust body fields are not in spec order:\n%s", commandText)
+	}
+	if strings.Contains(commandText, `return Ok(Some(Value::Object(payload)));`) {
+		t.Fatalf("generated supplier rust HTTP command should not rebuild JSON through Value::Object:\n%s", commandText)
+	}
+
+	clientContent, err := os.ReadFile(filepath.Join(dir, "src", "client.rs"))
+	if err != nil {
+		t.Fatalf("read generated client: %v", err)
+	}
+	clientText := string(clientContent)
+	for _, want := range []string{
+		`pub async fn request_json_text`,
+		`crate::auth::apply_aksk(&mut headers, method, path, body.as_deref())?;`,
+		`.body(body.clone())`,
+	} {
+		if !strings.Contains(clientText, want) {
+			t.Fatalf("generated rust client missing %q:\n%s", want, clientText)
+		}
+	}
+}
+
+func TestGenerateCommandRejectsIncompleteCustomSigner(t *testing.T) {
+	dir := t.TempDir()
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--auth", "ak_sk",
+		"--signer", "unknown",
+		"--input", filepath.Join("..", "..", "examples", "petstore.yaml"),
+		"--output", dir,
+		"--module", "github.com/acme/generated",
+		"--app", "petcli",
+	})
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), `custom signer "unknown" requires auth.signer.algorithm`) {
+		t.Fatalf("expected incomplete custom signer error, got %v", err)
+	}
+}
+
+func TestGenerateCommandAcceptsConfiguredSignerProfile(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "opencli.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+auth:
+  type: ak_sk
+  signer:
+    profile: custom_supplier
+    algorithm: sha512_hex
+    headers:
+      access_key: X-App-Key
+      signature: X-Sign
+      timestamp: X-Timestamp
+      nonce: X-Nonce
+    path:
+      strip_prefix: /api-apply
+    canonical:
+      template: "method={method}&path={path}&appKey={access_key}&appSecret={secret_key}&timestamp={timestamp}&nonce={nonce}&jsonBody={json_body}"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	outDir := filepath.Join(dir, "out")
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--input", filepath.Join("..", "..", "examples", "petstore.yaml"),
+		"--config", configPath,
+		"--output", outDir,
+		"--module", "github.com/acme/generated",
+		"--app", "petcli",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute generate: %v", err)
+	}
+
+	authContent, err := os.ReadFile(filepath.Join(outDir, "internal", "auth", "aksk.go"))
+	if err != nil {
+		t.Fatalf("read generated auth: %v", err)
+	}
+	content := string(authContent)
+	for _, want := range []string{`const signerProfile = "custom_supplier"`, `const accessKeyHeader = "X-App-Key"`, `const signatureHeader = "X-Sign"`} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("generated auth missing %q:\n%s", want, content)
+		}
 	}
 }
 

@@ -1,5 +1,5 @@
 use clap::{Args, Subcommand};
-{{- if or (groupHasBodyFields .Group) (groupUsesMCPHTTP .Group) (groupUsesMCPStdio .Group) }}
+{{- if or (groupUsesMCPHTTP .Group) (groupUsesMCPStdio .Group) }}
 use serde_json::{Map, Value};
 {{- else }}
 use serde_json::Value;
@@ -120,12 +120,73 @@ async fn run_{{ rustFieldName .CommandName }}(args: {{ rustTypeName .CommandName
 {{- else }}
     let headers = Vec::new();
 {{- end }}
-    let body = build_{{ rustFieldName .CommandName }}_body(&args)?;
-    let response = client::request("{{ .Method }}", &path, query, headers, body).await?;
+    let body = build_{{ rustFieldName .CommandName }}_http_body(&args)?;
+    let response = client::request_json_text("{{ .Method }}", &path, query, headers, body).await?;
 {{- end }}
     output::print_output("{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}", &response)
 }
 
+{{- if not (or (groupUsesMCPStdio $.Group) (groupUsesMCPHTTP $.Group)) }}
+fn build_{{ rustFieldName .CommandName }}_http_body(args: &{{ rustTypeName .CommandName }}Args) -> AppResult<Option<String>> {
+{{- if not .BodyMode }}
+    let _ = args;
+    Ok(None)
+{{- else }}
+    let has_data = args.body_data.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false);
+    let has_file = args.body_file.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false);
+    if has_data && has_file {
+        return Err("--data and --file are mutually exclusive".to_string());
+    }
+
+    if let Some(data) = &args.body_data {
+        let parsed = serde_json::from_str::<Value>(data).map_err(|err| err.to_string())?;
+        let _ = parsed;
+        return Ok(Some(data.trim().to_string()));
+    }
+    if let Some(path) = &args.body_file {
+        let content = std::fs::read_to_string(path).map_err(|err| err.to_string())?;
+        let parsed = serde_json::from_str::<Value>(&content).map_err(|err| err.to_string())?;
+        let _ = parsed;
+        return Ok(Some(content.trim().to_string()));
+    }
+
+{{- if .BodyFields }}
+    let mut parts: Vec<String> = Vec::new();
+    let mut has_flag_body = false;
+{{- range rustBodyFieldsForSigner $.App .BodyFields }}
+    if let Some(value) = &args.{{ rustBodyFieldName . }} {
+        let value = serde_json::to_string(value).map_err(|err| err.to_string())?;
+        parts.push(format!("\"{{ .Name }}\":{value}"));
+        has_flag_body = true;
+    }
+{{- end }}
+{{- if eq .BodyMode "simple-json" }}
+    if has_flag_body {
+{{- range .BodyFields }}
+{{- if .Required }}
+        if args.{{ rustBodyFieldName . }}.is_none() {
+            return Err("missing required body field: {{ .Name }}".to_string());
+        }
+{{- end }}
+{{- end }}
+        return Ok(Some("{".to_string() + &parts.join(",") + "}"));
+    }
+{{- else }}
+    if has_flag_body {
+        return Ok(Some("{".to_string() + &parts.join(",") + "}"));
+    }
+{{- end }}
+{{- end }}
+{{- if .BodyRequired }}
+    Err("request body is required".to_string())
+{{- else }}
+    Ok(None)
+{{- end }}
+{{- end }}
+}
+
+{{- end }}
+{{- if or (groupUsesMCPStdio $.Group) (groupUsesMCPHTTP $.Group) }}
 fn build_{{ rustFieldName .CommandName }}_body(args: &{{ rustTypeName .CommandName }}Args) -> AppResult<Option<Value>> {
 {{- if not .BodyMode }}
     let _ = args;
@@ -180,4 +241,5 @@ fn build_{{ rustFieldName .CommandName }}_body(args: &{{ rustTypeName .CommandNa
 {{- end }}
 {{- end }}
 }
+{{- end }}
 {{ end -}}

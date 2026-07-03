@@ -1,0 +1,94 @@
+use sha2::{Digest, Sha512};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::types::AppResult;
+
+const SIGNER_PROFILE: &str = "{{ appSignerProfile .App }}";
+{{- $signer := appSigner .App }}
+const SIGNER_ALGORITHM: &str = {{ rustString $signer.Algorithm }};
+const ACCESS_KEY_HEADER: &str = {{ rustString $signer.AccessKeyHeader }};
+const SIGNATURE_HEADER: &str = {{ rustString $signer.SignatureHeader }};
+const TIMESTAMP_HEADER: &str = {{ rustString $signer.TimestampHeader }};
+const NONCE_HEADER: &str = {{ rustString $signer.NonceHeader }};
+const PATH_STRIP_PREFIX: &str = {{ rustString $signer.PathStripPrefix }};
+const CANONICAL_TEMPLATE: &str = {{ rustString $signer.CanonicalTemplate }};
+
+pub fn apply_aksk(
+    headers: &mut Vec<(String, String)>,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+) -> AppResult<()> {
+    let ak = std::env::var("OPENCLI_AK").unwrap_or_default().trim().to_string();
+    let sk = std::env::var("OPENCLI_SK").unwrap_or_default().trim().to_string();
+    if ak.is_empty() || sk.is_empty() {
+        return Err("missing AK/SK: set OPENCLI_AK and OPENCLI_SK".to_string());
+    }
+
+    let timestamp = unix_millis().to_string();
+    let nonce = format!("{:x}", unix_nanos());
+    let body_text = body.unwrap_or_default();
+    let signed_headers = sign_headers(SIGNER_PROFILE, &ak, &sk, method, path, &body_text, &timestamp, &nonce)?;
+
+    for (name, value) in signed_headers {
+        set_header(headers, &name, value);
+    }
+    Ok(())
+}
+
+fn sign_headers(profile: &str, access_key: &str, secret_key: &str, method: &str, path: &str, body: &str, timestamp: &str, nonce: &str) -> AppResult<Vec<(String, String)>> {
+    if profile.trim().is_empty() {
+        return Err("missing signer profile".to_string());
+    }
+    Ok(vec![
+        (ACCESS_KEY_HEADER.to_string(), access_key.to_string()),
+        (SIGNATURE_HEADER.to_string(), sign(access_key, secret_key, method, path, body, timestamp, nonce)?),
+        (TIMESTAMP_HEADER.to_string(), timestamp.to_string()),
+        (NONCE_HEADER.to_string(), nonce.to_string()),
+    ])
+}
+
+fn sign(access_key: &str, secret_key: &str, method: &str, path: &str, body: &str, timestamp: &str, nonce: &str) -> AppResult<String> {
+    if SIGNER_ALGORITHM.trim() != "sha512_hex" {
+        return Err(format!("unsupported signer algorithm {:?}", SIGNER_ALGORITHM));
+    }
+    let payload = CANONICAL_TEMPLATE
+        .replace("{method}", &method.trim().to_uppercase())
+        .replace("{path}", &sign_path(path))
+        .replace("{access_key}", access_key)
+        .replace("{secret_key}", secret_key)
+        .replace("{timestamp}", timestamp)
+        .replace("{nonce}", nonce)
+        .replace("{json_body}", body);
+    let mut hasher = Sha512::new();
+    hasher.update(payload);
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn sign_path(path: &str) -> String {
+    let mut value = path.trim().to_string();
+    if !value.is_empty() && !value.starts_with('/') {
+        value.insert(0, '/');
+    }
+    value.strip_prefix(PATH_STRIP_PREFIX).unwrap_or(&value).to_string()
+}
+
+fn set_header(headers: &mut Vec<(String, String)>, name: &str, value: String) {
+    if let Some((_, existing)) = headers.iter_mut().find(|(header, _)| header.eq_ignore_ascii_case(name)) {
+        *existing = value;
+        return;
+    }
+    headers.push((name.to_string(), value));
+}
+
+fn unix_millis() -> u128 {
+    unix_duration().as_millis()
+}
+
+fn unix_nanos() -> u128 {
+    unix_duration().as_nanos()
+}
+
+fn unix_duration() -> std::time::Duration {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default()
+}
