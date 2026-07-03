@@ -19,6 +19,11 @@ const (
 	SignerProfileSupplierEDI = "supplier_edi"
 )
 
+// SignerAlgorithm constants identify supported signing algorithms.
+const (
+	SignerAlgorithmSHA512Hex = "sha512_hex"
+)
+
 // BodyMode constants identify how request bodies are rendered.
 const (
 	BodyModeSimpleJSON = "simple-json"

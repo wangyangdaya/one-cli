@@ -208,7 +208,7 @@ metadata:
 | `401` | 认证失败 |
 | `404` | 资源不存在 |
 -->
-{{- if or (eq .BodyMode "file-or-data") (operationHasUserHeaders $.App .) (and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) .BodyMode) }}
+{{- if or (eq .BodyMode "file-or-data") (operationHasUserHeaders $.App .) (and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) .BodyMode) (and (appUsesAKSK $.App) (eq .BodyMode "simple-json")) }}
 
 **注意事项：**
 {{- if eq .BodyMode "file-or-data" }}
@@ -219,6 +219,9 @@ metadata:
 {{- end }}
 {{- if and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) .BodyMode }}
 - 简单字段暴露为独立 flag；复杂输入回退到 `--data` / `--file`
+{{- end }}
+{{- if and (appUsesAKSK $.App) (or (eq .BodyMode "simple-json") (eq .BodyMode "file-or-data")) }}
+- AK/SK 签名下优先用独立 flag（如 `--date`、`--pageSize`），而非 `--data`/`--file`：flag 按文档字段顺序拼装 body，签名才一致；`--data`/`--file` 的 JSON 字段顺序不受控，可能导致签名校验失败
 {{- end }}
 {{- end }}
 

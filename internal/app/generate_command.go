@@ -171,9 +171,6 @@ func validateAuthAndSigner(auth, signer string) error {
 	if strings.TrimSpace(signer) != "" && auth != "ak_sk" {
 		return fmt.Errorf("--signer requires --auth ak_sk")
 	}
-	if auth != "ak_sk" {
-		return nil
-	}
 	return nil
 }
 
@@ -193,12 +190,23 @@ func resolveSignerConfig(auth, signer string, cfg configgen.Config) (model.Signe
 		resolved.Profile = model.SignerProfileSupplierEDI
 	}
 	if resolved.Profile == model.SignerProfileSupplierEDI {
-		return withSupplierEDIDefaults(resolved), nil
+		resolved = withSupplierEDIDefaults(resolved)
+		if !supportedSignerAlgorithm(resolved.Algorithm) {
+			return model.Signer{}, fmt.Errorf("signer %q uses unsupported algorithm %q: expected %s", resolved.Profile, resolved.Algorithm, model.SignerAlgorithmSHA512Hex)
+		}
+		return resolved, nil
 	}
 	if resolved.Algorithm == "" || resolved.CanonicalTemplate == "" || resolved.SignatureHeader == "" {
 		return model.Signer{}, fmt.Errorf("custom signer %q requires auth.signer.algorithm, auth.signer.canonical.template, and auth.signer.headers.signature", resolved.Profile)
 	}
+	if !supportedSignerAlgorithm(resolved.Algorithm) {
+		return model.Signer{}, fmt.Errorf("custom signer %q uses unsupported algorithm %q: expected %s", resolved.Profile, resolved.Algorithm, model.SignerAlgorithmSHA512Hex)
+	}
 	return withSignerDefaults(resolved), nil
+}
+
+func supportedSignerAlgorithm(value string) bool {
+	return strings.TrimSpace(value) == model.SignerAlgorithmSHA512Hex
 }
 
 func signerFromConfig(cfg configgen.SignerConfig) model.Signer {

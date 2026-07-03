@@ -1,0 +1,51 @@
+# Petstore OpenCLI 配置示例
+#
+# 与 examples/petstore.yaml 配套使用，演示如何用 opencli.yaml 调整生成出来的 CLI：
+# - app: 指定二进制和根命令名
+# - naming: 用 tag_alias / operation_alias 重命名分组和命令
+# - overrides: 控制 body 模式，补齐缺失的 body 字段描述
+#
+# 用法：
+#   opencli generate \
+#     --input ./examples/petstore.yaml \
+#     --config ./examples/petstore.opencli.yaml \
+#     --output ./tmp/petcli \
+#     --module github.com/acme/petcli \
+#     --app petcli
+
+app:
+  binary: petcli
+  root_command: petcli
+  version: 1.0.0
+
+naming:
+  # OpenAPI 里的 tag 已经是 pet，这里 alias 保持一致，仅作演示
+  tag_alias:
+    pet: pet
+  # 缩短命令名：listPets -> list，getPet -> get，createPet -> create
+  operation_alias:
+    listPets: list
+    getPet: get
+    createPet: create
+
+runtime:
+  auth_header: Authorization
+  default_output: json
+
+overrides:
+  # petstore 的 createPet body 是 NewPet schema，默认就是 simple-json
+  # 这里显式声明，方便演示 overrides.body_mode 用法
+  body_mode:
+    pet.create: simple-json
+  # 当 Swagger 导出丢失字段说明时，可在这里补齐
+  # key 匹配顺序：group.command、tag.command、command、operationId、"method /path"、/path
+  body_fields:
+    pet.create:
+      - name: name
+        required: true
+        type: string
+        description: 宠物名称
+      - name: tag
+        required: false
+        type: string
+        description: 宠物标签，可选分类信息

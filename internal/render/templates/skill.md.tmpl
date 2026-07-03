@@ -215,7 +215,7 @@ Generated APIs do not contain enough business semantics to infer real workflows.
 | `401` | 认证失败 |
 | `404` | 资源不存在 |
 -->
-{{- if or (eq .BodyMode "file-or-data") (operationHasUserHeaders $.App .) (and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) .BodyMode) }}
+{{- if or (eq .BodyMode "file-or-data") (operationHasUserHeaders $.App .) (and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) .BodyMode) (and (appUsesAKSK $.App) (eq .BodyMode "simple-json")) }}
 
 **Notes:**
 {{- if eq .BodyMode "file-or-data" }}
@@ -226,6 +226,9 @@ Generated APIs do not contain enough business semantics to infer real workflows.
 {{- end }}
 {{- if and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) .BodyMode }}
 - Simple fields are exposed as individual flags; complex input falls back to `--data` / `--file`
+{{- end }}
+{{- if and (appUsesAKSK $.App) (or (eq .BodyMode "simple-json") (eq .BodyMode "file-or-data")) }}
+- For AK/SK signing, prefer individual flags (e.g. `--date`, `--pageSize`) over `--data`/`--file`: flags preserve the spec field order the signer expects, while `--data`/`--file` JSON may reorder fields and break the signature
 {{- end }}
 {{- end }}
 

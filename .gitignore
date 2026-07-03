@@ -3,7 +3,7 @@ bin/
 dist/
 tmp/
 examples/*
-!examples/supplier.opencli.yaml
+!examples/petstore.opencli.yaml
 docs/
 !docs/
 docs/*

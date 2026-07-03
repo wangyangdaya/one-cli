@@ -396,6 +396,11 @@ overrides:
         description: 每次数量，最大 1000
 ```
 
+仓库内置可直接运行的配置示例：
+
+- [`examples/petstore.opencli.yaml`](examples/petstore.opencli.yaml) — 与 `examples/petstore.yaml` 配套，演示 `naming.operation_alias` 缩短命令名、`overrides.body_fields` 补齐字段说明。
+- `examples/supplier.opencli.yaml` — 真实供应商 AK/SK 接口配置，演示 `auth.type: ak_sk`、`signer` profile 和复用 body 字段 YAML 锚点（需配合本地 `supplier.json`）。
+
 ### Body Mode 说明
 
 | 模式 | 说明 | CLI 示例 |

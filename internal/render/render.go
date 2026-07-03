@@ -3,6 +3,7 @@ package render
 import (
 	"bytes"
 	"fmt"
+	"go/format"
 	"os"
 	"path/filepath"
 	"sort"
@@ -24,11 +25,22 @@ func writeTemplates(outputDir string, files []generatedFile) error {
 		if err != nil {
 			return err
 		}
+		if isGoSourceTemplate(file.Template) {
+			formatted, err := format.Source(content)
+			if err != nil {
+				return fmt.Errorf("format %s: %w", file.Template, err)
+			}
+			content = formatted
+		}
 		if err := writeFile(filepath.Join(outputDir, file.Path), content, file.Mode); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func isGoSourceTemplate(name string) bool {
+	return strings.HasPrefix(name, "go/") && strings.HasSuffix(name, ".go.tmpl")
 }
 
 func renderTemplate(name string, data any) ([]byte, error) {
@@ -339,12 +351,19 @@ func isHiddenAuthHeader(app model.App, parameter model.Parameter) bool {
 	if !appUsesAKSK(app) || strings.TrimSpace(parameter.In) != "header" {
 		return false
 	}
-	switch strings.ToLower(strings.TrimSpace(parameter.Name)) {
-	case "appkey", "sign", "timestamp", "nonce":
-		return true
-	default:
-		return false
+	name := strings.ToLower(strings.TrimSpace(parameter.Name))
+	signer := app.Auth.Signer
+	for _, candidate := range []string{
+		signer.AccessKeyHeader,
+		signer.SignatureHeader,
+		signer.TimestampHeader,
+		signer.NonceHeader,
+	} {
+		if name == strings.ToLower(strings.TrimSpace(candidate)) {
+			return true
+		}
 	}
+	return false
 }
 
 func operationHasPathParams(operation model.Operation) bool {

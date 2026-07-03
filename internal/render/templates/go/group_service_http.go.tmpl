@@ -14,12 +14,16 @@ import (
 {{- if appUsesAKSK .App }}
 
 	"{{ .Module }}/internal/auth"
-{{- end }}
 	"{{ .Module }}/internal/config"
 	"{{ .Module }}/internal/httpx"
 )
+{{- else }}
 
-{{ range .Group.Operations -}}
+	"{{ .Module }}/internal/config"
+	"{{ .Module }}/internal/httpx"
+)
+{{- end }}
+{{ range .Group.Operations }}
 type {{ .CommandName | pascal }}Input struct {
 {{- range .Parameters }}
 {{- if or (eq .In "path") (eq .In "query") }}

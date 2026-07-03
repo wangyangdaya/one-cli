@@ -261,7 +261,7 @@ func pathResourceGroupName(path string) string {
 	var candidates [][]string
 	for _, segment := range strings.Split(strings.TrimSpace(path), "/") {
 		segment = strings.TrimSpace(segment)
-		if segment == "" || strings.EqualFold(segment, "api") || strings.EqualFold(segment, "les") {
+		if segment == "" || isPathGroupSkipSegment(segment) {
 			continue
 		}
 		parts := splitIdentifier(strings.Trim(segment, "{}"))
@@ -276,6 +276,21 @@ func pathResourceGroupName(path string) string {
 		return strings.Join(append(append([]string{}, candidates[0]...), candidates[1]...), "-")
 	}
 	return strings.Join(candidates[0], "-")
+}
+
+// pathGroupSkipSegments lists path segments that are treated as transport noise
+// when deriving a group name from the URL path. "api" is a generic version prefix;
+// "les" is a legacy internal gateway prefix. Add new entries here when needed.
+var pathGroupSkipSegments = []string{"api", "les"}
+
+func isPathGroupSkipSegment(segment string) bool {
+	trimmed := strings.TrimSpace(segment)
+	for _, value := range pathGroupSkipSegments {
+		if strings.EqualFold(trimmed, value) {
+			return true
+		}
+	}
+	return false
 }
 
 func controllerGroupName(tag string) (string, bool) {

@@ -3,6 +3,7 @@ package command_test
 import (
 	"bytes"
 	"encoding/json"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -297,6 +298,53 @@ func TestGenerateCommandSupplierAKSKSkillDocumentsBodyExampleFields(t *testing.T
 	}
 }
 
+func TestGenerateCommandHTTPGoOutputIsGofmtClean(t *testing.T) {
+	cases := []struct {
+		name   string
+		input  string
+		config string
+		module string
+		app    string
+	}{
+		{
+			name:   "token",
+			input:  filepath.Join("..", "..", "examples", "petstore.yaml"),
+			module: "github.com/acme/petcli",
+			app:    "petcli",
+		},
+		{
+			name:   "aksk",
+			input:  filepath.Join("..", "..", "examples", "supplier.json"),
+			config: filepath.Join("..", "..", "examples", "supplier.opencli.yaml"),
+			module: "github.com/acme/supplier-cli",
+			app:    "supplier-cli",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			args := []string{
+				"generate",
+				"--input", tc.input,
+				"--output", dir,
+				"--module", tc.module,
+				"--app", tc.app,
+			}
+			if tc.config != "" {
+				args = append(args, "--config", tc.config)
+			}
+			cmd := app.NewRootCommand()
+			cmd.SetArgs(args)
+
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("execute generate: %v", err)
+			}
+			assertGoFilesGofmtClean(t, dir)
+		})
+	}
+}
+
 func TestGenerateCommandSupplierAKSKMatchesGatewaySigningExample(t *testing.T) {
 	dir := t.TempDir()
 	cmd := app.NewRootCommand()
@@ -457,6 +505,43 @@ func TestGenerateCommandRejectsIncompleteCustomSigner(t *testing.T) {
 	}
 }
 
+func TestGenerateCommandRejectsUnsupportedSignerAlgorithm(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "opencli.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+auth:
+  type: ak_sk
+  signer:
+    profile: custom_supplier
+    algorithm: hmac_sha256
+    headers:
+      access_key: X-App-Key
+      signature: X-Sign
+      timestamp: X-Timestamp
+      nonce: X-Nonce
+    canonical:
+      template: "method={method}&path={path}&appKey={access_key}&appSecret={secret_key}&timestamp={timestamp}&nonce={nonce}&jsonBody={json_body}"
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	outDir := filepath.Join(dir, "out")
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--input", filepath.Join("..", "..", "examples", "petstore.yaml"),
+		"--config", configPath,
+		"--output", outDir,
+		"--module", "github.com/acme/generated",
+		"--app", "petcli",
+	})
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), `unsupported algorithm "hmac_sha256"`) {
+		t.Fatalf("expected unsupported algorithm error, got %v", err)
+	}
+}
+
 func TestGenerateCommandAcceptsConfiguredSignerProfile(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "opencli.yaml")
@@ -582,5 +667,37 @@ func TestGenerateCommandRejectsUnknownTarget(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "unsupported target") {
 		t.Fatalf("expected unsupported target error, got %v", err)
+	}
+}
+
+func assertGoFilesGofmtClean(t *testing.T, root string) {
+	t.Helper()
+
+	var files []string
+	if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(path, ".go") {
+			files = append(files, path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk generated files: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatalf("expected generated Go files under %s", root)
+	}
+
+	cmd := exec.Command("gofmt", append([]string{"-l"}, files...)...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run gofmt: %v\n%s", err, output)
+	}
+	if strings.TrimSpace(string(output)) != "" {
+		t.Fatalf("generated Go files are not gofmt-clean:\n%s", output)
 	}
 }

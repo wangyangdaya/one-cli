@@ -20,7 +20,7 @@ Do not invent APIs or shell commands.
 DEFAULT_MODEL_NAME = "gpt-4o-mini"
 DEFAULT_LOG_LEVEL = "INFO"
 DEFAULT_THREAD_ID = "skills-verify"
-DEFAULT_RECURSION_LIMIT = 25
+DEFAULT_RECURSION_LIMIT = 50
 DEFAULT_APP_DIR = "tmp/openapi"
 DEFAULT_SKILL_LOG_PREVIEW_CHARS = 240
 logger = logging.getLogger("skills_verify")
