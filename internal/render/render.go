@@ -99,6 +99,7 @@ func renderTemplate(name string, data any) ([]byte, error) {
 			"operationIsWriteMethod":   operationIsWriteMethod,
 			"operationRiskLabel":       operationRiskLabel,
 			"groupDocumentationIssues": groupDocumentationIssues,
+			"appDocumentationIssues":   appDocumentationIssues,
 			"hasOptionalFields":        hasOptionalFields,
 			"upper":                    strings.ToUpper,
 		}).Parse(string(raw))
@@ -565,24 +566,169 @@ func groupDocumentationIssues(group model.Group, lang string) []string {
 				"`"+op.CommandName+"` 缺少命令摘要",
 			))
 		}
-		for _, param := range op.Parameters {
-			if strings.TrimSpace(param.Description) == "" {
-				issues = append(issues, issue(
-					"`"+op.CommandName+"` parameter `"+param.Name+"` is missing a description",
-					"`"+op.CommandName+"` 的参数 `"+param.Name+"` 缺少说明",
-				))
-			}
+		issues = append(issues, operationParameterIssues(op, issue)...)
+		issues = append(issues, operationBodyFieldIssues(op, issue)...)
+		issues = append(issues, operationPathIssues(op, issue)...)
+	}
+	return issues
+}
+
+func appDocumentationIssues(app model.App, lang string) []string {
+	var issues []string
+	for _, group := range app.Groups {
+		issues = append(issues, groupDocumentationIssues(group, lang)...)
+	}
+	return issues
+}
+
+func operationParameterIssues(op model.Operation, issue func(string, string) string) []string {
+	var issues []string
+	seen := make(map[string]bool, len(op.Parameters))
+	for _, param := range op.Parameters {
+		name := strings.TrimSpace(param.Name)
+		location := strings.TrimSpace(param.In)
+		if name == "" {
+			continue
 		}
-		for _, field := range op.BodySchemaFields {
-			if strings.TrimSpace(field.Description) == "" {
-				issues = append(issues, issue(
-					"`"+op.CommandName+"` request body field `"+field.Name+"` is missing a description",
-					"`"+op.CommandName+"` 的请求体字段 `"+field.Name+"` 缺少说明",
-				))
-			}
+		if location == "" {
+			issues = append(issues, issue(
+				"`"+op.CommandName+"` parameter `"+name+"` is missing a location",
+				"`"+op.CommandName+"` 的参数 `"+name+"` 缺少位置",
+			))
+		} else if !supportedParameterLocation(location) {
+			issues = append(issues, issue(
+				"`"+op.CommandName+"` parameter `"+name+"` uses unsupported location `"+location+"`",
+				"`"+op.CommandName+"` 的参数 `"+name+"` 使用了不支持的位置 `"+location+"`",
+			))
+		}
+		key := location + "\x00" + name
+		if seen[key] {
+			issues = append(issues, issue(
+				"`"+op.CommandName+"` declares duplicate `"+location+"` parameter `"+name+"`",
+				"`"+op.CommandName+"` 重复声明了 `"+location+"` 参数 `"+name+"`",
+			))
+		}
+		seen[key] = true
+		if strings.TrimSpace(param.Description) == "" {
+			issues = append(issues, issue(
+				"`"+op.CommandName+"` parameter `"+name+"` is missing a description",
+				"`"+op.CommandName+"` 的参数 `"+name+"` 缺少说明",
+			))
+		}
+		if strings.TrimSpace(param.Type) == "" {
+			issues = append(issues, issue(
+				"`"+op.CommandName+"` parameter `"+name+"` is missing a type",
+				"`"+op.CommandName+"` 的参数 `"+name+"` 缺少类型",
+			))
 		}
 	}
 	return issues
+}
+
+func operationBodyFieldIssues(op model.Operation, issue func(string, string) string) []string {
+	var issues []string
+	seen := make(map[string]bool, len(op.BodyFields)+len(op.BodySchemaFields))
+	for _, field := range append(append([]model.BodyField(nil), op.BodySchemaFields...), op.BodyFields...) {
+		name := strings.TrimSpace(field.Name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		if strings.TrimSpace(field.Description) == "" {
+			issues = append(issues, issue(
+				"`"+op.CommandName+"` request body field `"+name+"` is missing a description",
+				"`"+op.CommandName+"` 的请求体字段 `"+name+"` 缺少说明",
+			))
+		}
+		if strings.TrimSpace(field.Type) == "" {
+			issues = append(issues, issue(
+				"`"+op.CommandName+"` request body field `"+name+"` is missing a type",
+				"`"+op.CommandName+"` 的请求体字段 `"+name+"` 缺少类型",
+			))
+		}
+		if field.RequiredUnknown {
+			issues = append(issues, issue(
+				"`"+op.CommandName+"` request body field `"+name+"` does not declare whether it is required",
+				"`"+op.CommandName+"` 的请求体字段 `"+name+"` 未声明是否必填",
+			))
+		}
+	}
+	return issues
+}
+
+func operationPathIssues(op model.Operation, issue func(string, string) string) []string {
+	var issues []string
+	path := strings.TrimSpace(op.Path)
+	templateParams := pathTemplateParams(path)
+	declaredPathParams := make(map[string]model.Parameter, len(op.Parameters))
+	for _, param := range op.Parameters {
+		if strings.TrimSpace(param.In) != "path" {
+			continue
+		}
+		name := strings.TrimSpace(param.Name)
+		if name == "" {
+			continue
+		}
+		declaredPathParams[name] = param
+		if !templateParams[name] {
+			issues = append(issues, issue(
+				"`"+op.CommandName+"` declares path parameter `"+name+"` that is not present in path `"+path+"`",
+				"`"+op.CommandName+"` 声明了路径参数 `"+name+"`，但路径 `"+path+"` 中不存在该占位符",
+			))
+		}
+		if !param.Required {
+			issues = append(issues, issue(
+				"`"+op.CommandName+"` path parameter `"+name+"` should be required",
+				"`"+op.CommandName+"` 的路径参数 `"+name+"` 应声明为必填",
+			))
+		}
+	}
+	for _, name := range sortedIssueNames(templateParams) {
+		if _, ok := declaredPathParams[name]; !ok {
+			issues = append(issues, issue(
+				"`"+op.CommandName+"` path parameter `{"+name+"}` is missing a matching `in: path` parameter",
+				"`"+op.CommandName+"` 的路径参数 `{"+name+"}` 缺少匹配的 `in: path` 参数声明",
+			))
+		}
+	}
+	return issues
+}
+
+func supportedParameterLocation(location string) bool {
+	switch strings.TrimSpace(location) {
+	case "path", "query", "header":
+		return true
+	default:
+		return false
+	}
+}
+
+func pathTemplateParams(path string) map[string]bool {
+	params := make(map[string]bool)
+	for {
+		start := strings.Index(path, "{")
+		if start < 0 {
+			return params
+		}
+		path = path[start+1:]
+		end := strings.Index(path, "}")
+		if end < 0 {
+			return params
+		}
+		if name := strings.TrimSpace(path[:end]); name != "" {
+			params[name] = true
+		}
+		path = path[end+1:]
+	}
+}
+
+func sortedIssueNames(values map[string]bool) []string {
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func hasOptionalFields(operation model.Operation) bool {

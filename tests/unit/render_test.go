@@ -225,6 +225,74 @@ func TestRenderProjectCanGenerateChineseSkillPackage(t *testing.T) {
 	}
 }
 
+func TestGenerationReportListsAllDocumentationIssues(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name: "one",
+		Groups: []model.Group{
+			{
+				Name: "leave",
+				Operations: []model.Operation{
+					{
+						CommandName: "request",
+						Method:      "POST",
+						Path:        "/leaves/{leaveId}",
+						Parameters: []model.Parameter{
+							{Name: "userId", In: "query", Required: true, Type: "string"},
+							{Name: "filter", In: "query", Description: "Filter value"},
+							{Name: "sessionId", In: "cookie", Description: "Session ID", Type: "string"},
+						},
+					},
+				},
+			},
+			{
+				Name: "attendance",
+				Operations: []model.Operation{
+					{
+						CommandName: "punch",
+						Method:      "POST",
+						Path:        "/attendance/punch",
+						Summary:     "Punch attendance",
+						Parameters: []model.Parameter{
+							{Name: "tenantId", In: "path", Description: "Tenant ID", Type: "string"},
+						},
+						BodySchemaFields: []model.BodyField{
+							{Name: "siteCode"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := render.Project(dir, "github.com/acme/one-cli", app); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+
+	reportContent, err := os.ReadFile(filepath.Join(dir, "skills", "leave", "generation-report.md"))
+	if err != nil {
+		t.Fatalf("read generated report: %v", err)
+	}
+	reportText := string(reportContent)
+	for _, want := range []string{
+		"## All API Documentation Issues",
+		"`leave` is missing a group description",
+		"`request` parameter `userId` is missing a description",
+		"`request` parameter `filter` is missing a type",
+		"`request` parameter `sessionId` uses unsupported location `cookie`",
+		"`request` path parameter `{leaveId}` is missing a matching `in: path` parameter",
+		"`attendance` is missing a group description",
+		"`punch` request body field `siteCode` is missing a description",
+		"`punch` request body field `siteCode` is missing a type",
+		"`punch` declares path parameter `tenantId` that is not present in path `/attendance/punch`",
+		"`punch` path parameter `tenantId` should be required",
+	} {
+		if !strings.Contains(reportText, want) {
+			t.Fatalf("generated report missing %q:\n%s", want, reportText)
+		}
+	}
+}
+
 func TestRenderRustDisambiguatesIdentifiers(t *testing.T) {
 	dir := t.TempDir()
 	app := model.App{

@@ -9,6 +9,17 @@
 - 后端：{{ if groupUsesMCPHTTP .Group }}MCP HTTP{{ else if groupUsesMCPStdio .Group }}MCP Stdio{{ else }}HTTP API{{ end }}
 - 命令数量：{{ len .Group.Operations }}
 
+## 全部 API 文档问题
+
+{{- $allIssues := appDocumentationIssues .App .SkillLang }}
+{{- if $allIssues }}
+{{- range $allIssues }}
+- [ ] {{ . }}
+{{- end }}
+{{- else }}
+- 整个 API 输入未检测到明显的文档缺口。
+{{- end }}
+
 ## 检测到的缺口
 
 {{- $issues := groupDocumentationIssues .Group .SkillLang }}
@@ -31,4 +42,3 @@ API 描述通常无法提供这些业务细节：
 5. 权限、租户和状态校验。
 6. 常见错误恢复方式。
 7. 时间、翻页、排序和筛选约定。
-
