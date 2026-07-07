@@ -79,3 +79,88 @@ func TestValidateSuggestionRejectsDuplicateOperationAliasesInGroup(t *testing.T)
 		t.Fatalf("expected duplicate rejection, got %+v", diagnostics.Rejected)
 	}
 }
+
+func TestStripCodeFences(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"plain json", `{"a":1}`, `{"a":1}`},
+		{"json fence", "```json\n{\"a\":1}\n```", `{"a":1}`},
+		{"bare fence", "```\n{\"a\":1}\n```", `{"a":1}`},
+		{"json fence uppercase", "```JSON\n{\"a\":1}\n```", `{"a":1}`},
+		{"leading whitespace", "  ```json\n{\"a\":1}\n```  ", `{"a":1}`},
+		{"no closing fence", "```json\n{\"a\":1}", `{"a":1}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := stripCodeFences(tc.input); got != tc.want {
+				t.Fatalf("stripCodeFences(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestChatCompletionsEndpointAvoidsDoubleV1(t *testing.T) {
+	cases := []struct {
+		base string
+		want string
+	}{
+		{"https://api.openai.com", "https://api.openai.com/v1/chat/completions"},
+		{"https://api.openai.com/v1", "https://api.openai.com/v1/chat/completions"},
+		{"https://gateway.example.com/v1/", "https://gateway.example.com/v1/chat/completions"},
+		{"https://proxy.example.com/openai/v1/chat/completions", "https://proxy.example.com/openai/v1/chat/completions"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.base, func(t *testing.T) {
+			got, err := chatCompletionsEndpoint(tc.base)
+			if err != nil {
+				t.Fatalf("chatCompletionsEndpoint(%q): %v", tc.base, err)
+			}
+			if got != tc.want {
+				t.Fatalf("chatCompletionsEndpoint(%q) = %q, want %q", tc.base, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateSuggestionCoversAllOperationsSharingPathOnlyKey(t *testing.T) {
+	doc := openapi.Document{
+		Operations: []openapi.Operation{
+			{Method: "GET", Path: "/items", Tag: "catalog"},
+			{Method: "POST", Path: "/items", Tag: "catalog"},
+		},
+	}
+	inventory := BuildInventory(doc)
+	suggestion := Suggestion{
+		OperationAlias: map[string]string{
+			"/items": "items",
+		},
+	}
+
+	cfg, diagnostics := ValidateSuggestion(inventory, suggestion)
+	if len(cfg.Naming.OperationAlias) != 1 {
+		t.Fatalf("expected one operation alias, got %+v", cfg.Naming.OperationAlias)
+	}
+	if len(diagnostics.Rejected) != 0 {
+		t.Fatalf("expected no rejections, got %+v", diagnostics.Rejected)
+	}
+}
+
+func TestSystemPromptIncludesDocumentCleaningGuidance(t *testing.T) {
+	for _, want := range []string{
+		"METHOD /path",
+		"Chinese",
+		"2-3 words",
+		"operationId",
+		"Do not infer schemas",
+		"Do not infer auth",
+		"api-apply",
+		"securitySchemes",
+	} {
+		if !strings.Contains(systemPrompt, want) {
+			t.Fatalf("system prompt missing %q:\n%s", want, systemPrompt)
+		}
+	}
+}

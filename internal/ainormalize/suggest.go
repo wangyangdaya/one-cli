@@ -85,13 +85,13 @@ func ValidateSuggestion(inventory Inventory, suggestion Suggestion) (configgen.C
 	}
 
 	knownTags := map[string]struct{}{}
-	operationByKey := map[string]InventoryOperation{}
+	operationsByKey := map[string][]InventoryOperation{}
 	for _, op := range inventory.Operations {
 		if op.Tag != "" {
 			knownTags[op.Tag] = struct{}{}
 		}
 		for _, key := range operationKeys(op) {
-			operationByKey[key] = op
+			operationsByKey[key] = append(operationsByKey[key], op)
 		}
 	}
 
@@ -111,7 +111,7 @@ func ValidateSuggestion(inventory Inventory, suggestion Suggestion) (configgen.C
 	seenByGroup := map[string]map[string]string{}
 	for _, key := range sortedKeys(suggestion.OperationAlias) {
 		alias := strings.TrimSpace(suggestion.OperationAlias[key])
-		op, ok := operationByKey[key]
+		matches, ok := operationsByKey[key]
 		if !ok {
 			diagnostics.reject("operation_alias", key, alias, "unknown operation")
 			continue
@@ -120,18 +120,31 @@ func ValidateSuggestion(inventory Inventory, suggestion Suggestion) (configgen.C
 			diagnostics.reject("operation_alias", key, alias, "alias must be lowercase ASCII letters, numbers, and hyphens")
 			continue
 		}
-		group := cfg.Naming.TagAlias[op.Tag]
-		if group == "" {
-			group = op.Tag
+		var rejected bool
+		for _, op := range matches {
+			group := cfg.Naming.TagAlias[op.Tag]
+			if group == "" {
+				group = op.Tag
+			}
+			if seenByGroup[group] == nil {
+				seenByGroup[group] = map[string]string{}
+			}
+			if existing := seenByGroup[group][alias]; existing != "" {
+				diagnostics.reject("operation_alias", key, alias, fmt.Sprintf("duplicate alias in group %q also used by %s", group, existing))
+				rejected = true
+				break
+			}
 		}
-		if seenByGroup[group] == nil {
-			seenByGroup[group] = map[string]string{}
-		}
-		if existing := seenByGroup[group][alias]; existing != "" {
-			diagnostics.reject("operation_alias", key, alias, fmt.Sprintf("duplicate alias in group %q also used by %s", group, existing))
+		if rejected {
 			continue
 		}
-		seenByGroup[group][alias] = key
+		for _, op := range matches {
+			group := cfg.Naming.TagAlias[op.Tag]
+			if group == "" {
+				group = op.Tag
+			}
+			seenByGroup[group][alias] = key
+		}
 		cfg.Naming.OperationAlias[key] = alias
 	}
 
@@ -217,7 +230,7 @@ func (client OpenAICompatibleClient) SuggestConfig(ctx context.Context, inventor
 		return Suggestion{}, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return Suggestion{}, fmt.Errorf("AI provider returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		return Suggestion{}, fmt.Errorf("AI provider returned HTTP %d: %s", resp.StatusCode, sanitizeRespBody(respBody))
 	}
 	var parsed chatCompletionsResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
@@ -226,10 +239,14 @@ func (client OpenAICompatibleClient) SuggestConfig(ctx context.Context, inventor
 	if len(parsed.Choices) == 0 {
 		return Suggestion{}, fmt.Errorf("AI response did not include choices")
 	}
-	content := strings.TrimSpace(parsed.Choices[0].Message.Content)
+	content := stripCodeFences(strings.TrimSpace(parsed.Choices[0].Message.Content))
 	var suggestion Suggestion
 	if err := json.Unmarshal([]byte(content), &suggestion); err != nil {
-		return Suggestion{}, fmt.Errorf("decode AI suggestion JSON: %w", err)
+		preview := content
+		if len(preview) > 200 {
+			preview = preview[:200] + "..."
+		}
+		return Suggestion{}, fmt.Errorf("decode AI suggestion JSON: %w (content preview: %s)", err, preview)
 	}
 	return suggestion, nil
 }
@@ -295,7 +312,15 @@ func chatCompletionsEndpoint(base string) (string, error) {
 	if parsed.Scheme == "" || parsed.Host == "" {
 		return "", fmt.Errorf("OPENCLI_AI_BASE_URL must be an absolute URL")
 	}
-	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/v1/chat/completions"
+	path := strings.TrimRight(parsed.Path, "/")
+	switch {
+	case strings.HasSuffix(path, "/chat/completions"):
+		parsed.Path = path
+	case strings.HasSuffix(path, "/v1"):
+		parsed.Path = path + "/chat/completions"
+	default:
+		parsed.Path = path + "/v1/chat/completions"
+	}
 	return parsed.String(), nil
 }
 
@@ -307,11 +332,45 @@ func inventoryPrompt(inventory Inventory) string {
 	return string(raw)
 }
 
-const systemPrompt = `You generate CLI naming suggestions for irregular OpenAPI documents.
+func stripCodeFences(content string) string {
+	content = strings.TrimSpace(content)
+	for _, fence := range []string{"```json", "```JSON", "```Json", "```"} {
+		if strings.HasPrefix(content, fence) {
+			content = strings.TrimSpace(strings.TrimPrefix(content, fence))
+			break
+		}
+	}
+	if strings.HasSuffix(content, "```") {
+		content = strings.TrimSpace(strings.TrimSuffix(content, "```"))
+	}
+	return strings.TrimSpace(content)
+}
+
+func sanitizeRespBody(body []byte) string {
+	text := strings.TrimSpace(string(body))
+	for _, marker := range []string{"\"api-key\"", "\"apiKey\"", "authorization", "Authorization", "bearer"} {
+		if idx := strings.Index(strings.ToLower(text), strings.ToLower(marker)); idx >= 0 {
+			text = text[:idx] + "[redacted]"
+			break
+		}
+	}
+	const max = 500
+	if len(text) > max {
+		text = text[:max] + "..."
+	}
+	return text
+}
+
+const systemPrompt = `You generate reviewable opencli.yaml naming suggestions for irregular OpenAPI documents.
 Return only JSON with this shape: {"tag_alias":{"original tag":"cli-group"},"operation_alias":{"METHOD /path":"cli-command"}}.
-Use concise lowercase English identifiers with ASCII letters, numbers, and hyphens.
-Prefer business meaning from summaries. Remove transport noise such as api, version segments, supplier, get, and push when redundant.
-Keep verbs only when they clarify the action, such as confirm-po.`
+Prefer METHOD /path operation_alias keys because they are stable when operationId is missing, duplicated, or generated by an internal platform.
+Use concise lowercase English identifiers with ASCII letters, numbers, and hyphens. Keep command aliases to 2-3 words when possible.
+Map Chinese, Japanese, Korean, special-character, or keyword-like tags to short business domain group names such as logistics, supplier, order, catalog, or user.
+Prefer business meaning from summary over raw path tokens. If summary is empty, infer only from method, path, tag, and operationId.
+Remove transport and vendor noise such as api, api-apply, version segments, v1, v2, supplier, get, query, list, push, controller, usingpost, and usingget when redundant.
+Keep verbs only when they clarify the user action or risk, such as confirm-po, sync-inventory, submit-order, delete-user, or approve-request.
+Do not infer schemas, request fields, response fields, signing, securitySchemes, servers, or body_mode. Do not infer auth. This feature only suggests naming aliases.
+Do not rewrite paths, methods, operationId values, or OpenAPI content.`
 
 type chatCompletionsRequest struct {
 	Model       string        `json:"model"`
