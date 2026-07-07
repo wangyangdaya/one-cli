@@ -14,11 +14,13 @@ import (
 {{- if appUsesAKSK .App }}
 
 	"{{ .Module }}/internal/auth"
+	"{{ .Module }}/internal/cli"
 	"{{ .Module }}/internal/config"
 	"{{ .Module }}/internal/httpx"
 )
 {{- else }}
 
+	"{{ .Module }}/internal/cli"
 	"{{ .Module }}/internal/config"
 	"{{ .Module }}/internal/httpx"
 )
@@ -64,6 +66,9 @@ func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (
 	}
 	if len(body) > 0 {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if err := applyHeaders(req, cli.RequestHeaders()); err != nil {
+		return Result{}, err
 	}
 {{- if operationHasHeaderParams . }}
 	if err := applyHeaders(req, input.Headers); err != nil {
@@ -260,18 +265,18 @@ func applyAuthToken(req *http.Request) {
 }
 {{- end }}
 
-{{- if groupHasHeaderParams .Group }}
-
 func applyHeaders(req *http.Request, headers []string) error {
 	for _, raw := range headers {
 		name, value, ok := strings.Cut(raw, ":")
+		if !ok {
+			name, value, ok = strings.Cut(raw, "=")
+		}
 		name = strings.TrimSpace(name)
 		value = strings.TrimSpace(value)
 		if !ok || name == "" || value == "" {
-			return fmt.Errorf("invalid --header value %q: expected %q", raw, "Name: Value")
+			return fmt.Errorf("invalid --header value %q: expected %q or %q", raw, "Name: Value", "Name=Value")
 		}
 		req.Header.Set(name, value)
 	}
 	return nil
 }
-{{- end }}

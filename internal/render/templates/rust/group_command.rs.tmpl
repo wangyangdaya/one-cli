@@ -1,7 +1,7 @@
 use clap::{Args, Subcommand};
 {{- if or (groupUsesMCPHTTP .Group) (groupUsesMCPStdio .Group) }}
 use serde_json::{Map, Value};
-{{- else }}
+{{- else if groupHasBodyInput .Group }}
 use serde_json::Value;
 {{- end }}
 

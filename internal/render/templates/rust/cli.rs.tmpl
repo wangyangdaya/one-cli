@@ -34,6 +34,10 @@ struct Cli {
     #[arg(long)]
     json: bool,
 
+    /// Request header in 'Name: Value' or 'Name=Value' format; repeatable
+    #[arg(long = "header")]
+    header: Vec<String>,
+
     #[command(subcommand)]
     command: Option<GroupCommand>,
 }
@@ -64,6 +68,8 @@ pub async fn run() -> AppResult<()> {
 
     crate::trace::set_enabled(cli.trace);
     crate::output::set_json_enabled(cli.json);
+    let headers = crate::client::parse_headers(&cli.header)?;
+    crate::client::set_global_headers(headers);
     match cli.command {
 {{- range .App.Groups }}
         Some(GroupCommand::{{ rustTypeName (rustModuleName .) }} { command }) => command.run().await,

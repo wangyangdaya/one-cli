@@ -2,11 +2,20 @@
 
 use reqwest::Method;
 use serde_json::{json, Value};
+use std::sync::{Mutex, OnceLock};
 
 use crate::trace::trace_log;
 use crate::types::AppResult;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
+static GLOBAL_HEADERS: OnceLock<Mutex<Vec<(String, String)>>> = OnceLock::new();
+
+pub fn set_global_headers(headers: Vec<(String, String)>) {
+    let store = GLOBAL_HEADERS.get_or_init(|| Mutex::new(Vec::new()));
+    if let Ok(mut locked) = store.lock() {
+        *locked = headers;
+    }
+}
 
 pub async fn request(
     method: &str,
@@ -27,7 +36,7 @@ pub async fn request_json_text(
 ) -> AppResult<Value> {
     let base_url = std::env::var("OPENCLI_BASE_URL")
         .map_err(|_| "missing OPENCLI_BASE_URL".to_string())?;
-    let mut headers = headers;
+    let mut headers = merged_headers(headers);
 {{- if appUsesAKSK .App }}
     crate::auth::apply_aksk(&mut headers, method, path, body.as_deref())?;
 {{- else }}
@@ -91,17 +100,36 @@ pub async fn request_json_text(
 pub fn parse_headers(values: &[String]) -> AppResult<Vec<(String, String)>> {
     let mut headers = Vec::with_capacity(values.len());
     for raw in values {
-        let Some((name, value)) = raw.split_once(':') else {
-            return Err(format!("invalid --header value {raw:?}: expected Name: Value"));
+        let Some((name, value)) = raw.split_once(':').or_else(|| raw.split_once('=')) else {
+            return Err(format!("invalid --header value {raw:?}: expected Name: Value or Name=Value"));
         };
         let name = name.trim();
         let value = value.trim();
         if name.is_empty() || value.is_empty() {
-            return Err(format!("invalid --header value {raw:?}: expected Name: Value"));
+            return Err(format!("invalid --header value {raw:?}: expected Name: Value or Name=Value"));
         }
-        headers.push((name.to_string(), value.to_string()));
+        set_header(&mut headers, name, value.to_string());
     }
     Ok(headers)
+}
+
+fn merged_headers(headers: Vec<(String, String)>) -> Vec<(String, String)> {
+    let mut merged = GLOBAL_HEADERS
+        .get()
+        .and_then(|store| store.lock().ok().map(|locked| locked.clone()))
+        .unwrap_or_default();
+    for (name, value) in headers {
+        set_header(&mut merged, &name, value);
+    }
+    merged
+}
+
+fn set_header(headers: &mut Vec<(String, String)>, name: &str, value: String) {
+    if let Some((_, existing)) = headers.iter_mut().find(|(header, _)| header.eq_ignore_ascii_case(name)) {
+        *existing = value;
+        return;
+    }
+    headers.push((name.to_string(), value));
 }
 
 fn preview(text: &str) -> &str {

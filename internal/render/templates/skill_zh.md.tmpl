@@ -68,6 +68,15 @@ metadata:
 {{- end }}
 {{- end }}
 
+## 全局请求头
+
+所有 HTTP 命令都支持可重复的全局请求头。可使用 `--header "Name: Value"` 或 `--header "Name=Value"`，按需要放在子命令前后。
+
+```bash
+{{ .App.Name }} --header "ACCESS-STATUS=inner" {{ .Group.Name }} <command>
+{{ .App.Name }} {{ .Group.Name }} <command> --header "Name: Value"
+```
+
 <!-- MANUAL: 补充认证流程、前置命令、依赖说明等。 -->
 
 ## 核心概念

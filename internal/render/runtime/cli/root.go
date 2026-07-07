@@ -7,6 +7,7 @@ import (
 )
 
 var traceSetter func(bool)
+var requestHeaders []string
 
 func BindTrace(setter func(bool)) {
 	traceSetter = setter
@@ -15,6 +16,7 @@ func BindTrace(setter func(bool)) {
 func NewRootCommand(use, short, version string) *cobra.Command {
 	var trace bool
 	jsonOutput = false
+	requestHeaders = nil
 
 	cmd := &cobra.Command{
 		Use:           use,
@@ -33,9 +35,17 @@ func NewRootCommand(use, short, version string) *cobra.Command {
 	}
 
 	cmd.CompletionOptions.DisableDefaultCmd = true
+	cmd.PersistentFlags().StringArrayVar(&requestHeaders, "header", nil, "Request header in 'Name: Value' or 'Name=Value' format; repeatable")
 	cmd.PersistentFlags().BoolVar(&trace, "trace", false, "Print HTTP request and response trace logs")
 	cmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "Print command output as JSON")
 	return cmd
+}
+
+func RequestHeaders() []string {
+	if len(requestHeaders) == 0 {
+		return nil
+	}
+	return append([]string(nil), requestHeaders...)
 }
 
 func ApplyRootHelp(cmd *cobra.Command) {
@@ -111,6 +121,7 @@ const rootHelpTemplate = `{{with (or .Long .Short)}}{{.}}
 {{end}}Options:
 {{if .HasAvailableLocalFlags}}{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}
 {{end}}{{if .HasAvailablePersistentFlags}}{{.PersistentFlags.FlagUsages | trimTrailingWhitespaces}}
+{{end}}{{if .HasAvailableInheritedFlags}}{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}
 {{end}}
 More help: {{.CommandPath}} <command> --help
 `

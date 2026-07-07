@@ -7,7 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"one-cli/internal/configgen"
 	"one-cli/internal/model"
+	"one-cli/internal/openapi"
+	"one-cli/internal/planner"
 	"one-cli/internal/render"
 )
 
@@ -35,6 +38,13 @@ func TestRenderProject(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "internal", "leave", "command.go")); err != nil {
 		t.Fatalf("missing group command: %v", err)
+	}
+	serviceContent, err := os.ReadFile(filepath.Join(dir, "internal", "leave", "service.go"))
+	if err != nil {
+		t.Fatalf("read generated service.go: %v", err)
+	}
+	if !strings.Contains(string(serviceContent), "applyHeaders(req, cli.RequestHeaders())") {
+		t.Fatalf("generated service.go should apply root --header values:\n%s", serviceContent)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "bin", "one")); err != nil {
 		t.Fatalf("missing launcher: %v", err)
@@ -78,6 +88,15 @@ func TestRenderProject(t *testing.T) {
 	if !strings.Contains(skillText, "assets/demo-request.json") {
 		t.Fatalf("generated skill markdown missing demo request reference:\n%s", skillText)
 	}
+	for _, want := range []string{
+		"## Global Request Headers",
+		`--header "ACCESS-STATUS=inner"`,
+		`--header "Name: Value"`,
+	} {
+		if !strings.Contains(skillText, want) {
+			t.Fatalf("generated skill markdown missing global header usage %q:\n%s", want, skillText)
+		}
+	}
 	readmeContent, err := os.ReadFile(filepath.Join(dir, "README.md"))
 	if err != nil {
 		t.Fatalf("read generated README: %v", err)
@@ -98,6 +117,27 @@ func TestRenderProject(t *testing.T) {
 	}
 	if strings.Contains(readmeText, "ldflags") {
 		t.Fatalf("generated README should not recommend build-time version overrides:\n%s", readmeText)
+	}
+	headerTestPath := filepath.Join(dir, "internal", "leave", "service_header_test.go")
+	headerTest := `package leave
+
+import (
+	"net/http/httptest"
+	"testing"
+)
+
+func TestApplyHeadersAcceptsEqualsSyntax(t *testing.T) {
+	req := httptest.NewRequest("GET", "http://example.test/leaves", nil)
+	if err := applyHeaders(req, []string{"ACCESS-STATUS=inner"}); err != nil {
+		t.Fatalf("applyHeaders: %v", err)
+	}
+	if got := req.Header.Get("ACCESS-STATUS"); got != "inner" {
+		t.Fatalf("ACCESS-STATUS = %q, want inner", got)
+	}
+}
+`
+	if err := os.WriteFile(headerTestPath, []byte(headerTest), 0o644); err != nil {
+		t.Fatalf("write generated header test: %v", err)
 	}
 
 	cmd := exec.Command("go", "test", "./...")
@@ -147,11 +187,28 @@ func TestRenderProject(t *testing.T) {
 		"More help: one <command> --help",
 		"Available Commands:",
 		"leave",
+		"--header",
 		"--trace",
 		"--version",
 	} {
 		if !strings.Contains(helpText, want) {
 			t.Fatalf("generated project --help missing %q:\n%s", want, helpText)
+		}
+	}
+
+	commandHelp := exec.Command(binary, "leave", "list", "--help")
+	out, err = commandHelp.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated command --help should succeed, got %v, output: %s", err, string(out))
+	}
+	commandHelpText := string(out)
+	for _, want := range []string{
+		"--header",
+		"Name: Value",
+		"Name=Value",
+	} {
+		if !strings.Contains(commandHelpText, want) {
+			t.Fatalf("generated command --help missing %q:\n%s", want, commandHelpText)
 		}
 	}
 }
@@ -209,7 +266,8 @@ func TestRenderProjectCanGenerateChineseSkillPackage(t *testing.T) {
 	for _, want := range []string{
 		"# 生成报告：leave",
 		"`leave` 缺少分组描述",
-		"`request` 的参数 `userId` 缺少说明",
+		"- [ ] `request`",
+		"  - 参数 `userId`：缺少说明",
 	} {
 		if !strings.Contains(reportText, want) {
 			t.Fatalf("generated Chinese report missing %q:\n%s", want, reportText)
@@ -277,18 +335,115 @@ func TestGenerationReportListsAllDocumentationIssues(t *testing.T) {
 	for _, want := range []string{
 		"## All API Documentation Issues",
 		"`leave` is missing a group description",
-		"`request` parameter `userId` is missing a description",
-		"`request` parameter `filter` is missing a type",
-		"`request` parameter `sessionId` uses unsupported location `cookie`",
-		"`request` path parameter `{leaveId}` is missing a matching `in: path` parameter",
+		"- [ ] `request`",
+		"  - parameter `userId`: missing description",
+		"  - parameter `filter`: missing type",
+		"  - parameter `sessionId`: unsupported location `cookie`",
+		"  - path parameter `{leaveId}`: missing matching `in: path` parameter",
 		"`attendance` is missing a group description",
-		"`punch` request body field `siteCode` is missing a description",
-		"`punch` request body field `siteCode` is missing a type",
-		"`punch` declares path parameter `tenantId` that is not present in path `/attendance/punch`",
-		"`punch` path parameter `tenantId` should be required",
+		"- [ ] `punch`",
+		"  - request body field `siteCode`: missing description; missing type",
+		"  - path parameter `tenantId`: not present in path `/attendance/punch`; should be required",
 	} {
 		if !strings.Contains(reportText, want) {
 			t.Fatalf("generated report missing %q:\n%s", want, reportText)
+		}
+	}
+	for _, notWant := range []string{
+		"`request` parameter `userId` is missing a description",
+		"`punch` request body field `siteCode` is missing a description",
+		"`punch` request body field `siteCode` is missing a type",
+	} {
+		if strings.Contains(reportText, notWant) {
+			t.Fatalf("generated report should group repeated API issue prefixes %q:\n%s", notWant, reportText)
+		}
+	}
+}
+
+func TestGenerationReportOmitsAllIssuesSectionForSingleGroup(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name: "one",
+		Groups: []model.Group{
+			{
+				Name: "leave",
+				Operations: []model.Operation{
+					{CommandName: "list", Method: "GET", Path: "/leaves"},
+				},
+			},
+		},
+	}
+
+	if err := render.Project(dir, "github.com/acme/one-cli", app, "go", "zh"); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+
+	reportContent, err := os.ReadFile(filepath.Join(dir, "skills", "leave", "generation-report.md"))
+	if err != nil {
+		t.Fatalf("read generated report: %v", err)
+	}
+	reportText := string(reportContent)
+	if strings.Contains(reportText, "## 全部 API 文档问题") {
+		t.Fatalf("single-group report should not duplicate all API issues section:\n%s", reportText)
+	}
+	if !strings.Contains(reportText, "## 检测到的缺口") {
+		t.Fatalf("single-group report should keep detected gaps section:\n%s", reportText)
+	}
+}
+
+func TestGenerationReportUsesConfiguredBodyFieldSupplements(t *testing.T) {
+	dir := t.TempDir()
+	required := true
+	doc := openapi.Document{
+		Operations: []openapi.Operation{
+			{
+				Method:      "POST",
+				Path:        "/leaves",
+				Tag:         "leave",
+				OperationID: "createLeave",
+				Summary:     "Create leave request",
+				RequestBody: openapi.RequestBody{
+					ContentTypes:  []string{"application/json"},
+					HasJSONSchema: true,
+					IsSimpleJSON:  true,
+					JSONSchemaFields: []openapi.BodyField{
+						{Name: "reason", RequiredUnknown: true},
+					},
+				},
+			},
+		},
+	}
+	app := planner.Build(doc, configgen.Config{
+		Overrides: configgen.OverrideConfig{
+			BodyFields: map[string][]configgen.BodyField{
+				"leave.create": {
+					{
+						Name:        "reason",
+						Description: "Leave reason",
+						Required:    &required,
+						Type:        "string",
+					},
+				},
+			},
+		},
+	})
+
+	if err := render.Project(dir, "github.com/acme/one-cli", app); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+
+	reportContent, err := os.ReadFile(filepath.Join(dir, "skills", "leave", "generation-report.md"))
+	if err != nil {
+		t.Fatalf("read generated report: %v", err)
+	}
+	reportText := string(reportContent)
+	for _, notWant := range []string{
+		"`create` request body field `reason` is missing a description",
+		"`create` request body field `reason` is missing a type",
+		"`create` request body field `reason` does not declare whether it is required",
+	} {
+		if strings.Contains(reportText, notWant) {
+			t.Fatalf("generated report should honor configured body field supplement %q:\n%s", notWant, reportText)
 		}
 	}
 }

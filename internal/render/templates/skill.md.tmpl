@@ -68,6 +68,15 @@ This is a generated OpenCLI skill package. It contains API-derived facts and man
 {{- end }}
 {{- end }}
 
+## Global Request Headers
+
+All HTTP commands accept repeatable global request headers. Use `--header "Name: Value"` or `--header "Name=Value"` before or after the subcommand as needed.
+
+```bash
+{{ .App.Name }} --header "ACCESS-STATUS=inner" {{ .Group.Name }} <command>
+{{ .App.Name }} {{ .Group.Name }} <command> --header "Name: Value"
+```
+
 <!-- MANUAL: 补充认证流程、前置命令、依赖说明等 -->
 
 ## Core Concepts
