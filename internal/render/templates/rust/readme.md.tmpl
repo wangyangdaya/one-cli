@@ -36,8 +36,22 @@ export OPENCLI_BASE_URL='http://127.0.0.1:8000'
 cargo run -- --help
 ```
 
-{{- if appUsesAKSK .App }}
-## AK/SK Auth
+{{- if appUsesToken .App }}
+## Auth
+
+Mode: `token`
+
+Set the generated token before running commands that require authentication:
+
+```bash
+export OPENCLI_AUTH_TOKEN='your-token'
+```
+
+The CLI injects `Authorization: Bearer <token>` when no explicit `Authorization` header is provided.
+{{- else if appUsesAKSK .App }}
+## Auth
+
+Mode: `ak_sk`
 
 This CLI signs HTTP requests internally. Set credentials before running commands:
 
@@ -49,7 +63,21 @@ export OPENCLI_SK='your-secret-key'
 Requests include `appKey`, `sign`, `timestamp`, and `nonce` headers. Signer profile: `{{ appSignerProfile .App }}`.
 
 The `supplier_edi` profile uses the supplier `sha512Hex` canonical string: `method`, `/v2...` path, `appKey`, `appSecret`, `timestamp`, `nonce`, and compact `jsonBody`.
+{{- else }}
+## Auth
+
+Mode: `none`
+
+This CLI does not inject authentication headers. Use `--header` only when an endpoint needs non-auth routing or internal gateway headers.
 {{- end }}
+
+## Header Input
+
+HTTP commands accept repeatable `--header` flags:
+
+```bash
+cargo run -- --header "ACCESS-STATUS=inner" <group> <command>
+```
 
 ## Generated Skills
 

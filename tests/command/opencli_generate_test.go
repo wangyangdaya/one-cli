@@ -265,6 +265,125 @@ func TestGenerateCommandAcceptsAKSKAuthForRust(t *testing.T) {
 	}
 }
 
+func TestGenerateCommandAcceptsNoAuthForGo(t *testing.T) {
+	dir := t.TempDir()
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--auth", "none",
+		"--input", filepath.Join("..", "..", "examples", "petstore.yaml"),
+		"--output", dir,
+		"--module", "github.com/acme/generated",
+		"--app", "petcli",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute generate: %v", err)
+	}
+
+	serviceContent, err := os.ReadFile(filepath.Join(dir, "internal", "pet", "service.go"))
+	if err != nil {
+		t.Fatalf("read generated service: %v", err)
+	}
+	serviceText := string(serviceContent)
+	for _, unwanted := range []string{"applyAuthToken", "OPENCLI_AUTH_TOKEN", "Authorization\", \"Bearer "} {
+		if strings.Contains(serviceText, unwanted) {
+			t.Fatalf("generated no-auth service should not include %q:\n%s", unwanted, serviceText)
+		}
+	}
+
+	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "pet", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated skill: %v", err)
+	}
+	skillText := string(skillContent)
+	if !strings.Contains(skillText, "No authentication is configured") {
+		t.Fatalf("generated no-auth skill should document no authentication:\n%s", skillText)
+	}
+	if strings.Contains(skillText, "OPENCLI_AUTH_TOKEN") {
+		t.Fatalf("generated no-auth skill should not require OPENCLI_AUTH_TOKEN:\n%s", skillText)
+	}
+
+	readmeContent, err := os.ReadFile(filepath.Join(dir, "README.md"))
+	if err != nil {
+		t.Fatalf("read generated readme: %v", err)
+	}
+	readmeText := string(readmeContent)
+	for _, want := range []string{
+		"## Auth",
+		"Mode: `none`",
+		"This CLI does not inject authentication headers.",
+		`--header "ACCESS-STATUS=inner"`,
+	} {
+		if !strings.Contains(readmeText, want) {
+			t.Fatalf("generated no-auth README missing %q:\n%s", want, readmeText)
+		}
+	}
+	if strings.Contains(readmeText, "OPENCLI_AUTH_TOKEN") {
+		t.Fatalf("generated no-auth README should not require OPENCLI_AUTH_TOKEN:\n%s", readmeText)
+	}
+}
+
+func TestGenerateCommandAcceptsNoAuthForRust(t *testing.T) {
+	dir := t.TempDir()
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--target", "rust",
+		"--auth", "none",
+		"--input", filepath.Join("..", "..", "examples", "petstore.yaml"),
+		"--output", dir,
+		"--module", "petcli",
+		"--app", "petcli",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute rust generate: %v", err)
+	}
+
+	clientContent, err := os.ReadFile(filepath.Join(dir, "src", "client.rs"))
+	if err != nil {
+		t.Fatalf("read generated client: %v", err)
+	}
+	clientText := string(clientContent)
+	for _, unwanted := range []string{"OPENCLI_AUTH_TOKEN", "Authorization\", format!(\"Bearer"} {
+		if strings.Contains(clientText, unwanted) {
+			t.Fatalf("generated no-auth client should not include %q:\n%s", unwanted, clientText)
+		}
+	}
+
+	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "pet", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated skill: %v", err)
+	}
+	skillText := string(skillContent)
+	if !strings.Contains(skillText, "No authentication is configured") {
+		t.Fatalf("generated no-auth skill should document no authentication:\n%s", skillText)
+	}
+	if strings.Contains(skillText, "OPENCLI_AUTH_TOKEN") {
+		t.Fatalf("generated no-auth skill should not require OPENCLI_AUTH_TOKEN:\n%s", skillText)
+	}
+
+	readmeContent, err := os.ReadFile(filepath.Join(dir, "README.md"))
+	if err != nil {
+		t.Fatalf("read generated readme: %v", err)
+	}
+	readmeText := string(readmeContent)
+	for _, want := range []string{
+		"## Auth",
+		"Mode: `none`",
+		"This CLI does not inject authentication headers.",
+		`--header "ACCESS-STATUS=inner"`,
+	} {
+		if !strings.Contains(readmeText, want) {
+			t.Fatalf("generated no-auth README missing %q:\n%s", want, readmeText)
+		}
+	}
+	if strings.Contains(readmeText, "OPENCLI_AUTH_TOKEN") {
+		t.Fatalf("generated no-auth README should not require OPENCLI_AUTH_TOKEN:\n%s", readmeText)
+	}
+}
+
 func TestGenerateCommandSupplierAKSKSkillDocumentsBodyExampleFields(t *testing.T) {
 	dir := t.TempDir()
 	cmd := app.NewRootCommand()

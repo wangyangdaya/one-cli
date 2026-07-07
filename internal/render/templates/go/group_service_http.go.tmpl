@@ -79,7 +79,7 @@ func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (
 	if err := auth.ApplyAKSK(req, "{{ .Method }}", "{{ .Path }}", body); err != nil {
 		return Result{}, err
 	}
-{{- else }}
+{{- else if appUsesToken $.App }}
 	applyAuthToken(req)
 {{- end }}
 
@@ -252,7 +252,7 @@ func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input
 }
 {{ end -}}
 
-{{- if not (appUsesAKSK .App) }}
+{{- if appUsesToken .App }}
 func applyAuthToken(req *http.Request) {
 	if req.Header.Get("Authorization") != "" {
 		return

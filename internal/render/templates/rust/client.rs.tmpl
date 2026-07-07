@@ -39,7 +39,7 @@ pub async fn request_json_text(
     let mut headers = merged_headers(headers);
 {{- if appUsesAKSK .App }}
     crate::auth::apply_aksk(&mut headers, method, path, body.as_deref())?;
-{{- else }}
+{{- else if appUsesToken .App }}
     if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("Authorization")) {
         if let Ok(token) = std::env::var("OPENCLI_AUTH_TOKEN") {
             let token = token.trim();

@@ -9,7 +9,7 @@ const (
 
 // Auth type constants identify generated runtime authentication behavior.
 const (
-	AuthTypeNone  = ""
+	AuthTypeNone  = "none"
 	AuthTypeToken = "token"
 	AuthTypeAKSK  = "ak_sk"
 )

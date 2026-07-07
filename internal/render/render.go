@@ -65,6 +65,7 @@ func renderTemplate(name string, data any) ([]byte, error) {
 			"appHasMCPHTTP":                   appHasMCPHTTP,
 			"appHasMCPStdio":                  appHasMCPStdio,
 			"appHasAnyMCP":                    appHasAnyMCP,
+			"appUsesToken":                    appUsesToken,
 			"appUsesAKSK":                     appUsesAKSK,
 			"appSignerProfile":                appSignerProfile,
 			"appSigner":                       appSigner,
@@ -277,6 +278,11 @@ func appHasAnyMCP(app model.App) bool {
 
 func appUsesAKSK(app model.App) bool {
 	return strings.TrimSpace(app.Auth.Type) == model.AuthTypeAKSK
+}
+
+func appUsesToken(app model.App) bool {
+	authType := strings.TrimSpace(app.Auth.Type)
+	return authType == "" || authType == model.AuthTypeToken
 }
 
 func appSignerProfile(app model.App) string {

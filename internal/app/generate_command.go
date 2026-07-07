@@ -66,7 +66,7 @@ func NewGenerateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to opencli YAML config")
 	cmd.Flags().StringVar(&target, "target", "go", "Generation target: go or rust")
 	cmd.Flags().StringVar(&skillLang, "skill-lang", "en", "Generated skill language: en or zh")
-	cmd.Flags().StringVar(&auth, "auth", "", "Generated auth mode: token or ak_sk")
+	cmd.Flags().StringVar(&auth, "auth", "", "Generated auth mode: token, ak_sk, or none")
 	cmd.Flags().StringVar(&signer, "signer", "", "AK/SK signer profile, for example supplier_edi")
 	_ = cmd.MarkFlagRequired("output")
 	_ = cmd.MarkFlagRequired("module")
@@ -164,11 +164,11 @@ func resolveSigner(flag string, cfg configgen.Config) string {
 
 func validateAuthAndSigner(auth, signer string) error {
 	switch auth {
-	case "", "token", "ak_sk":
+	case "", model.AuthTypeToken, model.AuthTypeAKSK, model.AuthTypeNone:
 	default:
-		return fmt.Errorf("unsupported auth %q: expected token or ak_sk", auth)
+		return fmt.Errorf("unsupported auth %q: expected token, ak_sk, or none", auth)
 	}
-	if strings.TrimSpace(signer) != "" && auth != "ak_sk" {
+	if strings.TrimSpace(signer) != "" && auth != model.AuthTypeAKSK {
 		return fmt.Errorf("--signer requires --auth ak_sk")
 	}
 	return nil
@@ -178,7 +178,7 @@ func resolveSignerConfig(auth, signer string, cfg configgen.Config) (model.Signe
 	if err := validateAuthAndSigner(auth, signer); err != nil {
 		return model.Signer{}, err
 	}
-	if auth != "ak_sk" {
+	if auth != model.AuthTypeAKSK {
 		return model.Signer{}, nil
 	}
 

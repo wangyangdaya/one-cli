@@ -85,7 +85,7 @@ func TestGenerateSmokeIncludesHeaderFlagsAndDocs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read readme: %v", err)
 	}
-	if !strings.Contains(string(readmeContent), `--header "Authorization: Bearer token"`) {
+	if !strings.Contains(string(readmeContent), `--header "ACCESS-STATUS=inner"`) {
 		t.Fatalf("generated README missing header example:\n%s", string(readmeContent))
 	}
 

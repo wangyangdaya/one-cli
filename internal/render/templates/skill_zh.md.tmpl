@@ -63,8 +63,10 @@ metadata:
 - 环境变量 `OPENCLI_SK`：AK/SK Secret Key
 - 签名 profile：`{{ appSignerProfile .App }}`
 - AK/SK 请求头由 CLI 自动生成：`appKey`、`sign`、`timestamp`、`nonce`
-{{- else }}
+{{- else if appUsesToken .App }}
 - 环境变量 `OPENCLI_AUTH_TOKEN`：认证令牌
+{{- else }}
+- 未配置认证；如需内部路由请求头，可仅使用 `--header`
 {{- end }}
 {{- end }}
 
