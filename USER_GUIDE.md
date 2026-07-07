@@ -91,6 +91,33 @@ users GET /users/{userId} getUser
 opencli --json inspect --input ./api.yaml
 ```
 
+如果接口文档来自内部平台或第三方系统，tag、path、operationId 可能不适合直接生成 CLI。此时可以使用 AI 建议模式生成一份可审阅的 `opencli.yaml` 命名配置草稿：
+
+```bash
+OPENCLI_AI_BASE_URL=https://your-openai-compatible-host \
+OPENCLI_AI_API_KEY=your-api-key \
+OPENCLI_AI_MODEL=your-model \
+opencli inspect \
+  --input ./api.yaml \
+  --ai-suggest-config \
+  --output ./opencli.ai.yaml
+```
+
+然后人工确认 `opencli.ai.yaml` 后用于生成：
+
+```bash
+opencli generate \
+  --input ./api.yaml \
+  --config ./opencli.ai.yaml \
+  --output ./my-cli \
+  --module github.com/example/my-cli \
+  --app mycli
+```
+
+AI 建议模式不会修改原始 OpenAPI 文档，也不会自动执行生成。它只产生命名建议，并会在本地校验未知接口、非法命令名和重复 alias。
+
+完整说明见根目录下的 [`INSPECT.md`](./INSPECT.md)。
+
 ## 4. 生成 CLI 项目
 
 ### 4.1 从 OpenAPI/Swagger 生成

@@ -140,7 +140,8 @@ Rust + MCP 生成示例：
 
 ## 📚 文档
 
-- **[用户指南](docs/USER_GUIDE.md)** - 完整的使用说明
+- **[用户指南](USER_GUIDE.md)** - 完整的使用说明
+- **[`inspect` 使用说明](INSPECT.md)** - 检查接口文档、生成 AI 命名建议配置
 - **[Swagger 外部修复链路](docs/SWAGGER_EXTERNAL_FIX.md)** - 使用 `swagger2openapi` 和 `openapi-generator-cli validate` 修复/校验脏 Swagger 输入
 - **[Skill 标准产物](docs/skills/SKILL_STANDARD_OUTPUT.md)** - 生成的 `skills/<group>/` 目录结构、文件职责和扩展规则
 - **[Skill 生产化流程](docs/skills/SKILL_PRODUCTION_WORKFLOW.md)** - 如何把生成的 API scaffold 补齐为业务可用 Skill
@@ -408,7 +409,7 @@ overrides:
 | `file-or-data` | 支持文件或直接数据 | `--file user.json` 或 `--data '{...}'` |
 | `flags` | 展开为独立标志 | `--name John --email john@example.com` |
 
-详细配置说明请参考 [用户指南](docs/USER_GUIDE.md) 中的“配置文件”章节。
+详细配置说明请参考 [用户指南](USER_GUIDE.md) 中的“配置文件”章节。
 
 ---
 
@@ -579,7 +580,7 @@ opencli generate \
   --app petstore
 ```
 
-更多示例请参考 [用户指南](docs/USER_GUIDE.md) 中的“实战示例”章节。
+更多示例请参考 [用户指南](USER_GUIDE.md) 中的“实战示例”章节。
 
 ---
 

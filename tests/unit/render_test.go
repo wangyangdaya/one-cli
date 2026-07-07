@@ -536,6 +536,38 @@ func TestRenderRustDisambiguatesIdentifiers(t *testing.T) {
 	}
 }
 
+func TestRenderRustNoAuthClientDoesNotMarkHeadersMutable(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name: "one",
+		Auth: model.Auth{Type: model.AuthTypeNone},
+		Groups: []model.Group{
+			{
+				Name: "items",
+				Operations: []model.Operation{
+					{CommandName: "list", Method: "GET", Path: "/items"},
+				},
+			},
+		},
+	}
+
+	if err := render.Project(dir, "github.com/acme/one-cli", app, "rust"); err != nil {
+		t.Fatalf("render rust: %v", err)
+	}
+
+	clientContent, err := os.ReadFile(filepath.Join(dir, "src", "client.rs"))
+	if err != nil {
+		t.Fatalf("read generated client.rs: %v", err)
+	}
+	clientText := string(clientContent)
+	if strings.Contains(clientText, "let mut headers = merged_headers(headers);") {
+		t.Fatalf("generated no-auth Rust client should not mark merged headers mutable:\n%s", clientText)
+	}
+	if !strings.Contains(clientText, "let headers = merged_headers(headers);") {
+		t.Fatalf("generated no-auth Rust client missing immutable merged headers binding:\n%s", clientText)
+	}
+}
+
 func TestRenderProjectSkillIncludesHeaderUsageNotes(t *testing.T) {
 	dir := t.TempDir()
 	app := model.App{
