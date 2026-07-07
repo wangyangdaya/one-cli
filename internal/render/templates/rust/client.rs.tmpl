@@ -36,7 +36,7 @@ pub async fn request_json_text(
 ) -> AppResult<Value> {
     let base_url = std::env::var("OPENCLI_BASE_URL")
         .map_err(|_| "missing OPENCLI_BASE_URL".to_string())?;
-    let mut headers = merged_headers(headers);
+    let {{ if or (appUsesAKSK .App) (appUsesToken .App) }}mut {{ end }}headers = merged_headers(headers);
 {{- if appUsesAKSK .App }}
     crate::auth::apply_aksk(&mut headers, method, path, body.as_deref())?;
 {{- else if appUsesToken .App }}
