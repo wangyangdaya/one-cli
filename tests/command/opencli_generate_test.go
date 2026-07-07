@@ -567,6 +567,7 @@ func TestGenerateCommandSupplierRustAKSKPreservesBodyOrder(t *testing.T) {
 	}
 	commandText := string(commandContent)
 	for _, want := range []string{
+		`#[arg(short = 'H', long = "header")]`,
 		`let body = build_kanban_delivery_http_body(&args)?;`,
 		`client::request_json_text("POST", &path, query, headers, body).await?;`,
 		`parts.push(format!("\"date\":{value}"));`,

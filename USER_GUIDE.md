@@ -18,7 +18,7 @@ OpenCLI 当前支持两类输入：
 基本流程：
 
 ```text
-接口文档或 MCP 配置 -> opencli generate -> 生成 CLI 项目 -> 按业务确认和测试后交付
+接口文档或 MCP 配置 -> opencli generate -> 生成 CLI 项目 -> 编译生成可执行文件 -> 按业务确认和测试后交付
 ```
 
 重要说明：
@@ -184,6 +184,77 @@ opencli generate \
   --target rust
 ```
 
+### 4.4 编译生成后的 CLI
+
+`opencli generate` 生成的是 CLI 项目源码。要交付给最终用户使用，还需要在生成目录中编译成对应平台的可执行文件。
+
+Go 目标项目：
+
+```bash
+cd ./my-cli
+
+# 当前系统调试或本机交付
+go build -o bin/mycli ./cmd/mycli
+
+# macOS Apple Silicon
+GOOS=darwin GOARCH=arm64 go build -o dist/darwin-arm64/mycli ./cmd/mycli
+
+# Linux x86_64
+GOOS=linux GOARCH=amd64 go build -o dist/linux-amd64/mycli ./cmd/mycli
+
+# Windows x86_64
+GOOS=windows GOARCH=amd64 go build -o dist/windows-amd64/mycli.exe ./cmd/mycli
+```
+
+Go 交叉编译说明：
+
+- 在 Mac 上可以直接用 `GOOS=windows GOARCH=amd64` 生成 Windows `.exe`。
+- 如果生成项目没有使用 CGO，通常不需要额外安装 Windows 编译器或链接器。
+- 输出文件名建议显式加 `.exe`，方便 Windows 用户直接运行。
+
+Rust 目标项目：
+
+```bash
+cd ./my-cli-rust
+
+# 当前系统调试构建
+cargo build
+
+# 当前系统发布构建
+cargo build --release
+
+# 如需交叉编译，先安装目标平台，再构建
+rustup target add aarch64-apple-darwin x86_64-unknown-linux-gnu x86_64-pc-windows-msvc
+cargo build --release --target aarch64-apple-darwin
+cargo build --release --target x86_64-unknown-linux-gnu
+cargo build --release --target x86_64-pc-windows-msvc
+```
+
+Rust 交叉编译说明：
+
+- `cargo check --target <target>` 只做检查，不生成最终可执行文件；交付产物需要使用 `cargo build --release --target <target>`。
+- `x86_64-pc-windows-msvc` 依赖 Windows/MSVC 的 `link.exe`。在 Mac 上即使安装了 Rust target，也通常不能直接完成链接。
+- 如果必须生成 MSVC 版本的 Windows `.exe`，建议在 Windows 机器或 CI 的 Windows runner 上构建。
+- 如果要在 Mac 上本地生成 Windows `.exe`，可以改用 `x86_64-pc-windows-gnu`，并安装 MinGW 工具链：
+
+```bash
+rustup target add x86_64-pc-windows-gnu
+brew install mingw-w64
+cargo build --release --target x86_64-pc-windows-gnu
+```
+
+生成文件通常位于：
+
+```text
+target/x86_64-pc-windows-gnu/release/mycli.exe
+```
+
+说明：
+
+- 在 Mac 上直接构建，默认得到 Mac 可执行文件。
+- 在 Windows 上直接构建，默认得到 Windows `.exe` 可执行文件。
+- 如果要在一台机器上生成多个系统的产物，需要使用 Go 的 `GOOS`/`GOARCH` 或 Rust 的 target 机制。
+
 ## 5. `opencli.yaml` 配置文件
 
 `opencli.yaml` 用于在不修改接口文档的情况下调整生成结果。建议每个正式项目都维护一份配置文件，并由业务、接口提供方和交付方共同确认。
@@ -314,6 +385,7 @@ mycli users import --data '{"users":[{"name":"Alice"}]}'
 传递额外请求头：
 
 ```bash
+mycli -H "X-Tenant-ID: tenant-a" users list
 mycli users list --header "X-Tenant-ID: tenant-a"
 mycli users list --header "X-Trace-ID=trace-001"
 ```
@@ -409,10 +481,11 @@ OpenCLI 不会凭空知道真实业务规则，它主要根据接口文档生成
 3. 与业务和接口提供方确认 tag、operationId、参数、请求体和认证方式。
 4. 编写或更新 `opencli.yaml`。
 5. 使用 `opencli generate` 生成 CLI 项目。
-6. 查看生成项目的 `README.md` 和 `skills/<group>/SKILL.md`。
-7. 使用测试环境执行关键命令，覆盖查询、写入、更新、删除等场景。
-8. 根据测试结果修正接口文档或 `opencli.yaml`，然后重新生成。
-9. 形成交付版本，并附上确认后的使用说明、环境变量和示例命令。
+6. 进入生成目录，使用 `go build` 或 `cargo build` 编译生成可执行文件。
+7. 查看生成项目的 `README.md` 和 `skills/<group>/SKILL.md`。
+8. 使用测试环境执行关键命令，覆盖查询、写入、更新、删除等场景。
+9. 根据测试结果修正接口文档或 `opencli.yaml`，然后重新生成并重新编译。
+10. 形成交付版本，并附上确认后的使用说明、环境变量和示例命令。
 
 ## 11. 常见问题
 

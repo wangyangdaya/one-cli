@@ -134,16 +134,10 @@ func ValidateSuggestion(inventory Inventory, suggestion Suggestion) (configgen.C
 				rejected = true
 				break
 			}
+			seenByGroup[group][alias] = key
 		}
 		if rejected {
 			continue
-		}
-		for _, op := range matches {
-			group := cfg.Naming.TagAlias[op.Tag]
-			if group == "" {
-				group = op.Tag
-			}
-			seenByGroup[group][alias] = key
 		}
 		cfg.Naming.OperationAlias[key] = alias
 	}
@@ -343,22 +337,29 @@ func stripCodeFences(content string) string {
 	if strings.HasSuffix(content, "```") {
 		content = strings.TrimSpace(strings.TrimSuffix(content, "```"))
 	}
-	return strings.TrimSpace(content)
+	content = strings.TrimSpace(content)
+	start := strings.Index(content, "{")
+	end := strings.LastIndex(content, "}")
+	if start >= 0 && end > start {
+		return content[start : end+1]
+	}
+	return content
 }
 
 func sanitizeRespBody(body []byte) string {
 	text := strings.TrimSpace(string(body))
-	for _, marker := range []string{"\"api-key\"", "\"apiKey\"", "authorization", "Authorization", "bearer"} {
-		if idx := strings.Index(strings.ToLower(text), strings.ToLower(marker)); idx >= 0 {
-			text = text[:idx] + "[redacted]"
+	lowered := strings.ToLower(text)
+	for _, marker := range []string{`"api-key"`, `"apikey"`, "authorization", "bearer"} {
+		if idx := strings.Index(lowered, marker); idx >= 0 {
+			lowered = lowered[:idx] + "[redacted]"
 			break
 		}
 	}
 	const max = 500
-	if len(text) > max {
-		text = text[:max] + "..."
+	if len(lowered) > max {
+		lowered = lowered[:max] + "..."
 	}
-	return text
+	return lowered
 }
 
 const systemPrompt = `You generate reviewable opencli.yaml naming suggestions for irregular OpenAPI documents.

@@ -66,15 +66,16 @@ This is a generated OpenCLI skill package. It contains API-derived facts and man
 {{- else if appUsesToken .App }}
 - Environment variable `OPENCLI_AUTH_TOKEN`: Authentication token
 {{- else }}
-- No authentication is configured; use `--header` only for non-auth internal routing headers when needed
+- No authentication is configured; use `-H` / `--header` only for non-auth internal routing headers when needed
 {{- end }}
 {{- end }}
 
 ## Global Request Headers
 
-All HTTP commands accept repeatable global request headers. Use `--header "Name: Value"` or `--header "Name=Value"` before or after the subcommand as needed.
+All HTTP commands accept repeatable global request headers. Use `-H "Name: Value"`, `--header "Name: Value"`, or `--header "Name=Value"` before or after the subcommand as needed.
 
 ```bash
+{{ .App.Name }} -H "ACCESS-STATUS=inner" {{ .Group.Name }} <command>
 {{ .App.Name }} --header "ACCESS-STATUS=inner" {{ .Group.Name }} <command>
 {{ .App.Name }} {{ .Group.Name }} <command> --header "Name: Value"
 ```
@@ -233,7 +234,7 @@ Generated APIs do not contain enough business semantics to infer real workflows.
 - `--file` and `--data` are mutually exclusive
 {{- end }}
 {{- if operationHasUserHeaders $.App . }}
-- Use `--header "Name: Value"` for header parameters; can be specified multiple times
+- Use `-H "Name: Value"` or `--header "Name: Value"` for header parameters; can be specified multiple times
 {{- end }}
 {{- if and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) .BodyMode }}
 - Simple fields are exposed as individual flags; complex input falls back to `--data` / `--file`

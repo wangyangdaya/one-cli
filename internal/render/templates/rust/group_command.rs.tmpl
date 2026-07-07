@@ -41,7 +41,7 @@ pub struct {{ rustTypeName .CommandName }}Args {
 {{- end }}
 {{- end }}
 {{- if operationHasHeaderParams . }}
-    #[arg(long = "header")]
+    #[arg(short = 'H', long = "header")]
     pub header: Vec<String>,
 {{- end }}
 {{- if .BodyMode }}

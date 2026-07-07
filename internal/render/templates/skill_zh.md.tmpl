@@ -66,15 +66,16 @@ metadata:
 {{- else if appUsesToken .App }}
 - 环境变量 `OPENCLI_AUTH_TOKEN`：认证令牌
 {{- else }}
-- 未配置认证；如需内部路由请求头，可仅使用 `--header`
+- 未配置认证；如需内部路由请求头，可仅使用 `-H` / `--header`
 {{- end }}
 {{- end }}
 
 ## 全局请求头
 
-所有 HTTP 命令都支持可重复的全局请求头。可使用 `--header "Name: Value"` 或 `--header "Name=Value"`，按需要放在子命令前后。
+所有 HTTP 命令都支持可重复的全局请求头。可使用 `-H "Name: Value"`、`--header "Name: Value"` 或 `--header "Name=Value"`，按需要放在子命令前后。
 
 ```bash
+{{ .App.Name }} -H "ACCESS-STATUS=inner" {{ .Group.Name }} <command>
 {{ .App.Name }} --header "ACCESS-STATUS=inner" {{ .Group.Name }} <command>
 {{ .App.Name }} {{ .Group.Name }} <command> --header "Name: Value"
 ```
@@ -226,7 +227,7 @@ metadata:
 - `--file` 和 `--data` 互斥
 {{- end }}
 {{- if operationHasUserHeaders $.App . }}
-- 使用 `--header "Name: Value"` 传入请求头参数，可指定多次
+- 使用 `-H "Name: Value"` 或 `--header "Name: Value"` 传入请求头参数，可指定多次
 {{- end }}
 {{- if and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) .BodyMode }}
 - 简单字段暴露为独立 flag；复杂输入回退到 `--data` / `--file`

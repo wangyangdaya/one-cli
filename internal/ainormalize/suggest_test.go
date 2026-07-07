@@ -92,6 +92,10 @@ func TestStripCodeFences(t *testing.T) {
 		{"json fence uppercase", "```JSON\n{\"a\":1}\n```", `{"a":1}`},
 		{"leading whitespace", "  ```json\n{\"a\":1}\n```  ", `{"a":1}`},
 		{"no closing fence", "```json\n{\"a\":1}", `{"a":1}`},
+		{"preamble before fence", "Here is the JSON:\n```json\n{\"a\":1}\n```", `{"a":1}`},
+		{"trailing commentary", "```json\n{\"a\":1}\n```\nNote: done", `{"a":1}`},
+		{"jsonc variant", "```jsonc\n{\"a\":1}\n```", `{"a":1}`},
+		{"json on fence line", "```json{\"a\":1}```", `{"a":1}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -125,7 +129,7 @@ func TestChatCompletionsEndpointAvoidsDoubleV1(t *testing.T) {
 	}
 }
 
-func TestValidateSuggestionCoversAllOperationsSharingPathOnlyKey(t *testing.T) {
+func TestValidateSuggestionRejectsSameGroupDuplicateViaPathOnlyKey(t *testing.T) {
 	doc := openapi.Document{
 		Operations: []openapi.Operation{
 			{Method: "GET", Path: "/items", Tag: "catalog"},
@@ -140,11 +144,34 @@ func TestValidateSuggestionCoversAllOperationsSharingPathOnlyKey(t *testing.T) {
 	}
 
 	cfg, diagnostics := ValidateSuggestion(inventory, suggestion)
+	if len(cfg.Naming.OperationAlias) != 0 {
+		t.Fatalf("expected zero operation alias after same-group duplicate rejection, got %+v", cfg.Naming.OperationAlias)
+	}
+	if len(diagnostics.Rejected) != 1 || !strings.Contains(diagnostics.Rejected[0].Reason, "duplicate") {
+		t.Fatalf("expected one duplicate rejection, got %+v", diagnostics.Rejected)
+	}
+}
+
+func TestValidateSuggestionAllowsCrossGroupAliasViaPathOnlyKey(t *testing.T) {
+	doc := openapi.Document{
+		Operations: []openapi.Operation{
+			{Method: "GET", Path: "/items", Tag: "catalog"},
+			{Method: "POST", Path: "/items", Tag: "inventory"},
+		},
+	}
+	inventory := BuildInventory(doc)
+	suggestion := Suggestion{
+		OperationAlias: map[string]string{
+			"/items": "items",
+		},
+	}
+
+	cfg, diagnostics := ValidateSuggestion(inventory, suggestion)
 	if len(cfg.Naming.OperationAlias) != 1 {
 		t.Fatalf("expected one operation alias, got %+v", cfg.Naming.OperationAlias)
 	}
 	if len(diagnostics.Rejected) != 0 {
-		t.Fatalf("expected no rejections, got %+v", diagnostics.Rejected)
+		t.Fatalf("expected no rejections for cross-group alias, got %+v", diagnostics.Rejected)
 	}
 }
 

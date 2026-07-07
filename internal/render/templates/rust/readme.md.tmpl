@@ -68,14 +68,15 @@ The `supplier_edi` profile uses the supplier `sha512Hex` canonical string: `meth
 
 Mode: `none`
 
-This CLI does not inject authentication headers. Use `--header` only when an endpoint needs non-auth routing or internal gateway headers.
+This CLI does not inject authentication headers. Use `-H` / `--header` only when an endpoint needs non-auth routing or internal gateway headers.
 {{- end }}
 
 ## Header Input
 
-HTTP commands accept repeatable `--header` flags:
+HTTP commands accept repeatable `-H` / `--header` flags:
 
 ```bash
+cargo run -- -H "ACCESS-STATUS=inner" <group> <command>
 cargo run -- --header "ACCESS-STATUS=inner" <group> <command>
 ```
 

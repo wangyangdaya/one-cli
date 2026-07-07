@@ -42,6 +42,14 @@ func TestGenerateRustOpenAPISmoke(t *testing.T) {
 		}
 	}
 
+	cliContent, err := os.ReadFile(filepath.Join(dir, "src", "cli.rs"))
+	if err != nil {
+		t.Fatalf("read generated cli.rs: %v", err)
+	}
+	if !strings.Contains(string(cliContent), `#[arg(short = 'H', long = "header")]`) {
+		t.Fatalf("generated Rust cli.rs should bind -H as shorthand for --header:\n%s", cliContent)
+	}
+
 	cargoContent, err := os.ReadFile(filepath.Join(dir, "Cargo.toml"))
 	if err != nil {
 		t.Fatalf("read Cargo.toml: %v", err)

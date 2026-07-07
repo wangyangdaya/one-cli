@@ -46,6 +46,13 @@ func TestRenderProject(t *testing.T) {
 	if !strings.Contains(string(serviceContent), "applyHeaders(req, cli.RequestHeaders())") {
 		t.Fatalf("generated service.go should apply root --header values:\n%s", serviceContent)
 	}
+	rootContent, err := os.ReadFile(filepath.Join(dir, "internal", "cli", "root.go"))
+	if err != nil {
+		t.Fatalf("read generated root.go: %v", err)
+	}
+	if !strings.Contains(string(rootContent), `StringArrayVarP(&requestHeaders, "header", "H", nil`) {
+		t.Fatalf("generated root.go should bind -H as shorthand for --header:\n%s", rootContent)
+	}
 	if _, err := os.Stat(filepath.Join(dir, "bin", "one")); err != nil {
 		t.Fatalf("missing launcher: %v", err)
 	}
@@ -90,6 +97,7 @@ func TestRenderProject(t *testing.T) {
 	}
 	for _, want := range []string{
 		"## Global Request Headers",
+		`-H "ACCESS-STATUS=inner"`,
 		`--header "ACCESS-STATUS=inner"`,
 		`--header "Name: Value"`,
 	} {

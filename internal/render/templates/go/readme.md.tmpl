@@ -75,7 +75,7 @@ The `supplier_edi` profile uses the supplier `sha512Hex` canonical string: `meth
 
 Mode: `none`
 
-This CLI does not inject authentication headers. Use `--header` only when an endpoint needs non-auth routing or internal gateway headers.
+This CLI does not inject authentication headers. Use `-H` / `--header` only when an endpoint needs non-auth routing or internal gateway headers.
 {{- end }}
 
 ## Body Input
@@ -110,9 +110,10 @@ Simple JSON body endpoints accept top-level flags plus raw JSON input modes:
 {{- if not (appHasAnyMCP .App) }}
 ## Header Input
 
-HTTP commands accept repeatable `--header` flags:
+HTTP commands accept repeatable `-H` / `--header` flags:
 
 ```bash
+./bin/{{ .App.Name }} -H "ACCESS-STATUS=inner" auth me
 ./bin/{{ .App.Name }} auth me --header "ACCESS-STATUS=inner"
 ```
 
