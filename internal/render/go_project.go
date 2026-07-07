@@ -28,6 +28,23 @@ func writeGoProject(outputDir, module string, app model.App, skillLang string) e
 		files = append(files, skillPackageFiles(groupDir, data)...)
 	}
 
+	if app.SingleSkill {
+		prefix := "skill"
+		if skillLang == "zh" {
+			prefix = "skill_zh"
+		}
+		skillDir := filepath.Join("skills", skillPackageName(app))
+		files = append(files, generatedFile{
+			Path:     filepath.Join(skillDir, "SKILL.md"),
+			Template: prefix + "/unified_skill.md.tmpl",
+			Data:     templateData{Module: module, Target: "go", SkillLang: skillLang, App: app},
+		})
+		files = append(files,
+			generatedFile{Path: filepath.Join(skillDir, "scripts", app.Name), Template: "skill/scripts/single_launcher.sh.tmpl", Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}, Mode: 0o755},
+			generatedFile{Path: filepath.Join(skillDir, "scripts", app.Name+".cmd"), Template: "skill/scripts/single_launcher.cmd.tmpl", Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}, Mode: 0o644},
+		)
+	}
+
 	if err := writeGoMod(outputDir, module); err != nil {
 		return err
 	}

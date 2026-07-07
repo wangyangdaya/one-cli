@@ -3,11 +3,20 @@ package render
 import "path/filepath"
 
 func skillPackageFiles(groupDir string, data templateData) []generatedFile {
-	base := filepath.Join("skills", groupDir)
 	prefix := "skill"
 	if data.SkillLang == "zh" {
 		prefix = "skill_zh"
 	}
+
+	if data.App.SingleSkill {
+		base := filepath.Join("skills", skillPackageName(data.App), "references")
+		templateName := prefix + "/references/single-instructions.md.tmpl"
+		return []generatedFile{
+			{Path: filepath.Join(base, groupDir+".md"), Template: templateName, Data: data},
+		}
+	}
+
+	base := filepath.Join("skills", groupDir)
 	return []generatedFile{
 		{Path: filepath.Join(base, "SKILL.md"), Template: prefix + ".md.tmpl", Data: data},
 		{Path: filepath.Join(base, "README.md"), Template: prefix + "/readme.md.tmpl", Data: data},

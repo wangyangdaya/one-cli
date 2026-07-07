@@ -1,0 +1,25 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/../../.." && pwd)
+
+{{- if eq .Target "rust" }}
+if command -v cargo >/dev/null 2>&1; then
+  CARGO_BIN=$(command -v cargo)
+else
+  echo "cargo is required to run this unbuilt skill launcher; regenerate with --build to embed a binary" >&2
+  exit 1
+fi
+exec "$CARGO_BIN" run --manifest-path "$ROOT_DIR/Cargo.toml" -- "$@"
+{{- else }}
+if command -v go >/dev/null 2>&1; then
+  GO_BIN=$(command -v go)
+elif [ -x /usr/local/go/bin/go ]; then
+  GO_BIN=/usr/local/go/bin/go
+else
+  echo "go is required to run this unbuilt skill launcher; regenerate with --build to embed a binary" >&2
+  exit 1
+fi
+exec "$GO_BIN" run "$ROOT_DIR/cmd/{{ .App.Name }}" "$@"
+{{- end }}

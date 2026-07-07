@@ -44,10 +44,12 @@ func CloneStringMap(values map[string]string) map[string]string {
 }
 
 type App struct {
-	Name    string
-	Version string
-	Auth    Auth
-	Groups  []Group
+	Name        string
+	Version     string
+	Description string
+	Auth        Auth
+	SingleSkill bool
+	Groups      []Group
 }
 
 type Auth struct {

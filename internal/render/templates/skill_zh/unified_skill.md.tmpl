@@ -1,0 +1,91 @@
+---
+name: {{ .App.Name }}
+version: 1.0.0
+description: "{{ if .App.Description }}{{ .App.Description }}。{{ end }}使用此 Skill 处理 {{ .App.Name }} 的 CLI/API 工作流，覆盖 {{ len .App.Groups }} 个命令组和 {{ appOperationCount .App }} 个生成命令。执行前按需加载对应分组 reference。覆盖范围包括：{{ appGroupSummary .App 6 }}{{ if gt (len .App.Groups) 6 }} 等分组{{ end }}。"
+metadata:
+  requires:
+    bins: ["{{ skillCommand .App }}"]
+---
+
+# {{ .App.Name }} 统一命令集
+
+{{ if .App.Description }}
+{{ .App.Description }}
+{{- end }}
+
+这是 `{{ .App.Name }}` 的统一 CLI 工具，覆盖 {{ len .App.Groups }} 个命令组、{{ appOperationCount .App }} 个生成命令。
+
+## 工作流（必须遵守）
+
+```
+用户请求 → 1. 匹配命令组
+         → 2. 加载 references/<group_name>.md
+         → 3. 按 reference 中的命令、参数、示例执行
+         → 4. 写入/删除/批量/不可逆操作前确认用户意图
+```
+
+**关键规则：**
+
+- 执行任何命令前，必须先加载对应的 `references/<group_name>.md`，获取参数、示例和安全约束。
+- 不确定属于哪个命令组时，先查看下面的命令组索引；仍不确定再运行 `<executable> <group> --help`。
+- 写入、删除、批量或不可逆操作执行前必须确认用户意图、目标对象和影响范围。
+- `--file` 和 `--data` 互斥，JSON 请求体二选一。
+
+## CLI 执行入口
+
+从 `scripts/` 选择当前平台对应的可执行文件：
+
+| 构建类型 | macOS / Linux | Windows |
+|------|------|------|
+| 当前平台构建 | `{{ skillCommand .App }}` | `{{ skillCommand .App }}.exe` |
+| 多平台构建 | `{{ skillCommand .App }}`（自动转发到平台二进制） | `{{ skillCommand .App }}.cmd`（转发到 windows-amd64.exe） |
+
+references 中的命令示例仍使用生成的根命令名（`{{ .App.Name }}`）展示命令结构；实际执行时用选中的 `scripts/` 可执行文件替换该根命令。
+
+全局选项：`--json`（JSON 输出）、`--trace`（HTTP 日志）、`-h` / `--help`（帮助）。
+
+通过 `opencli generate --single-skill` 生成时，`{{ skillCommand .App }}` 默认会被构建为当前平台可执行文件；显式传 `--build all` 或平台列表时会生成多平台二进制和转发脚本。少数直接渲染但未构建的包会保留同名源码 launcher，从当前 skill 包自动回到生成项目根目录运行源码。
+
+## 前置条件
+{{- if appUsesAKSK .App }}
+
+执行 HTTP API 命令前通常需要设置：
+
+```bash
+export OPENCLI_BASE_URL="<api-base-url>"
+export OPENCLI_AK="<access-key>"
+export OPENCLI_SK="<secret-key>"
+```
+
+AK/SK 请求头由 CLI 自动生成：`appKey`、`sign`、`timestamp`、`nonce`。如果接口还需要租户或系统 Header，通过 `-H` / `--header` 重复传入。
+{{- else }}
+
+执行 HTTP API 命令前通常需要设置 API 地址，并通过 Header 传入认证信息：
+
+```bash
+export OPENCLI_BASE_URL="<api-base-url>"
+export OPENCLI_AUTH_TOKEN="<token>"
+```
+
+认证和租户 Header 示例：
+
+```bash
+-H "Authorization: Bearer $OPENCLI_AUTH_TOKEN" \
+  -H "TENANT-CODE: <tenant-code>" \
+  -H "TENANT-ID: <tenant-id>"
+```
+{{- end }}
+
+MCP 命令组的 endpoint、stdio 命令和环境变量要求以对应 reference 文件为准。
+
+## 命令组索引
+
+| 命令组 | reference | 命令数 | 说明 |
+|--------|-----------|--------|----------|
+{{- range .App.Groups }}
+{{- $groupDir := groupPackageName . }}
+{{- if eq $.Target "rust" }}
+{{- $groupDir = rustModuleName . }}
+{{- end }}
+| {{ .Name }} | [references/{{ $groupDir }}.md](references/{{ $groupDir }}.md) | {{ len .Operations }} | {{ if .Description }}{{ .Description }}{{ else }}{{ groupOperationSummary . 4 }}{{ end }} |
+{{- end }}

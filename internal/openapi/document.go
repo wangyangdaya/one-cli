@@ -1,9 +1,10 @@
 package openapi
 
 type Document struct {
-	Title      string
-	Version    string
-	Tags       []Tag
+	Title       string
+	Version     string
+	Description string
+	Tags        []Tag
 	Operations []Operation
 }
 

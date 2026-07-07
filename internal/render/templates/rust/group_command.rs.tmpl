@@ -40,8 +40,8 @@ pub struct {{ rustTypeName .CommandName }}Args {
     pub {{ rustParamFieldName . }}: {{ if .Required }}{{ rustType .Type }}{{ else }}Option<{{ rustType .Type }}>{{ end }},
 {{- end }}
 {{- end }}
-{{- if operationHasHeaderParams . }}
-    #[arg(long = "header")]
+{{- if not (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) }}
+    #[arg(short = 'H', long = "header")]
     pub header: Vec<String>,
 {{- end }}
 {{- if .BodyMode }}
@@ -115,11 +115,7 @@ async fn run_{{ rustFieldName .CommandName }}(args: {{ rustTypeName .CommandName
 {{- end }}
 {{- end }}
 
-{{- if operationHasHeaderParams . }}
     let headers = client::parse_headers(&args.header)?;
-{{- else }}
-    let headers = Vec::new();
-{{- end }}
     let body = build_{{ rustFieldName .CommandName }}_http_body(&args)?;
     let response = client::request_json_text("{{ .Method }}", &path, query, headers, body).await?;
 {{- end }}

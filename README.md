@@ -62,23 +62,24 @@ make build
   --module github.com/myorg/my-petcli \
   --app petcli \
   --app-version 0.0.1 \
-  --skill-lang zh
+  --skill-lang zh \
+  --single-skill
 
 # 3. 直接运行生成的 CLI
 cd my-petcli
-./bin/petcli --help
-./bin/petcli pet list
+./skills/petcli/scripts/petcli --help
+./skills/petcli/scripts/petcli pet list
 
-# 4. 如需分发，编译为真实二进制
-# 生成后的 bin/petcli 是启动脚本；下面会用编译产物覆盖它
-go build -o bin/petcli ./cmd/petcli
-./bin/petcli --version
-
-# 5. 按目标平台生成不同二进制；版本来自生成时的 --app-version
-mkdir -p dist/darwin-arm64 dist/linux-amd64 dist/windows-amd64
-GOOS=darwin GOARCH=arm64 go build -o dist/darwin-arm64/petcli ./cmd/petcli
-GOOS=linux GOARCH=amd64 go build -o dist/linux-amd64/petcli ./cmd/petcli
-GOOS=windows GOARCH=amd64 go build -o dist/windows-amd64/petcli.exe ./cmd/petcli
+# 4. 如需分发多平台版本，可以显式构建 all
+# --single-skill 下构建产物会放入 skills/<skill-name>/scripts/
+cd ..
+./dist/opencli generate \
+  --input ./examples/petstore.yaml \
+  --output ./my-petcli-all \
+  --module github.com/myorg/my-petcli \
+  --app petcli \
+  --single-skill \
+  --build all
 ```
 
 Rust + OpenAPI 生成示例：
@@ -234,13 +235,17 @@ opencli generate \
 | `--auth` | ❌ | 生成认证模式：`token` 保持现状，`ak_sk` 生成 AK/SK 签名支持 |
 | `--signer` | ❌ | AK/SK 签名 profile；当前支持 `supplier_edi` |
 | `--skill-lang` | ❌ | 生成的 Skill 文档语言：`en` 或 `zh`，默认 `en` |
+| `--single-skill` | ❌ | 生成一个统一 Skill 包：`skills/<skill-name>/SKILL.md`，分组说明放入 `references/`，并默认把当前平台 CLI 构建到 `scripts/` |
+| `--build` | ❌ | 生成完成后自动编译 CLI，可选目标：`current`、`windows`、`mac-silicon`、`mac-intel`、`linux`、逗号分隔多个平台或 `all`。普通模式输出到 `bin/<app>`；`--single-skill` 模式可用它覆盖默认当前平台构建目标，输出到 `skills/<skill-name>/scripts/` |
 | `--config` | ❌ | 配置文件路径（可选） |
 
 `--input` 和 `--mcp-config` 互斥，必须且只能提供一个。
 
 `--app-version` 设置的是生成出来的 CLI 项目版本；如果同时配置了 `opencli.yaml` 的 `app.version`，命令行参数优先。
 
-`--skill-lang zh` 会生成中文 `skills/<group>/` 文档；不传时默认生成英文文档。生成出来的文件名保持不变，例如 `SKILL.md`、`README.md`、`generation-report.md`。
+`--skill-lang zh` 会生成中文 Skill 文档；不传时默认生成英文文档。普通模式生成 `skills/<group>/`，`--single-skill` 模式生成 `skills/<skill-name>/SKILL.md`、`skills/<skill-name>/references/` 和 `skills/<skill-name>/scripts/`，并默认构建当前平台入口，生成后可直接执行。
+
+`--build all` 会在同一个 `scripts/` 目录里放入多个平台二进制，例如 `<app>-darwin-arm64`、`<app>-darwin-amd64`、`<app>-linux-amd64`、`<app>-windows-amd64.exe`，并额外生成 macOS/Linux 的 `<app>` 和 Windows 的 `<app>.cmd` 入口脚本。也可以传多个目标，例如 `--build mac-silicon,linux`。生成的 `SKILL.md` 会提示 Agent 按当前 OS/CPU 选择对应文件，再把命令示例里的根命令替换为选中的 `scripts/` 可执行文件。
 
 AK/SK 接口可以显式生成内置签名逻辑：
 
@@ -480,6 +485,20 @@ my-cli-rs/
 
 `skills/<group>/` 是标准化 Skill 工作包。`SKILL.md` 是 Agent 入口，`README.md` 说明交付和修改流程，`assets/demo-request.json` 是可立即用于 `--file` 示例的合法 JSON 占位文件，`references/` 用于补充命令路由、业务流程和生产验收清单，`generation-report.md` 用于列出 API/MCP 输入中缺失的 group、命令、参数或请求体字段描述。
 
+使用 `--single-skill` 时，生成结构会变为：
+
+```
+skills/<skill-name>/
+├── SKILL.md
+├── references/
+│   └── <group>.md
+└── scripts/
+    ├── <app>
+    └── <app>.cmd 或 <app>-<os>-<arch>
+```
+
+`--single-skill` 会默认构建当前平台入口，因此生成后的 skill 包不需要额外安装 CLI；把命令示例里的根命令替换为 `scripts/<app>`（Windows 使用 `scripts/<app>.cmd` 或对应 `.exe`）即可执行。
+
 中文 Skill 文档可通过 `--skill-lang zh` 生成。风险等级按 HTTP 方法轻量标注：`GET/HEAD/OPTIONS` 为只读，`POST/PUT/PATCH` 为写入，`DELETE` 为高风险；不会按命令名猜测业务语义。
 
 ---
@@ -511,6 +530,7 @@ MCP 映射：
 - CLI 命令组名保留短横线，例如 `te-mm-mri-current`。
 - Go package、Rust module、`skills/<group>/` 目录使用 package name：非字母数字压缩为 `_`，转小写，数字开头加 `group_`。
 - 例如：`te-mm-mri-current` → `te_mm_mri_current`，生成 `skills/te_mm_mri_current/`。
+- `--single-skill` 的 `<skill-name>` 来自 app 名称，转为小写短横线形式，例如 `DMS CLI` → `skills/dms-cli/`。
 
 ---
 

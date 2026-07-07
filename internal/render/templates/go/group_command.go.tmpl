@@ -25,7 +25,7 @@ func new{{ .CommandName | pascal }}Command() *cobra.Command {
 	var bodyData string
 	var bodyFile string
 {{- end }}
-{{- if operationHasHeaderParams . }}
+{{- if not (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) }}
 	var headers []string
 {{- end }}
 {{- range .Parameters }}
@@ -55,7 +55,7 @@ func new{{ .CommandName | pascal }}Command() *cobra.Command {
 				BodyData: bodyData,
 				BodyFile: bodyFile,
 {{- end }}
-{{- if operationHasHeaderParams . }}
+{{- if not (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) }}
 				Headers: headers,
 {{- end }}
 {{- range .BodyFields }}
@@ -82,8 +82,8 @@ func new{{ .CommandName | pascal }}Command() *cobra.Command {
 	cmd.Flags().StringVar(&bodyData, "data", "", "Raw JSON request body")
 	cmd.Flags().StringVar(&bodyFile, "file", "", "Path to JSON request body file")
 {{- end }}
-{{- if operationHasHeaderParams . }}
-	cmd.Flags().StringArrayVar(&headers, "header", nil, "Request header in 'Name: Value' format; repeatable")
+{{- if not (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) }}
+	cmd.Flags().StringArrayVarP(&headers, "header", "H", nil, "Request header in 'Name: Value' format; repeatable")
 {{- end }}
 {{- range .Parameters }}
 {{- if eq .In "path" }}

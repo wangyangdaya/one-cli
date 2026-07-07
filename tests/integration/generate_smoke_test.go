@@ -73,7 +73,7 @@ func TestGenerateSmokeIncludesHeaderFlagsAndDocs(t *testing.T) {
 	commandText := string(commandContent)
 	for _, want := range []string{
 		`var headers []string`,
-		`cmd.Flags().StringArrayVar(&headers, "header", nil, "Request header in 'Name: Value' format; repeatable")`,
+		`cmd.Flags().StringArrayVarP(&headers, "header", "H", nil, "Request header in 'Name: Value' format; repeatable")`,
 		`Headers: headers,`,
 	} {
 		if !strings.Contains(commandText, want) {
@@ -85,8 +85,15 @@ func TestGenerateSmokeIncludesHeaderFlagsAndDocs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read readme: %v", err)
 	}
-	if !strings.Contains(string(readmeContent), `--header "Authorization: Bearer token"`) {
-		t.Fatalf("generated README missing header example:\n%s", string(readmeContent))
+	readmeText := string(readmeContent)
+	for _, want := range []string{
+		`-H "Authorization: Bearer token"`,
+		`-H "TENANT-CODE: 100001"`,
+		`If ` + "`Authorization`" + ` is not provided with ` + "`-H`" + ` / ` + "`--header`",
+	} {
+		if !strings.Contains(readmeText, want) {
+			t.Fatalf("generated README missing %q:\n%s", want, readmeText)
+		}
 	}
 
 	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "auth", "SKILL.md"))
@@ -100,6 +107,8 @@ func TestGenerateSmokeIncludesHeaderFlagsAndDocs(t *testing.T) {
 		"## Core Concepts",
 		"### openapi-cli auth me",
 		`--header "authorization: <value>"`,
+		`-H "TENANT-CODE: 100001"`,
+		`Header-based auth and tenant headers use the same repeatable header flag`,
 		"<!-- MANUAL:",
 	} {
 		if !strings.Contains(skillText, want) {

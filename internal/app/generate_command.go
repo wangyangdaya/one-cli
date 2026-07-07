@@ -2,7 +2,13 @@ package app
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"unicode"
 
 	"one-cli/internal/configgen"
 	"one-cli/internal/loaders"
@@ -28,12 +34,25 @@ func NewGenerateCommand() *cobra.Command {
 	var skillLang string
 	var auth string
 	var signer string
+	var singleSkill bool
+	var buildTargets string
 
 	cmd := &cobra.Command{
 		Use:   "generate",
 		Short: "Generate a Go CLI project from Swagger/OpenAPI or MCP",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := RunGenerateWithVersionSkillLangAuthAndSigner(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang, auth, signer, target); err != nil {
+			autoBuild := cmd.Flags().Changed("build") || singleSkill
+			buildPlatform := strings.TrimSpace(buildTargets)
+			if autoBuild && len(args) > 0 {
+				buildPlatform = strings.Join(args, ",")
+			}
+			if !autoBuild && len(args) > 0 {
+				return fmt.Errorf("unexpected arguments %q: build targets must follow --build", strings.Join(args, " "))
+			}
+			if autoBuild && buildPlatform == "" {
+				buildPlatform = "current"
+			}
+			if err := RunGenerateWithVersionSkillLangAuthSignerAndBuild(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang, auth, signer, singleSkill, autoBuild, buildPlatform, target); err != nil {
 				return err
 			}
 			if JSONEnabled() {
@@ -42,10 +61,12 @@ func NewGenerateCommand() *cobra.Command {
 					selectedTarget = "go"
 				}
 				rendered, err := outjson.JSONSuccess(cmd.CommandPath(), "generated project", map[string]string{
-					"output": strings.TrimSpace(output),
-					"module": strings.TrimSpace(module),
-					"app":    strings.TrimSpace(appName),
-					"target": selectedTarget,
+					"output":   strings.TrimSpace(output),
+					"module":   strings.TrimSpace(module),
+					"app":      strings.TrimSpace(appName),
+					"target":   selectedTarget,
+					"build":    fmt.Sprintf("%t", autoBuild),
+					"platform": strings.TrimSpace(buildPlatform),
 				})
 				if err != nil {
 					return err
@@ -68,6 +89,9 @@ func NewGenerateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&skillLang, "skill-lang", "en", "Generated skill language: en or zh")
 	cmd.Flags().StringVar(&auth, "auth", "", "Generated auth mode: token or ak_sk")
 	cmd.Flags().StringVar(&signer, "signer", "", "AK/SK signer profile, for example supplier_edi")
+	cmd.Flags().BoolVar(&singleSkill, "single-skill", false, "Generate a single unified skill instead of one per group; builds the current-platform CLI into the skill scripts directory by default")
+	cmd.Flags().StringVar(&buildTargets, "build", "", "Build after rendering; optional targets: current, windows, mac-silicon, mac-intel, linux, comma-separated values, or all")
+	cmd.Flags().Lookup("build").NoOptDefVal = "current"
 	_ = cmd.MarkFlagRequired("output")
 	_ = cmd.MarkFlagRequired("module")
 	_ = cmd.MarkFlagRequired("app")
@@ -96,10 +120,14 @@ func RunGenerateWithVersionAndSkillLang(input, mcpConfig, output, module, appNam
 }
 
 func RunGenerateWithVersionSkillLangAndAuth(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang, auth string, targets ...string) error {
-	return RunGenerateWithVersionSkillLangAuthAndSigner(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang, auth, "", targets...)
+	return RunGenerateWithVersionSkillLangAuthAndSigner(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang, auth, "", false, targets...)
 }
 
-func RunGenerateWithVersionSkillLangAuthAndSigner(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang, auth, signer string, targets ...string) error {
+func RunGenerateWithVersionSkillLangAuthAndSigner(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang, auth, signer string, singleSkill bool, targets ...string) error {
+	return RunGenerateWithVersionSkillLangAuthSignerAndBuild(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang, auth, signer, singleSkill, false, "current", targets...)
+}
+
+func RunGenerateWithVersionSkillLangAuthSignerAndBuild(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang, auth, signer string, singleSkill, autoBuild bool, buildPlatform string, targets ...string) error {
 	if err := validateGenerateSources(input, mcpConfig); err != nil {
 		return err
 	}
@@ -138,6 +166,7 @@ func RunGenerateWithVersionSkillLangAuthAndSigner(input, mcpConfig, output, modu
 
 	plan := planner.Build(doc, cfg)
 	plan.Name = strings.TrimSpace(appName)
+	plan.SingleSkill = singleSkill
 	plan.Auth.Type = auth
 	plan.Auth.SignerProfile = signerConfig.Profile
 	plan.Auth.Signer = signerConfig
@@ -145,7 +174,405 @@ func RunGenerateWithVersionSkillLangAuthAndSigner(input, mcpConfig, output, modu
 	if len(targets) > 0 {
 		target = strings.TrimSpace(targets[0])
 	}
-	return render.Project(strings.TrimSpace(output), strings.TrimSpace(module), plan, target, strings.TrimSpace(skillLang))
+	outputDir := strings.TrimSpace(output)
+	if err := render.Project(outputDir, strings.TrimSpace(module), plan, target, strings.TrimSpace(skillLang)); err != nil {
+		return err
+	}
+	if autoBuild {
+		return buildGeneratedProject(outputDir, strings.TrimSpace(module), plan.Name, target, singleSkill, buildPlatform)
+	}
+	return nil
+}
+
+func buildGeneratedProject(outputDir, module, appName, target string, singleSkill bool, platform string) error {
+	specs, err := resolveBuildPlatforms(platform)
+	if err != nil {
+		return err
+	}
+	multiPlatform := len(specs) > 1
+	switch strings.ToLower(strings.TrimSpace(target)) {
+	case "", "go":
+		for _, spec := range specs {
+			if err := buildGeneratedGoProject(outputDir, appName, singleSkill, spec, multiPlatform); err != nil {
+				return err
+			}
+		}
+		if multiPlatform {
+			return writeMultiPlatformLaunchers(outputDir, appName, singleSkill)
+		}
+		return nil
+	case "rust":
+		for _, spec := range specs {
+			if err := buildGeneratedRustProject(outputDir, module, appName, singleSkill, spec, multiPlatform); err != nil {
+				return err
+			}
+		}
+		if multiPlatform {
+			return writeMultiPlatformLaunchers(outputDir, appName, singleSkill)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported target %q: expected go or rust", target)
+	}
+}
+
+type buildPlatformSpec struct {
+	Name       string
+	GOOS       string
+	GOARCH     string
+	RustTarget string
+	Windows    bool
+}
+
+func resolveBuildPlatforms(platform string) ([]buildPlatformSpec, error) {
+	parts := splitBuildPlatforms(platform)
+	if len(parts) == 0 {
+		parts = []string{"current"}
+	}
+	if len(parts) == 1 && parts[0] == "all" {
+		return []buildPlatformSpec{
+			{Name: "windows-amd64", GOOS: "windows", GOARCH: "amd64", RustTarget: "x86_64-pc-windows-msvc", Windows: true},
+			{Name: "darwin-arm64", GOOS: "darwin", GOARCH: "arm64", RustTarget: "aarch64-apple-darwin"},
+			{Name: "darwin-amd64", GOOS: "darwin", GOARCH: "amd64", RustTarget: "x86_64-apple-darwin"},
+			{Name: "linux-amd64", GOOS: "linux", GOARCH: "amd64", RustTarget: "x86_64-unknown-linux-gnu"},
+		}, nil
+	}
+	specs := make([]buildPlatformSpec, 0, len(parts))
+	seen := make(map[string]bool, len(parts))
+	for _, part := range parts {
+		if part == "all" {
+			return nil, fmt.Errorf("unsupported build platform list %q: all must be used alone", platform)
+		}
+		spec, err := resolveBuildPlatform(part)
+		if err != nil {
+			return nil, err
+		}
+		if seen[spec.Name] {
+			continue
+		}
+		seen[spec.Name] = true
+		specs = append(specs, spec)
+	}
+	return specs, nil
+}
+
+func splitBuildPlatforms(platform string) []string {
+	raw := strings.FieldsFunc(platform, func(r rune) bool {
+		return r == ',' || unicode.IsSpace(r)
+	})
+	parts := make([]string, 0, len(raw))
+	for _, part := range raw {
+		trimmed := strings.ToLower(strings.TrimSpace(part))
+		if trimmed != "" {
+			parts = append(parts, trimmed)
+		}
+	}
+	return parts
+}
+
+func resolveBuildPlatform(platform string) (buildPlatformSpec, error) {
+	switch strings.ToLower(strings.TrimSpace(platform)) {
+	case "", "current":
+		return buildPlatformSpec{Name: runtime.GOOS + "-" + runtime.GOARCH, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, Windows: runtime.GOOS == "windows"}, nil
+	case "windows", "win":
+		return buildPlatformSpec{Name: "windows-amd64", GOOS: "windows", GOARCH: "amd64", RustTarget: "x86_64-pc-windows-msvc", Windows: true}, nil
+	case "mac-silicon", "darwin-arm64", "mac-arm64":
+		return buildPlatformSpec{Name: "darwin-arm64", GOOS: "darwin", GOARCH: "arm64", RustTarget: "aarch64-apple-darwin"}, nil
+	case "mac-intel", "darwin-amd64", "mac-amd64":
+		return buildPlatformSpec{Name: "darwin-amd64", GOOS: "darwin", GOARCH: "amd64", RustTarget: "x86_64-apple-darwin"}, nil
+	case "linux", "linux-amd64":
+		return buildPlatformSpec{Name: "linux-amd64", GOOS: "linux", GOARCH: "amd64", RustTarget: "x86_64-unknown-linux-gnu"}, nil
+	default:
+		return buildPlatformSpec{}, fmt.Errorf("unsupported build platform %q: expected current, windows, mac-silicon, mac-intel, linux, or all", platform)
+	}
+}
+
+func buildGeneratedGoProject(outputDir, appName string, singleSkill bool, spec buildPlatformSpec, multiPlatform bool) error {
+	finalBinary := generatedBinaryPath(outputDir, appName, singleSkill, spec, multiPlatform)
+	tempDir := filepath.Join(outputDir, ".opencli-build")
+	if err := os.MkdirAll(tempDir, 0o755); err != nil {
+		return fmt.Errorf("prepare generated Go build directory: %w", err)
+	}
+	absTempDir, err := filepath.Abs(tempDir)
+	if err != nil {
+		return fmt.Errorf("resolve generated Go build directory: %w", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	tempBinary := filepath.Join(absTempDir, filepath.Base(finalBinary))
+	cmd := exec.Command(goExecutable(), "build", "-mod=mod", "-o", tempBinary, "./cmd/"+strings.TrimSpace(appName))
+	cmd.Dir = outputDir
+	cmd.Env = generatedGoBuildEnv(absTempDir, spec)
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+
+	absFinalBinary, err := filepath.Abs(finalBinary)
+	if err != nil {
+		return fmt.Errorf("resolve generated Go binary path: %w", err)
+	}
+	printBuildStart("Go", spec.Name, outputDir, cmd.Args)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("build generated Go project: %w", err)
+	}
+	if spec.Windows {
+		_ = os.Remove(finalBinary)
+	}
+	if err := os.MkdirAll(filepath.Dir(finalBinary), 0o755); err != nil {
+		return fmt.Errorf("prepare generated Go script directory: %w", err)
+	}
+	if err := os.Rename(tempBinary, finalBinary); err != nil {
+		return fmt.Errorf("install generated Go binary: %w", err)
+	}
+	printBuildComplete(absFinalBinary)
+	return nil
+}
+
+func generatedGoBuildEnv(tempDir string, spec buildPlatformSpec) []string {
+	env := os.Environ()
+	env = append(env, "GOOS="+spec.GOOS, "GOARCH="+spec.GOARCH, "CGO_ENABLED=0")
+	if strings.TrimSpace(os.Getenv("GOCACHE")) == "" {
+		env = append(env, "GOCACHE="+filepath.Join(tempDir, "gocache"))
+	}
+	return env
+}
+
+func buildGeneratedRustProject(outputDir, module, appName string, singleSkill bool, spec buildPlatformSpec, multiPlatform bool) error {
+	args := []string{"build"}
+	if spec.RustTarget != "" {
+		args = append(args, "--target", spec.RustTarget)
+	}
+	cmd := exec.Command("cargo", args...)
+	cmd.Dir = outputDir
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+
+	sourceDir := filepath.Join(outputDir, "target", "debug")
+	if spec.RustTarget != "" {
+		sourceDir = filepath.Join(outputDir, "target", spec.RustTarget, "debug")
+	}
+	binaryPath := filepath.Join(sourceDir, cargoBinaryName(module))
+	if spec.Windows {
+		binaryPath += ".exe"
+	}
+	finalBinary := generatedBinaryPath(outputDir, appName, singleSkill, spec, multiPlatform)
+	absFinalBinary, err := filepath.Abs(finalBinary)
+	if err != nil {
+		return fmt.Errorf("resolve generated Rust binary path: %w", err)
+	}
+	printBuildStart("Rust", spec.Name, outputDir, cmd.Args)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("build generated Rust project: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(finalBinary), 0o755); err != nil {
+		return fmt.Errorf("prepare generated Rust script directory: %w", err)
+	}
+	if err := copyFile(binaryPath, finalBinary, 0o755); err != nil {
+		return fmt.Errorf("install generated Rust binary: %w", err)
+	}
+	printBuildComplete(absFinalBinary)
+	return nil
+}
+
+func generatedBinaryPath(outputDir, appName string, singleSkill bool, spec buildPlatformSpec, multiPlatform bool) string {
+	name := strings.TrimSpace(appName)
+	if name == "" {
+		name = "app"
+	}
+	binaryName := name
+	if multiPlatform {
+		binaryName += "-" + spec.Name
+	}
+	if spec.Windows {
+		binaryName += ".exe"
+	}
+	if !singleSkill {
+		return filepath.Join(outputDir, "bin", binaryName)
+	}
+	return filepath.Join(outputDir, "skills", skillPackageName(name), "scripts", binaryName)
+}
+
+func generatedBinaryDir(outputDir, appName string, singleSkill bool) string {
+	if !singleSkill {
+		return filepath.Join(outputDir, "bin")
+	}
+	return filepath.Join(outputDir, "skills", skillPackageName(appName), "scripts")
+}
+
+func writeMultiPlatformLaunchers(outputDir, appName string, singleSkill bool) error {
+	name := strings.TrimSpace(appName)
+	if name == "" {
+		name = "app"
+	}
+	dir := generatedBinaryDir(outputDir, name, singleSkill)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("prepare generated launcher directory: %w", err)
+	}
+	shellLauncher := fmt.Sprintf(`#!/bin/sh
+set -eu
+
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+OS=$(uname -s)
+ARCH=$(uname -m)
+
+case "$OS:$ARCH" in
+  Darwin:arm64) BIN="$DIR/%[1]s-darwin-arm64" ;;
+  Darwin:x86_64) BIN="$DIR/%[1]s-darwin-amd64" ;;
+  Linux:x86_64|Linux:amd64) BIN="$DIR/%[1]s-linux-amd64" ;;
+  MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64) BIN="$DIR/%[1]s-windows-amd64.exe" ;;
+  *) echo "unsupported platform: $OS/$ARCH" >&2; exit 1 ;;
+esac
+
+exec "$BIN" "$@"
+`, name)
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(shellLauncher), 0o755); err != nil {
+		return fmt.Errorf("write generated shell launcher: %w", err)
+	}
+
+	cmdLauncher := fmt.Sprintf(`@echo off
+set "DIR=%%~dp0"
+set "BIN=%%DIR%%%[1]s-windows-amd64.exe"
+if not exist "%%BIN%%" (
+  echo unsupported platform or missing binary: %%BIN%% 1>&2
+  exit /b 1
+)
+"%%BIN%%" %%*
+exit /b %%ERRORLEVEL%%
+`, name)
+	if err := os.WriteFile(filepath.Join(dir, name+".cmd"), []byte(cmdLauncher), 0o644); err != nil {
+		return fmt.Errorf("write generated Windows launcher: %w", err)
+	}
+	absShellLauncher, err := filepath.Abs(filepath.Join(dir, name))
+	if err != nil {
+		absShellLauncher = filepath.Join(dir, name)
+	}
+	absCmdLauncher, err := filepath.Abs(filepath.Join(dir, name+".cmd"))
+	if err != nil {
+		absCmdLauncher = filepath.Join(dir, name+".cmd")
+	}
+	fmt.Fprintf(os.Stderr, "[opencli] Build complete: %s\n", absShellLauncher)
+	fmt.Fprintf(os.Stderr, "[opencli] Build complete: %s\n", absCmdLauncher)
+	return nil
+}
+
+func copyFile(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+func skillPackageName(name string) string {
+	value := strings.TrimSpace(name)
+	if value == "" {
+		return "skill"
+	}
+	var builder strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(value) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			builder.WriteRune(r)
+			lastDash = false
+		default:
+			if !lastDash {
+				builder.WriteRune('-')
+				lastDash = true
+			}
+		}
+	}
+	result := strings.Trim(builder.String(), "-")
+	if result == "" {
+		return "skill"
+	}
+	return result
+}
+
+func printBuildStart(target, platform, outputDir string, args []string) {
+	absOutputDir, err := filepath.Abs(outputDir)
+	if err != nil {
+		absOutputDir = outputDir
+	}
+	fmt.Fprintf(os.Stderr, "[opencli] Building generated %s project for %s\n", target, platform)
+	fmt.Fprintf(os.Stderr, "[opencli] Build directory: %s\n", absOutputDir)
+	fmt.Fprintf(os.Stderr, "[opencli] Command: %s\n", shellCommand(args))
+}
+
+func printBuildComplete(binaryPath string) {
+	fmt.Fprintf(os.Stderr, "[opencli] Build complete: %s\n", binaryPath)
+}
+
+func shellCommand(args []string) string {
+	quoted := make([]string, 0, len(args))
+	for _, arg := range args {
+		quoted = append(quoted, shellQuote(arg))
+	}
+	return strings.Join(quoted, " ")
+}
+
+func shellQuote(arg string) string {
+	if arg == "" {
+		return "''"
+	}
+	if strings.IndexFunc(arg, func(r rune) bool {
+		return !(unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune("-_./:=+", r))
+	}) < 0 {
+		return arg
+	}
+	return "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
+}
+
+func cargoBinaryName(module string) string {
+	module = strings.TrimSpace(module)
+	if module == "" {
+		return "generated-cli"
+	}
+	if idx := strings.LastIndex(module, "/"); idx >= 0 && idx+1 < len(module) {
+		module = module[idx+1:]
+	}
+
+	var builder strings.Builder
+	lastDash := false
+	for _, r := range module {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			builder.WriteRune(unicode.ToLower(r))
+			lastDash = false
+		default:
+			if !lastDash {
+				builder.WriteRune('-')
+				lastDash = true
+			}
+		}
+	}
+	result := strings.Trim(builder.String(), "-")
+	if result == "" {
+		return "generated-cli"
+	}
+	return result
+}
+
+func goExecutable() string {
+	if goroot := runtime.GOROOT(); strings.TrimSpace(goroot) != "" {
+		candidate := filepath.Join(goroot, "bin", "go")
+		if runtime.GOOS == "windows" {
+			candidate += ".exe"
+		}
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return "go"
 }
 
 func resolveAuth(flag string, cfg configgen.Config) string {

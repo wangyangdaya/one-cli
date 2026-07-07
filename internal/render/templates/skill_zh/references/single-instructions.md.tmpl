@@ -1,13 +1,3 @@
----
-name: {{ .Group.Name }}
-version: 1.0.0
-description: "{{- if .Group.Description }}{{ .Group.Description }}{{- else }}{{ .Group.Name }} 是 {{ .App.Name }} 的命令组。{{ range $i, $op := .Group.Operations }}{{ if $i }}、{{ end }}{{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}{{ end }}。{{- end }}"
-metadata:
-  requires:
-    bins: ["{{ .App.Name }}"]
-  cliHelp: "{{ .App.Name }} {{ .Group.Name }} --help"
----
-
 # {{ .Group.Name }}
 {{- if .Group.Description }}
 
@@ -18,22 +8,27 @@ metadata:
 
 ## 第一步
 
-1. 选择命令前，先运行 `{{ .App.Name }} {{ .Group.Name }} --help`。
-2. 多个命令含义接近时，查看 [references/command-routing.md](references/command-routing.md)。
-3. 多步骤任务查看 [references/workflows.md](references/workflows.md)，生产使用前必须补全其中的 MANUAL 部分。
-4. 写入、删除、批量或不可逆操作必须遵守下面的安全规则和 [references/production-checklist.md](references/production-checklist.md)。
+1. 确认用户请求属于 `{{ .Group.Name }}`；如果不确定，回到 [../SKILL.md](../SKILL.md) 查看命令组索引。
+2. 按 [../SKILL.md](../SKILL.md) 的说明，从 `../scripts/` 选择当前平台对应的可执行文件。
+3. 选择命令前，先运行 `<selected-executable> {{ .Group.Name }} --help` 查看子命令。
+4. 按本文件的参数、示例和注意事项执行；不要凭空猜测 ID、枚举值或必填字段。
+5. 写入、删除、批量或不可逆操作执行前，必须确认用户意图、目标对象和影响范围。
+6. 多步骤任务先补全本文件中的 MANUAL 工作流说明，再用于生产流程。
 
 ## 包文件
 
 | 文件 | 用途 |
 | --- | --- |
-| [README.md](README.md) | 说明如何编辑、验证和交接这个生成的 Skill 包。 |
-| [SKILL.md](SKILL.md) | Agent 入口：触发规则、前置条件、命令索引、示例和安全约束。 |
-| [assets/demo-request.json](assets/demo-request.json) | 用于演示、`--file` 示例和手工编辑的有效占位 JSON 请求文件。 |
-| [references/command-routing.md](references/command-routing.md) | 命令选择表和人工意图映射。 |
-| [references/workflows.md](references/workflows.md) | 基于生成命令集的人工业务流程槽位。 |
-| [references/production-checklist.md](references/production-checklist.md) | 生产可用前的产品、工程、QA 和维护检查清单。 |
-| [generation-report.md](generation-report.md) | 从 API/MCP 输入检测到的文档缺口和后续补充建议。 |
+| [../SKILL.md](../SKILL.md) | 统一 Skill 入口和命令组索引。 |
+| [../scripts/](../scripts/) | 此 Skill 使用的已构建 CLI 二进制。 |
+| 本文件 | 当前分组的前置条件、路由说明、命令示例和安全约束。 |
+
+## 执行约定
+
+- reference 中的示例使用根命令名 `{{ .App.Name }}` 展示命令结构；实际执行时替换为选中的 `../scripts/` 可执行文件。
+- 常用输出建议追加 `--json`，便于读取 ID、状态和分页字段。
+- HTTP API 的认证、租户或系统 Header 使用可重复的 `-H` / `--header` 传入。
+- `--file` 和 `--data` 互斥，JSON 请求体二选一。
 
 ## 前置条件
 {{- if or (groupUsesMCPHTTP .Group) (groupUsesMCPStdio .Group) }}
@@ -80,14 +75,14 @@ metadata:
 
 ## 重要规则
 
-<!-- MANUAL: 补充 Agent 必须遵守的业务规则、选择规则和安全约束。示例：
-- 不要猜 ID；缺少 ID 时先 list/search/get。
+- 不要猜 ID；缺少 ID 时先用 list/search/get 类命令查询。
 - 删除、批量修改、状态推进等操作执行前必须确认目标和影响。
--->
+
+<!-- MANUAL: 补充 Agent 必须遵守的业务规则、选择规则和安全约束。 -->
 
 ## 命令路由
 
-生成命令的选择细节见 [references/command-routing.md](references/command-routing.md)。
+生成命令的选择细节如下。用户说法容易混淆时，把人工路由规则补充到这里。
 
 ## 命令
 
@@ -99,7 +94,7 @@ metadata:
 
 ## 常用工作流
 
-生成的 API 信息不足以推断真实业务流程。先补全 [references/workflows.md](references/workflows.md)，再把最重要的 3-5 个流程摘要写到这里。
+生成的 API 信息不足以推断真实业务流程。先补全下面的 MANUAL 区域，再把最重要的 3-5 个流程摘要写到这里。
 
 <!-- MANUAL: 补充多命令编排的常见场景。每个流程写清触发场景、前置查询、命令顺序、上一步输出字段、确认/dry-run、回读校验和最终返回字段。 -->
 
@@ -139,7 +134,7 @@ metadata:
   --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if and (eq .In "query") .Required }} \
   --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }}{{ if .Required }} \
   --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ end }}{{ if eq .BodyMode "file-or-data" }} \
-  --file assets/demo-request.json{{ end }}{{ range .Parameters }}{{ if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }} \
+  --data '{{ operationRequestJSON . }}'{{ end }}{{ range .Parameters }}{{ if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }} \
   --header "{{ .Name }}: <value>"{{ end }}{{ end }}
 {{- if hasOptionalFields . }}
 

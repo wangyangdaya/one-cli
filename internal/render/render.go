@@ -71,6 +71,8 @@ func renderTemplate(name string, data any) ([]byte, error) {
 			"goString":                 goString,
 			"rustString":               rustString,
 			"groupPackageName":         groupPackageName,
+			"skillPackageName":         skillPackageName,
+			"skillCommand":             skillCommand,
 			"operationHasHeaderParams": operationHasHeaderParams,
 			"operationHasUserHeaders":  operationHasUserHeaders,
 			"operationHasPathParams":   operationHasPathParams,
@@ -96,10 +98,14 @@ func renderTemplate(name string, data any) ([]byte, error) {
 			"exampleJSONFields":        exampleJSONFields,
 			"bodyRequiredLabel":        bodyRequiredLabel,
 			"demoRequestJSON":          demoRequestJSON,
+			"operationRequestJSON":     operationRequestJSON,
 			"operationIsWriteMethod":   operationIsWriteMethod,
 			"operationRiskLabel":       operationRiskLabel,
 			"groupDocumentationIssues": groupDocumentationIssues,
 			"hasOptionalFields":        hasOptionalFields,
+			"appOperationCount":        appOperationCount,
+			"groupOperationSummary":    groupOperationSummary,
+			"appGroupSummary":          appGroupSummary,
 			"upper":                    strings.ToUpper,
 		}).Parse(string(raw))
 		if err != nil {
@@ -134,6 +140,53 @@ func bodyRequiredLabel(field model.BodyField, lang string) string {
 		return "否"
 	}
 	return "no"
+}
+
+func appOperationCount(app model.App) int {
+	count := 0
+	for _, group := range app.Groups {
+		count += len(group.Operations)
+	}
+	return count
+}
+
+func groupOperationSummary(group model.Group, limit int) string {
+	var parts []string
+	for _, op := range group.Operations {
+		label := strings.TrimSpace(op.Summary)
+		if label == "" {
+			label = strings.TrimSpace(op.CommandName)
+		}
+		if label != "" {
+			parts = append(parts, label)
+		}
+		if limit > 0 && len(parts) >= limit {
+			break
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func appGroupSummary(app model.App, limit int) string {
+	var parts []string
+	for _, group := range app.Groups {
+		name := strings.TrimSpace(group.Name)
+		if name == "" {
+			continue
+		}
+		desc := strings.TrimSpace(group.Description)
+		if desc != "" {
+			parts = append(parts, name+": "+desc)
+		} else if ops := groupOperationSummary(group, 2); ops != "" {
+			parts = append(parts, name+": "+ops)
+		} else {
+			parts = append(parts, name)
+		}
+		if limit > 0 && len(parts) >= limit {
+			break
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 func pascal(value string) string {
@@ -238,16 +291,104 @@ func groupUsesMCPStdio(group model.Group) bool {
 
 func groupPackageName(group model.Group) string {
 	if trimmed := strings.TrimSpace(group.PackageName); trimmed != "" {
-		return trimmed
+		return safeGoPackageName(trimmed)
 	}
 	value := strings.TrimSpace(group.Name)
 	if value == "" {
-		return "default"
+		return "default_group"
 	}
 	value = strings.ReplaceAll(value, "-", "_")
 	value = strings.ReplaceAll(value, ".", "_")
 	value = strings.ReplaceAll(value, " ", "_")
-	return strings.ToLower(value)
+	return safeGoPackageName(value)
+}
+
+func skillPackageName(app model.App) string {
+	value := strings.TrimSpace(app.Name)
+	if value == "" {
+		return "skill"
+	}
+	var builder strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(value) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			builder.WriteRune(r)
+			lastDash = false
+		case r >= 'A' && r <= 'Z':
+			builder.WriteRune(r + ('a' - 'A'))
+			lastDash = false
+		default:
+			if !lastDash {
+				builder.WriteRune('-')
+				lastDash = true
+			}
+		}
+	}
+	result := strings.Trim(builder.String(), "-")
+	if result == "" {
+		return "skill"
+	}
+	return result
+}
+
+func skillCommand(app model.App) string {
+	name := strings.TrimSpace(app.Name)
+	if name == "" {
+		name = "app"
+	}
+	return "scripts/" + name
+}
+
+func safeGoPackageName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "default_group"
+	}
+	var builder strings.Builder
+	lastUnderscore := false
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			builder.WriteRune(r)
+			lastUnderscore = false
+		case r == '_':
+			if !lastUnderscore {
+				builder.WriteRune('_')
+				lastUnderscore = true
+			}
+		default:
+			if !lastUnderscore {
+				builder.WriteRune('_')
+				lastUnderscore = true
+			}
+		}
+	}
+	result := strings.Trim(builder.String(), "_")
+	if result == "" {
+		return "default_group"
+	}
+	if result[0] >= '0' && result[0] <= '9' {
+		result = "group_" + result
+	}
+	result = strings.ToLower(result)
+	if isGoKeyword(result) {
+		return result + "_group"
+	}
+	return result
+}
+
+func isGoKeyword(value string) bool {
+	switch value {
+	case "break", "default", "func", "interface", "select",
+		"case", "defer", "go", "map", "struct",
+		"chan", "else", "goto", "package", "switch",
+		"const", "fallthrough", "if", "range", "type",
+		"continue", "for", "import", "return", "var":
+		return true
+	default:
+		return false
+	}
 }
 
 func appHasMCPHTTP(app model.App) bool {
@@ -489,6 +630,16 @@ func demoRequestJSON(group model.Group) string {
 		if len(operation.BodyFields) > 0 {
 			return exampleJSONFields(operation.BodyFields)
 		}
+	}
+	return `{"demo": true}`
+}
+
+func operationRequestJSON(operation model.Operation) string {
+	if len(operation.BodySchemaFields) > 0 {
+		return exampleJSONFields(operation.BodySchemaFields)
+	}
+	if len(operation.BodyFields) > 0 {
+		return exampleJSONFields(operation.BodyFields)
 	}
 	return `{"demo": true}`
 }

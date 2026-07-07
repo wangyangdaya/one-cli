@@ -13,8 +13,9 @@ type Plan = model.App
 
 func Build(doc openapi.Document, cfg configgen.Config) Plan {
 	app := Plan{
-		Name:    appName(doc, cfg),
-		Version: strings.TrimSpace(cfg.App.Version),
+		Name:        appName(doc, cfg),
+		Version:     strings.TrimSpace(cfg.App.Version),
+		Description: cleanDescription(doc.Description),
 	}
 
 	groupIndex := make(map[string]int)
@@ -91,6 +92,17 @@ func Build(doc openapi.Document, cfg configgen.Config) Plan {
 	return app
 }
 
+func cleanDescription(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\"", "\\\"")
+	s = strings.TrimSpace(s)
+	for strings.Contains(s, "  ") {
+		s = strings.ReplaceAll(s, "  ", " ")
+	}
+	return s
+}
+
 func applyBodyFieldOverrides(op openapi.Operation, groupName, commandName string, cfg configgen.Config, plannedOp *model.Operation) {
 	for _, key := range overrideCandidates(op, groupName, commandName) {
 		fields := cfg.Overrides.BodyFields[key]
@@ -165,7 +177,7 @@ func commandIdentifier(value string) string {
 func packageName(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "default"
+		return "default_group"
 	}
 
 	var builder strings.Builder
@@ -185,12 +197,29 @@ func packageName(value string) string {
 
 	result := strings.Trim(builder.String(), "_")
 	if result == "" {
-		return "default"
+		return "default_group"
 	}
 	if result[0] >= '0' && result[0] <= '9' {
 		return "group_" + result
 	}
-	return strings.ToLower(result)
+	result = strings.ToLower(result)
+	if isGoKeyword(result) {
+		return result + "_group"
+	}
+	return result
+}
+
+func isGoKeyword(value string) bool {
+	switch value {
+	case "break", "default", "func", "interface", "select",
+		"case", "defer", "go", "map", "struct",
+		"chan", "else", "goto", "package", "switch",
+		"const", "fallthrough", "if", "range", "type",
+		"continue", "for", "import", "return", "var":
+		return true
+	default:
+		return false
+	}
 }
 
 func groupDescription(op openapi.Operation, groupName string, descriptions map[string]string) string {

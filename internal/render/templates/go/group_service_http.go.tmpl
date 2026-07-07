@@ -30,9 +30,7 @@ type {{ .CommandName | pascal }}Input struct {
 	{{ .Name | pascal }} {{ goType .Type }}
 {{- end }}
 {{- end }}
-{{- if operationHasHeaderParams . }}
 	Headers []string
-{{- end }}
 {{- if .BodyMode }}
 	BodyData string
 	BodyFile string
@@ -65,11 +63,9 @@ func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (
 	if len(body) > 0 {
 		req.Header.Set("Content-Type", "application/json")
 	}
-{{- if operationHasHeaderParams . }}
 	if err := applyHeaders(req, input.Headers); err != nil {
 		return Result{}, err
 	}
-{{- end }}
 {{- if appUsesAKSK $.App }}
 	if err := auth.ApplyAKSK(req, "{{ .Method }}", "{{ .Path }}", body); err != nil {
 		return Result{}, err
@@ -260,8 +256,6 @@ func applyAuthToken(req *http.Request) {
 }
 {{- end }}
 
-{{- if groupHasHeaderParams .Group }}
-
 func applyHeaders(req *http.Request, headers []string) error {
 	for _, raw := range headers {
 		name, value, ok := strings.Cut(raw, ":")
@@ -274,4 +268,3 @@ func applyHeaders(req *http.Request, headers []string) error {
 	}
 	return nil
 }
-{{- end }}

@@ -1,13 +1,3 @@
----
-name: {{ .Group.Name }}
-version: 1.0.0
-description: "{{- if .Group.Description }}{{ .Group.Description }}{{- else }}{{ .Group.Name }} commands for {{ .App.Name }}. {{ range $i, $op := .Group.Operations }}{{ if $i }}, {{ end }}{{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}{{ end }}.{{- end }}"
-metadata:
-  requires:
-    bins: ["{{ .App.Name }}"]
-  cliHelp: "{{ .App.Name }} {{ .Group.Name }} --help"
----
-
 # {{ .Group.Name }}
 {{- if .Group.Description }}
 
@@ -18,22 +8,27 @@ This is a generated OpenCLI skill package. It contains API-derived facts and man
 
 ## First Steps
 
-1. Run `{{ .App.Name }} {{ .Group.Name }} --help` before choosing a command.
-2. Use [references/command-routing.md](references/command-routing.md) when multiple commands look similar.
-3. Use [references/workflows.md](references/workflows.md) for multi-step work; fill its MANUAL sections before relying on business flows.
-4. For write, delete, bulk, or irreversible actions, follow the safety rules below and [references/production-checklist.md](references/production-checklist.md).
+1. Confirm that the user request belongs to `{{ .Group.Name }}`; if unclear, return to [../SKILL.md](../SKILL.md) and check the command group index.
+2. Choose the current platform's executable from `../scripts/` as described in [../SKILL.md](../SKILL.md).
+3. Run `<selected-executable> {{ .Group.Name }} --help` before choosing a subcommand.
+4. Use this file's parameters, examples, and notes; do not guess IDs, enum values, or required fields.
+5. Confirm the user's intent, target objects, and impact before write, delete, bulk, or irreversible actions.
+6. For multi-step work, fill the MANUAL workflow notes in this file before relying on business flows.
 
 ## Package Files
 
 | File | Purpose |
 | --- | --- |
-| [README.md](README.md) | Explains how to edit, validate, and hand off this generated skill package. |
-| [SKILL.md](SKILL.md) | Agent entrypoint: trigger rules, prerequisites, command index, examples, and safety constraints. |
-| [assets/demo-request.json](assets/demo-request.json) | Valid placeholder JSON request file for demos, `--file` examples, and manual editing. |
-| [references/command-routing.md](references/command-routing.md) | Command selection table and manual intent mapping. |
-| [references/workflows.md](references/workflows.md) | Manual business workflow slots built from the generated command set. |
-| [references/production-checklist.md](references/production-checklist.md) | Product, engineering, QA, and maintenance checklist for making the skill production-ready. |
-| [generation-report.md](generation-report.md) | Generated documentation gaps and follow-up notes from the API/MCP input. |
+| [../SKILL.md](../SKILL.md) | Unified skill entrypoint and command group index. |
+| [../scripts/](../scripts/) | Built CLI binaries used by this skill. |
+| This file | Group-specific prerequisites, routing notes, command examples, and safety constraints. |
+
+## Execution Conventions
+
+- Examples in this reference use the root command name `{{ .App.Name }}` to show the command shape; when executing, replace it with the selected `../scripts/` executable.
+- Prefer appending `--json` for machine-readable output so IDs, status fields, and pagination fields can be extracted reliably.
+- Pass HTTP API authentication, tenant, or system headers with repeatable `-H` / `--header` values.
+- `--file` and `--data` are mutually exclusive; choose one JSON body input mode.
 
 ## Prerequisites
 {{- if or (groupUsesMCPHTTP .Group) (groupUsesMCPStdio .Group) }}
@@ -80,14 +75,14 @@ This is a generated OpenCLI skill package. It contains API-derived facts and man
 
 ## Important Notes
 
-<!-- MANUAL: 补充 Agent 必须遵守的业务规则、选择规则和安全约束。示例：
-- 不要猜 ID；缺少 ID 时先 list/search/get。
-- 删除、批量修改、状态推进等操作执行前必须确认目标和影响。
--->
+- Do not guess IDs; when an ID is missing, query with list/search/get commands first.
+- Confirm targets and impact before delete, bulk update, or state-transition commands.
+
+<!-- MANUAL: Add business rules, selection rules, and safety constraints the agent must follow. -->
 
 ## Command Routing
 
-For generated command selection details, read [references/command-routing.md](references/command-routing.md).
+Generated command selection details are listed below. Add manual routing notes here when user phrasing is ambiguous.
 
 ## Commands
 
@@ -99,7 +94,7 @@ For generated command selection details, read [references/command-routing.md](re
 
 ## Common Workflows
 
-Generated APIs do not contain enough business semantics to infer real workflows. Fill [references/workflows.md](references/workflows.md), then summarize the top 3-5 workflows here.
+Generated APIs do not contain enough business semantics to infer real workflows. Fill the MANUAL section below, then summarize the top 3-5 workflows here.
 
 <!-- MANUAL: 补充多命令编排的常见场景。每个流程写清触发场景、前置查询、命令顺序、上一步输出字段、确认/dry-run、回读校验和最终返回字段。 -->
 
@@ -139,7 +134,7 @@ Generated APIs do not contain enough business semantics to infer real workflows.
   --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if and (eq .In "query") .Required }} \
   --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }}{{ if .Required }} \
   --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ end }}{{ if eq .BodyMode "file-or-data" }} \
-  --file assets/demo-request.json{{ end }}{{ range .Parameters }}{{ if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }} \
+  --data '{{ operationRequestJSON . }}'{{ end }}{{ range .Parameters }}{{ if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }} \
   --header "{{ .Name }}: <value>"{{ end }}{{ end }}
 {{- if hasOptionalFields . }}
 

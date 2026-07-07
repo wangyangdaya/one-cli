@@ -1,13 +1,3 @@
----
-name: {{ .Group.Name }}
-version: 1.0.0
-description: "{{- if .Group.Description }}{{ .Group.Description }}{{- else }}{{ .Group.Name }} 是 {{ .App.Name }} 的命令组。{{ range $i, $op := .Group.Operations }}{{ if $i }}、{{ end }}{{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}{{ end }}。{{- end }}"
-metadata:
-  requires:
-    bins: ["{{ .App.Name }}"]
-  cliHelp: "{{ .App.Name }} {{ .Group.Name }} --help"
----
-
 # {{ .Group.Name }}
 {{- if .Group.Description }}
 

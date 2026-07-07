@@ -51,6 +51,21 @@ Requests include `appKey`, `sign`, `timestamp`, and `nonce` headers. Signer prof
 The `supplier_edi` profile uses the supplier `sha512Hex` canonical string: `method`, `/v2...` path, `appKey`, `appSecret`, `timestamp`, `nonce`, and compact `jsonBody`.
 {{- end }}
 
+{{- if not (appHasAnyMCP .App) }}
+## Header Input
+
+HTTP commands accept repeatable `-H` / `--header` flags. Use this for custom system headers, tenant headers, and header-based auth:
+
+```bash
+./target/debug/{{ cargoPackageName .Module }} users list \
+  -H "Authorization: Bearer token" \
+  -H "TENANT-CODE: 100001" \
+  -H "TENANT-ID: 100001"
+```
+
+If `Authorization` is not provided with `-H` / `--header`, token auth commands still fall back to `OPENCLI_AUTH_TOKEN`.
+{{- end }}
+
 ## Generated Skills
 
 Each command group includes a standardized skill package under `skills/<group>/`:

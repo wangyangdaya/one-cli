@@ -1,0 +1,9 @@
+@echo off
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%\..\..\..") do set "ROOT_DIR=%%~fI"
+{{- if eq .Target "rust" }}
+cargo run --manifest-path "%ROOT_DIR%\Cargo.toml" -- %*
+{{- else }}
+go run "%ROOT_DIR%\cmd\{{ .App.Name }}" %*
+{{- end }}
+exit /b %ERRORLEVEL%

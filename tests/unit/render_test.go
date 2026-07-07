@@ -225,6 +225,116 @@ func TestRenderProjectCanGenerateChineseSkillPackage(t *testing.T) {
 	}
 }
 
+func TestRenderProjectSingleSkillUsesUnifiedReferences(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name:        "one",
+		Description: "one-core",
+		SingleSkill: true,
+		Groups: []model.Group{
+			{
+				Name:        "leave",
+				Description: "Leave request operations",
+				Operations: []model.Operation{
+					{
+						CommandName: "list",
+						Method:      "GET",
+						Path:        "/leaves",
+						Summary:     "List leave requests",
+					},
+					{
+						CommandName:  "create",
+						Method:       "POST",
+						Path:         "/leaves",
+						Summary:      "Create leave request",
+						BodyMode:     model.BodyModeFileOrData,
+						BodyRequired: true,
+						BodySchemaFields: []model.BodyField{
+							{Name: "reason", Type: "string", Description: "Leave reason"},
+						},
+					},
+				},
+			},
+			{
+				Name: "profile",
+				Operations: []model.Operation{
+					{CommandName: "get", Method: "GET", Path: "/profile", Summary: "Get profile"},
+				},
+			},
+		},
+	}
+
+	if err := render.Project(dir, "github.com/acme/one-cli", app); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+
+	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "one", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated unified skill markdown: %v", err)
+	}
+	skillText := string(skillContent)
+	for _, want := range []string{
+		"description: \"one-core. Use this skill to operate one CLI/API workflows across 2 command groups and 3 generated commands.",
+		"Covered areas include leave: Leave request operations; profile: Get profile.",
+		`bins: ["scripts/one"]`,
+		"Before running any command, load the matching `references/<group_name>.md`",
+		"| leave | [references/leave.md](references/leave.md) | 2 | Leave request operations |",
+		"| profile | [references/profile.md](references/profile.md) | 1 | Get profile |",
+	} {
+		if !strings.Contains(skillText, want) {
+			t.Fatalf("generated unified skill markdown missing %q:\n%s", want, skillText)
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "skills", "leave", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("single-skill mode should not generate per-group SKILL.md, stat err: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "skills", "leave", "references", "workflows.md")); !os.IsNotExist(err) {
+		t.Fatalf("single-skill mode should not generate per-group workflow reference, stat err: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "skills", "one", "scripts", "one")); err != nil {
+		t.Fatalf("single-skill mode should generate packaged launcher: %v", err)
+	}
+	launcherContent, err := os.ReadFile(filepath.Join(dir, "skills", "one", "scripts", "one"))
+	if err != nil {
+		t.Fatalf("read generated packaged launcher: %v", err)
+	}
+	if !strings.Contains(string(launcherContent), `exec "$GO_BIN" run "$ROOT_DIR/cmd/one"`) {
+		t.Fatalf("generated packaged launcher should run project source:\n%s", launcherContent)
+	}
+
+	referenceContent, err := os.ReadFile(filepath.Join(dir, "skills", "one", "references", "leave.md"))
+	if err != nil {
+		t.Fatalf("read generated single-skill reference: %v", err)
+	}
+	referenceText := string(referenceContent)
+	for _, want := range []string{
+		"[../SKILL.md](../SKILL.md)",
+		"Unified skill entrypoint and command group index.",
+		"Choose the current platform's executable from `../scripts/`",
+		"Examples in this reference use the root command name `one`",
+		"Generated command selection details are listed below.",
+		"--data '{\"reason\": \"value\"}'",
+	} {
+		if !strings.Contains(referenceText, want) {
+			t.Fatalf("generated single-skill reference missing %q:\n%s", want, referenceText)
+		}
+	}
+	for _, stale := range []string{
+		"references/command-routing.md",
+		"references/workflows.md",
+		"references/production-checklist.md",
+		"assets/demo-request.json",
+		"generation-report.md",
+		"[SKILL.md](SKILL.md)",
+		"[README.md](README.md)",
+	} {
+		if strings.Contains(referenceText, stale) {
+			t.Fatalf("generated single-skill reference contains stale link %q:\n%s", stale, referenceText)
+		}
+	}
+}
+
 func TestRenderRustDisambiguatesIdentifiers(t *testing.T) {
 	dir := t.TempDir()
 	app := model.App{
@@ -329,6 +439,11 @@ func TestRenderProjectSkillIncludesHeaderUsageNotes(t *testing.T) {
 							{Name: "authorization", In: "header", Type: "string"},
 						},
 					},
+					{
+						CommandName: "profile",
+						Method:      "GET",
+						Path:        "/auth/profile",
+					},
 				},
 			},
 		},
@@ -351,11 +466,29 @@ func TestRenderProjectSkillIncludesHeaderUsageNotes(t *testing.T) {
 		"## Common Workflows",
 		"### one auth me",
 		`--header "authorization: <value>"`,
+		`-H "TENANT-CODE: 100001"`,
+		`Header-based auth and tenant headers use the same repeatable header flag`,
+		"| `-H`, `--header \"Name: Value\"` | no | Custom HTTP header; repeatable. Use for Authorization, tenant, or system headers. |",
 		"**Parameters:**",
 		"<!-- MANUAL:",
 	} {
 		if !strings.Contains(skillText, want) {
 			t.Fatalf("generated SKILL.md missing %q:\n%s", want, skillText)
+		}
+	}
+
+	commandContent, err := os.ReadFile(filepath.Join(dir, "internal", "auth", "command.go"))
+	if err != nil {
+		t.Fatalf("read generated command.go: %v", err)
+	}
+	commandText := string(commandContent)
+	for _, want := range []string{
+		`cmd.Flags().StringArrayVarP(&headers, "header", "H", nil, "Request header in 'Name: Value' format; repeatable")`,
+		`func newProfileCommand() *cobra.Command`,
+		`Headers: headers,`,
+	} {
+		if !strings.Contains(commandText, want) {
+			t.Fatalf("generated command.go missing %q:\n%s", want, commandText)
 		}
 	}
 }
@@ -560,5 +693,45 @@ func TestRenderProjectCompilesWhenGroupNameContainsHyphen(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("generated project should compile for hyphenated groups, got %v, output: %s", err, string(out))
+	}
+}
+
+func TestRenderProjectAvoidsGoKeywordPackageNames(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name: "one",
+		Groups: []model.Group{
+			{
+				Name:        "默认",
+				PackageName: "default",
+				Operations: []model.Operation{
+					{CommandName: "refresh", Method: "POST", Path: "/user/refreshPermission"},
+				},
+			},
+		},
+	}
+
+	if err := render.Project(dir, "github.com/acme/one-cli", app); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+
+	mainContent, err := os.ReadFile(filepath.Join(dir, "cmd", "one", "main.go"))
+	if err != nil {
+		t.Fatalf("read generated main.go: %v", err)
+	}
+	mainText := string(mainContent)
+	if strings.Contains(mainText, "\tdefault ") {
+		t.Fatalf("generated main.go used Go keyword as import alias:\n%s", mainText)
+	}
+	if !strings.Contains(mainText, `default_group "github.com/acme/one-cli/internal/default_group"`) {
+		t.Fatalf("generated main.go missing safe default_group import:\n%s", mainText)
+	}
+
+	commandContent, err := os.ReadFile(filepath.Join(dir, "internal", "default_group", "command.go"))
+	if err != nil {
+		t.Fatalf("read generated command.go: %v", err)
+	}
+	if !strings.Contains(string(commandContent), "package default_group") {
+		t.Fatalf("generated command.go missing safe package name:\n%s", commandContent)
 	}
 }

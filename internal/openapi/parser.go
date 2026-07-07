@@ -249,6 +249,7 @@ func convertDocument(doc *openapi3.T) Document {
 	if doc.Info != nil {
 		d.Title = strings.TrimSpace(doc.Info.Title)
 		d.Version = strings.TrimSpace(doc.Info.Version)
+		d.Description = strings.TrimSpace(doc.Info.Description)
 	}
 	d.Tags = convertTags(doc.Tags)
 	d.Operations = convertOperations(doc.Paths)

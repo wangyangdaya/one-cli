@@ -90,11 +90,16 @@ Simple JSON body endpoints accept top-level flags plus raw JSON input modes:
 {{- if not (appHasAnyMCP .App) }}
 ## Header Input
 
-Endpoints with OpenAPI header parameters accept repeatable `--header` flags:
+HTTP commands accept repeatable `-H` / `--header` flags. Use this for custom system headers, tenant headers, and header-based auth:
 
 ```bash
-./bin/{{ .App.Name }} auth me --header "Authorization: Bearer token"
+./bin/{{ .App.Name }} users list \
+  -H "Authorization: Bearer token" \
+  -H "TENANT-CODE: 100001" \
+  -H "TENANT-ID: 100001"
 ```
+
+If `Authorization` is not provided with `-H` / `--header`, token auth commands still fall back to `OPENCLI_AUTH_TOKEN`.
 
 ## Trace
 

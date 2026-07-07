@@ -68,6 +68,36 @@ func TestGenerateCommandJSONOutput(t *testing.T) {
 	}
 }
 
+func TestGenerateCommandCanBuildGeneratedGoProject(t *testing.T) {
+	dir := t.TempDir()
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--input", filepath.Join("..", "..", "examples", "petstore.yaml"),
+		"--output", dir,
+		"--module", "github.com/acme/generated",
+		"--app", "petcli",
+		"--app-version", "0.0.1",
+		"--build",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute generate --build: %v", err)
+	}
+
+	binary := filepath.Join(dir, "bin", "petcli")
+	if _, err := os.Stat(binary); err != nil {
+		t.Fatalf("expected generated binary: %v", err)
+	}
+	out, err := exec.Command(binary, "--version").CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated binary --version failed: %v output=%s", err, string(out))
+	}
+	if got := string(out); !strings.Contains(got, "petcli version 0.0.1") {
+		t.Fatalf("generated binary --version output = %q", got)
+	}
+}
+
 func TestGenerateCommandWithSimpleJSONBodySpec(t *testing.T) {
 	dir := t.TempDir()
 	cmd := app.NewRootCommand()
