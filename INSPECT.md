@@ -58,9 +58,9 @@ opencli --json inspect --input ./api.yaml
 有些接口文档虽然合法，但命名不适合直接生成 CLI。例如：
 
 ```text
-计划物流. POST /api-apply/v2/get/supplierMrpMonth
-计划物流. POST /api-apply/v2/get/supplierPo
-计划物流. POST /api-apply/v2/push/supplierConPo
+中文. POST /api/v2/get/xx
+中文. POST /api/v2/get/xxx
+中文. POST /api/v2/push/xxxx
 ```
 
 这类文档的 `tag`、路径和 `operationId` 往往来自内部平台或接口代码名，生成的命令可能不直观。可以使用 AI 建议模式生成 `opencli.yaml` 草稿：
