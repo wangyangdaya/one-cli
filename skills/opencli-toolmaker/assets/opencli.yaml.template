@@ -1,0 +1,36 @@
+app:
+  binary: <app-name>
+  root_command: <app-name>
+  version: 0.0.1
+
+naming:
+  # 将中文或特殊字符 tag 映射为英文命令组
+  tag_alias:
+    # "原始 tag 名": 英文别名
+    "计划物流.": planlogistics
+
+  # 简化子命令名
+  # 1) 如果原始文档有 operationId，直接用 operationId 作为键
+  # 2) 如果没有 operationId，用 "METHOD PATH" 作为键
+  operation_alias:
+    # 按 operationId 映射
+    # listUsers: list
+    # createUser: create
+
+    # 按 METHOD PATH 映射（无 operationId 时使用）
+    "POST /api-apply/v2/get/supplierDelState": del-state
+    "POST /api-apply/v2/get/supplierInvData": inv-data
+
+runtime:
+  # 认证头名称（可选）
+  # auth_header: Authorization
+  # 默认输出格式：pretty / json / table
+  default_output: pretty
+
+overrides:
+  # 请求体处理模式
+  # flags: 把简单 JSON 字段展开为独立 flags
+  # file-or-data: 使用 --file 或 --data 传入完整请求体
+  body_mode:
+    # <group>.<command>: flags
+    planlogistics.del-state: file-or-data

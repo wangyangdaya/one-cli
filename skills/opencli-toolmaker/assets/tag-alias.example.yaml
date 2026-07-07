@@ -1,0 +1,9 @@
+# 中文/特殊字符 tag 映射示例
+# 复制到 opencli.yaml 的 naming.tag_alias 下使用
+naming:
+  tag_alias:
+    "计划物流.": planlogistics
+    "供应商管理": supplier
+    "采购订单": purchase-order
+    "库存中心": inventory
+    "品质管理-来料检验": incoming-qc

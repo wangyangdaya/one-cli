@@ -20,6 +20,14 @@ func commandName(op openapi.Operation, cfg configgen.Config) string {
 		}
 		return simplifyOperationID(trimmed)
 	}
+
+	pathKey := strings.ToUpper(strings.TrimSpace(op.Method)) + " " + strings.TrimSpace(op.Path)
+	if alias, ok := cfg.Naming.OperationAlias[pathKey]; ok {
+		if trimmed := strings.TrimSpace(alias); trimmed != "" {
+			return trimmed
+		}
+	}
+
 	return deriveFromMethodPath(op.Method, op.Path)
 }
 

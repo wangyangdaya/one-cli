@@ -313,9 +313,11 @@ naming:
     pet-store: pets
   
   # Operation 别名：重命名子命令
+  # 当 OpenAPI 文档中没有 operationId 时，也可以用 "METHOD PATH" 作为键
   operation_alias:
     listUsers: list
     createUser: create
+    "POST /api-apply/v2/get/supplierDelState": del-state
 
 runtime:
   # 认证头名称

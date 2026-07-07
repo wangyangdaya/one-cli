@@ -1,0 +1,18 @@
+# 子命令别名示例
+# 复制到 opencli.yaml 的 naming.operation_alias 下使用
+naming:
+  operation_alias:
+    # 方式一：按 operationId 映射（推荐，原始文档有 operationId 时使用）
+    listUsers: list
+    createUser: create
+    getUserById: get
+    deleteUser: delete
+
+    # 方式二：按 METHOD PATH 映射（原始文档无 operationId 时使用）
+    "POST /api-apply/v2/get/supplierDelState": del-state
+    "POST /api-apply/v2/get/supplierInvData": inv-data
+    "POST /api-apply/v2/get/supplierMrpDate": mrp-date
+    "POST /api-apply/v2/get/supplierMrpMonth": mrp-month
+    "POST /api-apply/v2/get/supplierPo": po
+    "POST /api-apply/v2/push/supplierConDate": con-date
+    "POST /api-apply/v2/push/supplierConPo": con-po
