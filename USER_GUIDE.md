@@ -45,6 +45,78 @@ OpenCLI 当前支持两类输入：
 opencli --help
 ```
 
+### 2.1 收到 `dist` 文件夹后如何运行
+
+如果你收到的是一个 `dist` 文件夹，里面通常已经放好了不同系统可直接运行的 OpenCLI 程序。使用人员不需要编译代码，只需要根据自己的电脑系统选择对应文件。
+
+常见文件说明：
+
+| 文件名 | 适用系统 | 如何运行 |
+| --- | --- | --- |
+| `opencli` | 当前构建机器对应的系统 | 在终端中执行 `./opencli --help` |
+| `opencli_darwin_arm64` | macOS，Apple Silicon 芯片，例如 M1/M2/M3/M4 | 在终端中执行 `./opencli_darwin_arm64 --help` |
+| `opencli_linux_amd64` | Linux，x86_64 服务器或电脑 | 在终端中执行 `./opencli_linux_amd64 --help` |
+| `opencli_windows_amd64.exe` | Windows，x86_64 电脑 | 在 PowerShell 中执行 `.\opencli_windows_amd64.exe --help` |
+
+Windows 使用方式：
+
+1. 解压或打开 `dist` 文件夹。
+2. 在文件夹空白处按住 `Shift`，点击鼠标右键，选择“在终端中打开”或“在 PowerShell 中打开”。
+3. 执行：
+
+```powershell
+.\opencli_windows_amd64.exe --help
+```
+
+macOS 使用方式：
+
+1. 打开“终端”。
+2. 进入 `dist` 文件夹，例如：
+
+```bash
+cd ~/Downloads/dist
+```
+
+3. 第一次运行前，如果系统提示没有执行权限，先执行：
+
+```bash
+chmod +x ./opencli_darwin_arm64
+```
+
+4. 查看帮助：
+
+```bash
+./opencli_darwin_arm64 --help
+```
+
+Linux 使用方式：
+
+```bash
+cd ./dist
+chmod +x ./opencli_linux_amd64
+./opencli_linux_amd64 --help
+```
+
+看到帮助信息后，说明程序可以正常运行。后续命令只需要把文档中的 `opencli` 替换成你实际使用的文件名即可，例如：
+
+```bash
+./opencli_darwin_arm64 inspect --input ./api.yaml
+./opencli_darwin_arm64 generate --input ./api.yaml --output ./my-cli --module github.com/example/my-cli --app mycli
+```
+
+Windows 示例：
+
+```powershell
+.\opencli_windows_amd64.exe inspect --input .\api.yaml
+.\opencli_windows_amd64.exe generate --input .\api.yaml --output .\my-cli --module github.com/example/my-cli --app mycli
+```
+
+注意：
+
+- 这个程序是命令行工具，通常不是双击打开使用，而是在终端或 PowerShell 中输入命令执行。
+- 如果命令提示“找不到文件”，请先确认当前终端所在目录就是 `dist` 文件夹。
+- 如果 macOS 提示无法打开来自未知开发者的程序，可以在“系统设置 > 隐私与安全性”中允许打开，或联系交付人员提供已签名版本。
+
 查看某个子命令帮助：
 
 ```bash

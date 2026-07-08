@@ -328,16 +328,20 @@ func inventoryPrompt(inventory Inventory) string {
 
 func stripCodeFences(content string) string {
 	content = strings.TrimSpace(content)
-	for _, fence := range []string{"```json", "```JSON", "```Json", "```"} {
-		if strings.HasPrefix(content, fence) {
-			content = strings.TrimSpace(strings.TrimPrefix(content, fence))
-			break
+	if open := strings.Index(content, "```"); open >= 0 {
+		rest := content[open+3:]
+		if idx := strings.IndexByte(rest, '\n'); idx >= 0 {
+			rest = rest[idx+1:]
+		} else if strings.HasPrefix(rest, "json") || strings.HasPrefix(rest, "JSON") || strings.HasPrefix(rest, "Json") {
+			rest = strings.TrimPrefix(rest, "json")
+			rest = strings.TrimPrefix(rest, "JSON")
+			rest = strings.TrimPrefix(rest, "Json")
 		}
+		if close := strings.Index(rest, "```"); close >= 0 {
+			return strings.TrimSpace(rest[:close])
+		}
+		return strings.TrimSpace(rest)
 	}
-	if strings.HasSuffix(content, "```") {
-		content = strings.TrimSpace(strings.TrimSuffix(content, "```"))
-	}
-	content = strings.TrimSpace(content)
 	start := strings.Index(content, "{")
 	end := strings.LastIndex(content, "}")
 	if start >= 0 && end > start {
@@ -351,15 +355,15 @@ func sanitizeRespBody(body []byte) string {
 	lowered := strings.ToLower(text)
 	for _, marker := range []string{`"api-key"`, `"apikey"`, "authorization", "bearer"} {
 		if idx := strings.Index(lowered, marker); idx >= 0 {
-			lowered = lowered[:idx] + "[redacted]"
+			text = text[:idx] + "[redacted]"
 			break
 		}
 	}
 	const max = 500
-	if len(lowered) > max {
-		lowered = lowered[:max] + "..."
+	if len(text) > max {
+		text = text[:max] + "..."
 	}
-	return lowered
+	return text
 }
 
 const systemPrompt = `You generate reviewable opencli.yaml naming suggestions for irregular OpenAPI documents.

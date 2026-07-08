@@ -96,6 +96,7 @@ func TestStripCodeFences(t *testing.T) {
 		{"trailing commentary", "```json\n{\"a\":1}\n```\nNote: done", `{"a":1}`},
 		{"jsonc variant", "```jsonc\n{\"a\":1}\n```", `{"a":1}`},
 		{"json on fence line", "```json{\"a\":1}```", `{"a":1}`},
+		{"preamble with brace", "Here is the {json}:\n```json\n{\"a\":1}\n```", `{"a":1}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
