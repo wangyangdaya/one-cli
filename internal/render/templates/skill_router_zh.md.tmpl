@@ -1,0 +1,31 @@
+---
+name: {{ .App.Name }}-skills
+version: 1.0.0
+description: "{{ .App.Name }} 的 Skill 路由入口。执行任务前，用它选择正确的命令组 Skill。"
+metadata:
+  requires:
+    bins: ["{{ .App.Name }}"]
+  cliHelp: "{{ .App.Name }} skills --help"
+---
+
+# {{ .App.Name }} Skills Router
+
+本目录包含 OpenCLI 生成的 Skill 包。这个路由入口用于兼容要求所选文件夹根目录必须有 `SKILL.md` 的 agent loader。
+
+执行任务前：
+
+1. 从索引中选择匹配的命令组 Skill。
+2. 阅读该命令组的 `SKILL.md`。
+3. 只把本文件当作导航入口，不要当作完整操作手册。
+
+```bash
+{{ .App.Name }} skills list
+{{ .App.Name }} skills read <skill>
+{{ .App.Name }} skills read <skill> references/command-routing.md
+```
+
+| Skill | 命令数 | 说明 |
+| --- | ---: | --- |
+{{- range .App.Groups }}
+| `{{ if eq $.Target "rust" }}{{ rustModuleName . }}{{ else }}{{ groupPackageName . }}{{ end }}` | {{ len .Operations }} | [`{{ if eq $.Target "rust" }}{{ rustModuleName . }}{{ else }}{{ groupPackageName . }}{{ end }}/SKILL.md`]({{ if eq $.Target "rust" }}{{ rustModuleName . }}{{ else }}{{ groupPackageName . }}{{ end }}/SKILL.md) |
+{{- end }}

@@ -19,9 +19,10 @@ This is a generated OpenCLI skill package. It contains API-derived facts and man
 ## First Steps
 
 1. Run `{{ .App.Name }} {{ .Group.Name }} --help` before choosing a command.
-2. Use [references/command-routing.md](references/command-routing.md) when multiple commands look similar.
-3. Use [references/workflows.md](references/workflows.md) for multi-step work; fill its MANUAL sections before relying on business flows.
-4. For write, delete, bulk, or irreversible actions, follow the safety rules below and [references/production-checklist.md](references/production-checklist.md).
+2. Use `{{ .App.Name }} skills list` to discover generated skill names and `{{ .App.Name }} skills read {{ if eq .Target "rust" }}{{ rustModuleName .Group }}{{ else }}{{ groupPackageName .Group }}{{ end }}` to read the current editable skill file. If not running from the generated project root, pass `--skills-dir <path-to-skills>`.
+3. Use [references/command-routing.md](references/command-routing.md) when multiple commands look similar.
+4. Use [references/workflows.md](references/workflows.md) for multi-step work; fill its MANUAL sections before relying on business flows.
+5. For write, delete, bulk, or irreversible actions, follow the safety rules below and [references/production-checklist.md](references/production-checklist.md).
 
 ## Package Files
 

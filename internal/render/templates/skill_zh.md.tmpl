@@ -19,9 +19,10 @@ metadata:
 ## 第一步
 
 1. 选择命令前，先运行 `{{ .App.Name }} {{ .Group.Name }} --help`。
-2. 多个命令含义接近时，查看 [references/command-routing.md](references/command-routing.md)。
-3. 多步骤任务查看 [references/workflows.md](references/workflows.md)，生产使用前必须补全其中的 MANUAL 部分。
-4. 写入、删除、批量或不可逆操作必须遵守下面的安全规则和 [references/production-checklist.md](references/production-checklist.md)。
+2. 使用 `{{ .App.Name }} skills list` 发现生成的 Skill 名称，使用 `{{ .App.Name }} skills read {{ if eq .Target "rust" }}{{ rustModuleName .Group }}{{ else }}{{ groupPackageName .Group }}{{ end }}` 读取当前可编辑的 Skill 文件；如果不在生成项目根目录运行，传 `--skills-dir <skills目录>`。
+3. 多个命令含义接近时，查看 [references/command-routing.md](references/command-routing.md)。
+4. 多步骤任务查看 [references/workflows.md](references/workflows.md)，生产使用前必须补全其中的 MANUAL 部分。
+5. 写入、删除、批量或不可逆操作必须遵守下面的安全规则和 [references/production-checklist.md](references/production-checklist.md)。
 
 ## 包文件
 

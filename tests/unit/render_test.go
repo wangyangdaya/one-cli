@@ -66,6 +66,12 @@ func TestRenderProject(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "skills", "leave", "SKILL.md")); err != nil {
 		t.Fatalf("missing generated skill markdown: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(dir, "skills", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("single-group project should not generate skills router, got err: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "skills", "README.md")); err != nil {
+		t.Fatalf("missing generated skills index: %v", err)
+	}
 	for _, rel := range []string{
 		"skills/leave/README.md",
 		"skills/leave/assets/demo-request.json",
@@ -115,6 +121,9 @@ func TestRenderProject(t *testing.T) {
 		"Generated Go CLIs use `0.0.1` for `--version`.",
 		"./bin/one --version",
 		"## Generated Skills",
+		"./bin/one skills list",
+		"./bin/one skills read <skill>",
+		"./bin/one skills --skills-dir /path/to/skills read <skill>",
 		"demo-request.json",
 		"production-checklist.md",
 		"generation-report.md",
@@ -125,6 +134,21 @@ func TestRenderProject(t *testing.T) {
 	}
 	if strings.Contains(readmeText, "ldflags") {
 		t.Fatalf("generated README should not recommend build-time version overrides:\n%s", readmeText)
+	}
+	skillsIndexContent, err := os.ReadFile(filepath.Join(dir, "skills", "README.md"))
+	if err != nil {
+		t.Fatalf("read generated skills index: %v", err)
+	}
+	skillsIndexText := string(skillsIndexContent)
+	for _, want := range []string{
+		"# Generated Skills",
+		"one skills list",
+		"one skills read <skill>",
+		"| `leave` | 1 | [`SKILL.md`](leave/SKILL.md) |",
+	} {
+		if !strings.Contains(skillsIndexText, want) {
+			t.Fatalf("generated skills index missing %q:\n%s", want, skillsIndexText)
+		}
 	}
 	headerTestPath := filepath.Join(dir, "internal", "leave", "service_header_test.go")
 	headerTest := `package leave
@@ -195,6 +219,7 @@ func TestApplyHeadersAcceptsEqualsSyntax(t *testing.T) {
 		"More help: one <command> --help",
 		"Available Commands:",
 		"leave",
+		"skills",
 		"--header",
 		"--trace",
 		"--version",
@@ -217,6 +242,121 @@ func TestApplyHeadersAcceptsEqualsSyntax(t *testing.T) {
 	} {
 		if !strings.Contains(commandHelpText, want) {
 			t.Fatalf("generated command --help missing %q:\n%s", want, commandHelpText)
+		}
+	}
+
+	skillsList := exec.Command(binary, "skills", "list")
+	skillsList.Dir = dir
+	out, err = skillsList.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated skills list should succeed, got %v, output: %s", err, string(out))
+	}
+	if got := string(out); !strings.Contains(got, "leave\t") || !strings.Contains(got, "leave commands for one") {
+		t.Fatalf("generated skills list output = %q, want leave skill with description", got)
+	}
+
+	skillsRead := exec.Command(binary, "skills", "read", "leave")
+	skillsRead.Dir = dir
+	out, err = skillsRead.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated skills read should succeed, got %v, output: %s", err, string(out))
+	}
+	if got := string(out); !strings.Contains(got, "name: leave") || !strings.Contains(got, "## Commands") {
+		t.Fatalf("generated skills read output missing SKILL.md content:\n%s", got)
+	}
+
+	manualSkillContent := strings.Replace(skillText, "## Important Notes", "## Business Override\n\nManual business edit.\n\n## Important Notes", 1)
+	if err := os.WriteFile(filepath.Join(dir, "skills", "leave", "SKILL.md"), []byte(manualSkillContent), 0o644); err != nil {
+		t.Fatalf("write manual skill edit: %v", err)
+	}
+	skillsRead = exec.Command(binary, "skills", "read", "leave")
+	skillsRead.Dir = dir
+	out, err = skillsRead.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated skills read after manual edit should succeed, got %v, output: %s", err, string(out))
+	}
+	if got := string(out); !strings.Contains(got, "Manual business edit.") {
+		t.Fatalf("generated skills read should reflect disk edits:\n%s", got)
+	}
+
+	hiddenSkillsDir := filepath.Join(dir, "skills.hidden")
+	if err := os.Rename(filepath.Join(dir, "skills"), hiddenSkillsDir); err != nil {
+		t.Fatalf("hide generated skills directory: %v", err)
+	}
+
+	nestedBinary := filepath.Join(dir, "target", "release", "one")
+	if err := os.MkdirAll(filepath.Dir(nestedBinary), 0o755); err != nil {
+		t.Fatalf("create nested binary dir: %v", err)
+	}
+	nestedBuild := exec.Command("go", "build", "-o", nestedBinary, "./cmd/one")
+	nestedBuild.Dir = dir
+	nestedBuild.Env = append(nestedBuild.Environ(),
+		"GOCACHE="+filepath.Join(t.TempDir(), "gocache"),
+		"GOTOOLCHAIN=local",
+	)
+	out, err = nestedBuild.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated nested project binary should build, got %v, output: %s", err, string(out))
+	}
+	nestedSkillsList := exec.Command(nestedBinary, "skills", "--skills-dir", hiddenSkillsDir, "list")
+	nestedSkillsList.Dir = filepath.Join(dir, "target", "release")
+	out, err = nestedSkillsList.CombinedOutput()
+	if err != nil {
+		t.Fatalf("nested generated skills list should read explicit skills dir, got %v, output: %s", err, string(out))
+	}
+	if got := string(out); !strings.Contains(got, "leave\t") {
+		t.Fatalf("nested generated skills list output = %q, want leave skill", got)
+	}
+
+	nestedSkillsRead := exec.Command(nestedBinary, "skills", "--skills-dir", hiddenSkillsDir, "read", "leave")
+	nestedSkillsRead.Dir = filepath.Join(dir, "target", "release")
+	out, err = nestedSkillsRead.CombinedOutput()
+	if err != nil {
+		t.Fatalf("nested generated skills read should read explicit skills dir, got %v, output: %s", err, string(out))
+	}
+	if got := string(out); !strings.Contains(got, "name: leave") || !strings.Contains(got, "Manual business edit.") {
+		t.Fatalf("nested generated skills read output missing SKILL.md content:\n%s", got)
+	}
+}
+
+func TestRenderProjectGeneratesSkillsRouterForMultipleGroups(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name: "one",
+		Groups: []model.Group{
+			{
+				Name: "leave",
+				Operations: []model.Operation{
+					{CommandName: "list", Method: "GET", Path: "/leaves"},
+				},
+			},
+			{
+				Name: "attendance",
+				Operations: []model.Operation{
+					{CommandName: "punch", Method: "POST", Path: "/attendance/punch"},
+				},
+			},
+		},
+	}
+
+	if err := render.Project(dir, "github.com/acme/one-cli", app); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+
+	skillsRouterContent, err := os.ReadFile(filepath.Join(dir, "skills", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated skills router: %v", err)
+	}
+	skillsRouterText := string(skillsRouterContent)
+	for _, want := range []string{
+		"name: one-skills",
+		"Skills Router",
+		"one skills list",
+		"| `leave` | 1 | [`leave/SKILL.md`](leave/SKILL.md) |",
+		"| `attendance` | 1 | [`attendance/SKILL.md`](attendance/SKILL.md) |",
+	} {
+		if !strings.Contains(skillsRouterText, want) {
+			t.Fatalf("generated skills router missing %q:\n%s", want, skillsRouterText)
 		}
 	}
 }
@@ -510,6 +650,23 @@ func TestRenderRustDisambiguatesIdentifiers(t *testing.T) {
 	}
 	if strings.Contains(cliText, "过点车辆定时任务(线边、sps) {") {
 		t.Fatalf("generated cli.rs used display name as Rust variant:\n%s", cliText)
+	}
+
+	skillsRouterContent, err := os.ReadFile(filepath.Join(dir, "skills", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated Rust skills router: %v", err)
+	}
+	skillsRouterText := string(skillsRouterContent)
+	for _, want := range []string{
+		"name: one-skills",
+		"Skills Router",
+		"one skills list",
+		"| `default` | 1 | [`default/SKILL.md`](default/SKILL.md) |",
+		"| `default_2` | 1 | [`default_2/SKILL.md`](default_2/SKILL.md) |",
+	} {
+		if !strings.Contains(skillsRouterText, want) {
+			t.Fatalf("generated Rust skills router missing %q:\n%s", want, skillsRouterText)
+		}
 	}
 
 	modContent, err := os.ReadFile(filepath.Join(dir, "src", "commands", "mod.rs"))

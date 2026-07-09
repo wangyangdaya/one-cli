@@ -44,6 +44,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum GroupCommand {
+    #[command(name = "skills")]
+    Skills {
+        #[arg(long = "skills-dir", default_value = "skills")]
+        skills_dir: String,
+        #[command(subcommand)]
+        command: SkillsCommand,
+    },
 {{- range .App.Groups }}
     #[command(name = "{{ .Name }}")]
     {{ rustTypeName (rustModuleName .) }} {
@@ -51,6 +58,17 @@ enum GroupCommand {
         command: commands::{{ rustModuleName . }}::Command,
     },
 {{- end }}
+}
+
+#[derive(Subcommand)]
+enum SkillsCommand {
+    /// List generated skills
+    List,
+    /// Print a generated skill file
+    Read {
+        skill: String,
+        path: Option<String>,
+    },
 }
 
 pub async fn run() -> AppResult<()> {
@@ -71,6 +89,7 @@ pub async fn run() -> AppResult<()> {
     let headers = crate::client::parse_headers(&cli.header)?;
     crate::client::set_global_headers(headers);
     match cli.command {
+        Some(GroupCommand::Skills { skills_dir, command }) => run_skills(command, &skills_dir),
 {{- range .App.Groups }}
         Some(GroupCommand::{{ rustTypeName (rustModuleName .) }} { command }) => command.run().await,
 {{- end }}
@@ -84,4 +103,94 @@ pub async fn run() -> AppResult<()> {
 
 fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
+}
+
+fn run_skills(command: SkillsCommand, skills_dir: &str) -> AppResult<()> {
+    match command {
+        SkillsCommand::List => {
+            let root = skills_root(skills_dir)?;
+            let mut names = Vec::new();
+            for entry in std::fs::read_dir(&root).map_err(|err| err.to_string())? {
+                let entry = entry.map_err(|err| err.to_string())?;
+                if !entry.file_type().map_err(|err| err.to_string())?.is_dir() {
+                    continue;
+                }
+                let name = entry.file_name().to_string_lossy().to_string();
+                if entry.path().join("SKILL.md").is_file() {
+                    names.push(name);
+                }
+            }
+            names.sort();
+            for name in names {
+                let desc = skill_description(&root.join(&name).join("SKILL.md"));
+                if desc.is_empty() {
+                    println!("{name}");
+                } else {
+                    println!("{name}\t{desc}");
+                }
+            }
+            Ok(())
+        }
+        SkillsCommand::Read { skill, path } => {
+            let root = skills_root(skills_dir)?;
+            let path = safe_skill_path(&root, &skill, path.as_deref().unwrap_or("SKILL.md"))?;
+            let content = std::fs::read_to_string(path).map_err(|err| err.to_string())?;
+            print!("{content}");
+            Ok(())
+        }
+    }
+}
+
+fn skills_root(dir: &str) -> AppResult<std::path::PathBuf> {
+    let root = if dir.trim().is_empty() { "skills" } else { dir.trim() };
+    let path = std::path::PathBuf::from(root);
+    if path.is_dir() {
+        return Ok(path);
+    }
+    Err(format!("skills directory {root:?} not found; run from the generated project root or pass --skills-dir"))
+}
+
+fn safe_skill_path(root: &std::path::Path, skill: &str, rel: &str) -> AppResult<std::path::PathBuf> {
+    if skill.is_empty() || skill.contains('/') || skill.contains('\\') {
+        return Err(format!("invalid skill {skill:?}"));
+    }
+    let rel_path = std::path::Path::new(rel);
+    if rel_path.as_os_str().is_empty() || rel_path.is_absolute() {
+        return Err(format!("invalid skill file path {rel:?}"));
+    }
+    for component in rel_path.components() {
+        match component {
+            std::path::Component::Normal(_) => {}
+            _ => return Err(format!("invalid skill file path {rel:?}")),
+        }
+    }
+    let base = root.join(skill);
+    if !base.join("SKILL.md").is_file() {
+        return Err(format!("unknown skill {skill:?}"));
+    }
+    Ok(base.join(rel_path))
+}
+
+fn skill_description(path: &std::path::Path) -> String {
+    // Best-effort single-line description extraction. Generated SKILL.md always
+    // emits `description: "..."` as a single-line double-quoted string. Manual
+    // multi-line YAML (folded `>` or block `|`) is not supported here; keep
+    // descriptions single-line for correct `skills list` output.
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return String::new();
+    };
+    let mut lines = content.lines();
+    if lines.next().map(str::trim) != Some("---") {
+        return String::new();
+    }
+    for line in lines {
+        let line = line.trim();
+        if line == "---" {
+            return String::new();
+        }
+        if let Some(value) = line.strip_prefix("description:") {
+            return value.trim().trim_matches('"').to_string();
+        }
+    }
+    String::new()
 }

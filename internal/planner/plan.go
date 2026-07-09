@@ -25,6 +25,7 @@ func Build(doc openapi.Document, cfg configgen.Config) Plan {
 	}
 	for _, op := range doc.Operations {
 		groupName := groupName(op, cfg, groupDescriptions)
+		groupName, renamedFrom := reserveGroupName(groupName)
 		commandName := uniqueCommandName(commandName(op, cfg), groupName, groupCommandCounts)
 
 		plannedOp := model.Operation{
@@ -78,6 +79,7 @@ func Build(doc openapi.Document, cfg configgen.Config) Plan {
 			Name:        groupName,
 			PackageName: packageName(groupName),
 			Description: groupDescription(op, groupName, groupDescriptions),
+			RenamedFrom: renamedFrom,
 			Backend:     strings.TrimSpace(op.Backend),
 			Endpoint:    strings.TrimSpace(op.Endpoint),
 			Headers:     model.CloneStringMap(op.Headers),
@@ -214,6 +216,20 @@ func appName(doc openapi.Document, cfg configgen.Config) string {
 		return slugify(title)
 	}
 	return "app"
+}
+
+var reservedGroupNames = map[string]string{
+	"skills":     "skills-api",
+	"help":       "help-group",
+	"completion": "completion-group",
+	"version":    "version-group",
+}
+
+func reserveGroupName(name string) (string, string) {
+	if replacement, ok := reservedGroupNames[strings.ToLower(name)]; ok {
+		return replacement, name
+	}
+	return name, ""
 }
 
 func groupName(op openapi.Operation, cfg configgen.Config, descriptions map[string]string) string {

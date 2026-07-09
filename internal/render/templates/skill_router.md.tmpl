@@ -1,0 +1,31 @@
+---
+name: {{ .App.Name }}-skills
+version: 1.0.0
+description: "Router skill for {{ .App.Name }}. Use this to select the correct generated command-group skill before acting."
+metadata:
+  requires:
+    bins: ["{{ .App.Name }}"]
+  cliHelp: "{{ .App.Name }} skills --help"
+---
+
+# {{ .App.Name }} Skills Router
+
+This directory contains generated OpenCLI skill packages. This router exists for agent loaders that require a `SKILL.md` at the selected folder root.
+
+Before acting:
+
+1. Pick the matching command-group skill from the index.
+2. Read that group's `SKILL.md`.
+3. Use this router only for navigation; do not treat it as the complete operating guide.
+
+```bash
+{{ .App.Name }} skills list
+{{ .App.Name }} skills read <skill>
+{{ .App.Name }} skills read <skill> references/command-routing.md
+```
+
+| Skill | Commands | Guide |
+| --- | ---: | --- |
+{{- range .App.Groups }}
+| `{{ if eq $.Target "rust" }}{{ rustModuleName . }}{{ else }}{{ groupPackageName . }}{{ end }}` | {{ len .Operations }} | [`{{ if eq $.Target "rust" }}{{ rustModuleName . }}{{ else }}{{ groupPackageName . }}{{ end }}/SKILL.md`]({{ if eq $.Target "rust" }}{{ rustModuleName . }}{{ else }}{{ groupPackageName . }}{{ end }}/SKILL.md) |
+{{- end }}

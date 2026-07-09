@@ -82,19 +82,34 @@ cargo run -- --header "ACCESS-STATUS=inner" <group> <command>
 
 ## Generated Skills
 
-Each command group includes a standardized skill package under `skills/<group>/`:
+Each generated project includes standardized command-group skill packages{{ if gt (len .App.Groups) 1 }} plus a router skill for agent loaders{{ end }}:
 
-```text
-skills/<group>/
-├── SKILL.md
-├── README.md
-├── assets/
-│   └── demo-request.json
-├── references/
-│   ├── command-routing.md
-│   ├── workflows.md
-│   └── production-checklist.md
-└── generation-report.md
+```bash
+cargo run -- skills list
+cargo run -- skills read <skill>
+cargo run -- skills --skills-dir /path/to/skills read <skill>
 ```
 
-Generated skills are API scaffolds. `assets/demo-request.json` is valid placeholder JSON and can be used immediately in documented `--file` examples; `generation-report.md` lists source documentation gaps. Before production, fill the MANUAL sections with business intent, routing rules, workflows, safety constraints, and validation evidence.
+```text
+skills/
+{{ if gt (len .App.Groups) 1 }}
+├── SKILL.md
+├── README.md
+{{ else }}
+├── README.md
+{{ end }}
+└── <group>/
+    ├── SKILL.md
+    ├── README.md
+    ├── assets/
+    │   └── demo-request.json
+    ├── references/
+    │   ├── command-routing.md
+    │   ├── workflows.md
+    │   └── production-checklist.md
+    └── generation-report.md
+```
+
+Generated skills are API scaffolds.{{ if gt (len .App.Groups) 1 }} Root `skills/SKILL.md` is a router for agent loaders;{{ end }} per-group `SKILL.md` files hold the command guidance. `assets/demo-request.json` is valid placeholder JSON and can be used immediately in documented `--file` examples; `generation-report.md` lists source documentation gaps. Before production, fill the MANUAL sections with business intent, routing rules, workflows, safety constraints, and validation evidence.
+
+`skills list` and `skills read` read the generated `skills/` folder from disk so manual business edits are visible to agents. Run them from the generated project root, or pass `--skills-dir /path/to/skills` when the CLI binary is installed elsewhere.

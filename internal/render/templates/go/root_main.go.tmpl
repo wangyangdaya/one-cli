@@ -18,6 +18,7 @@ func main() {
 {{- range .App.Groups }}
 	root.AddCommand({{ groupPackageName . }}.NewCommand())
 {{- end }}
+	root.AddCommand(cli.NewSkillsCommand())
 	cli.ApplyRootHelp(root)
 	os.Exit(cli.ExecuteRoot(root))
 }

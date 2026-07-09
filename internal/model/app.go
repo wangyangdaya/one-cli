@@ -72,6 +72,7 @@ type Group struct {
 	Name        string
 	PackageName string
 	Description string
+	RenamedFrom string
 	Backend     string
 	Endpoint    string
 	Headers     map[string]string

@@ -11,6 +11,7 @@ func writeRustProject(outputDir, module string, app model.App, skillLang string)
 	files := []generatedFile{
 		{Path: "Cargo.toml", Template: "rust/Cargo.toml.tmpl", Data: templateData{Module: module, Target: "rust", SkillLang: skillLang, App: app}},
 		{Path: "README.md", Template: "rust/readme.md.tmpl", Data: templateData{Module: module, Target: "rust", SkillLang: skillLang, App: app}},
+		{Path: filepath.Join("skills", "README.md"), Template: skillIndexTemplate(skillLang), Data: templateData{Module: module, Target: "rust", SkillLang: skillLang, App: app}},
 		{Path: filepath.Join("src", "main.rs"), Template: "rust/main.rs.tmpl", Data: templateData{Module: module, Target: "rust", SkillLang: skillLang, App: app}},
 		{Path: filepath.Join("src", "cli.rs"), Template: "rust/cli.rs.tmpl", Data: templateData{Module: module, Target: "rust", SkillLang: skillLang, App: app}},
 		{Path: filepath.Join("src", "client.rs"), Template: "rust/client.rs.tmpl", Data: templateData{Module: module, Target: "rust", SkillLang: skillLang, App: app}},
@@ -21,6 +22,9 @@ func writeRustProject(outputDir, module string, app model.App, skillLang string)
 	}
 	if appUsesAKSK(app) {
 		files = append(files, generatedFile{Path: filepath.Join("src", "auth.rs"), Template: "rust/auth.rs.tmpl", Data: templateData{Module: module, Target: "rust", SkillLang: skillLang, App: app}})
+	}
+	if len(app.Groups) > 1 {
+		files = append(files, generatedFile{Path: filepath.Join("skills", "SKILL.md"), Template: skillRouterTemplate(skillLang), Data: templateData{Module: module, Target: "rust", SkillLang: skillLang, App: app}})
 	}
 
 	for _, group := range app.Groups {

@@ -1,0 +1,15 @@
+# Generated Skills
+
+这是生成 Skill 的轻量索引。执行任务前，先阅读对应分组的 `SKILL.md`。
+
+```bash
+{{ .App.Name }} skills list
+{{ .App.Name }} skills read <skill>
+{{ .App.Name }} skills read <skill> references/command-routing.md
+```
+
+| Skill | 命令数 | 说明 |
+| --- | ---: | --- |
+{{- range .App.Groups }}
+| `{{ if eq $.Target "rust" }}{{ rustModuleName . }}{{ else }}{{ groupPackageName . }}{{ end }}` | {{ len .Operations }} | [`SKILL.md`]({{ if eq $.Target "rust" }}{{ rustModuleName . }}{{ else }}{{ groupPackageName . }}{{ end }}/SKILL.md) |
+{{- end }}

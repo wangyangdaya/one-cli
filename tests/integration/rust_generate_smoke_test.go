@@ -23,6 +23,7 @@ func TestGenerateRustOpenAPISmoke(t *testing.T) {
 	for _, rel := range []string{
 		"Cargo.toml",
 		"README.md",
+		"skills/README.md",
 		"skills/pet/SKILL.md",
 		"skills/pet/README.md",
 		"skills/pet/assets/demo-request.json",
@@ -48,6 +49,33 @@ func TestGenerateRustOpenAPISmoke(t *testing.T) {
 	}
 	if !strings.Contains(string(cliContent), `#[arg(short = 'H', long = "header")]`) {
 		t.Fatalf("generated Rust cli.rs should bind -H as shorthand for --header:\n%s", cliContent)
+	}
+	for _, want := range []string{
+		`#[command(name = "skills")]`,
+		`#[arg(long = "skills-dir", default_value = "skills")]`,
+		"enum SkillsCommand",
+		"fn run_skills(command: SkillsCommand, skills_dir: &str) -> AppResult<()>",
+	} {
+		if !strings.Contains(string(cliContent), want) {
+			t.Fatalf("generated Rust cli.rs missing skills command fragment %q:\n%s", want, cliContent)
+		}
+	}
+
+	skillsIndexContent, err := os.ReadFile(filepath.Join(dir, "skills", "README.md"))
+	if err != nil {
+		t.Fatalf("read generated skills index: %v", err)
+	}
+	for _, want := range []string{
+		"petcli skills list",
+		"petcli skills read <skill>",
+		"| `pet` |",
+	} {
+		if !strings.Contains(string(skillsIndexContent), want) {
+			t.Fatalf("generated Rust skills index missing %q:\n%s", want, skillsIndexContent)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "skills", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("single-group Rust project should not generate skills router, got err: %v", err)
 	}
 
 	cargoContent, err := os.ReadFile(filepath.Join(dir, "Cargo.toml"))

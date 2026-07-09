@@ -1,0 +1,15 @@
+# Generated Skills
+
+Use this file as a lightweight index. Read the per-group `SKILL.md` before acting.
+
+```bash
+{{ .App.Name }} skills list
+{{ .App.Name }} skills read <skill>
+{{ .App.Name }} skills read <skill> references/command-routing.md
+```
+
+| Skill | Commands | Guide |
+| --- | ---: | --- |
+{{- range .App.Groups }}
+| `{{ if eq $.Target "rust" }}{{ rustModuleName . }}{{ else }}{{ groupPackageName . }}{{ end }}` | {{ len .Operations }} | [`SKILL.md`]({{ if eq $.Target "rust" }}{{ rustModuleName . }}{{ else }}{{ groupPackageName . }}{{ end }}/SKILL.md) |
+{{- end }}

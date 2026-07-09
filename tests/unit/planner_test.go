@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"one-cli/internal/configgen"
+	"one-cli/internal/model"
 	"one-cli/internal/openapi"
 	"one-cli/internal/planner"
 )
@@ -355,6 +356,60 @@ func TestBuildAppliesBodyFieldOverrides(t *testing.T) {
 	}
 }
 
+func TestBuildAppliesBodyFieldOverridesByOriginalTagAfterReservedRename(t *testing.T) {
+	required := true
+	doc := openapi.Document{
+		Operations: []openapi.Operation{
+			{
+				Method:      "POST",
+				Path:        "/api-apply/v2/get/supplierDelState",
+				Tag:         "skills",
+				OperationID: "POST /api-apply/v2/get/supplierDelState",
+				RequestBody: openapi.RequestBody{
+					ContentTypes:  []string{"application/json"},
+					HasJSONSchema: true,
+					IsSimpleJSON:  true,
+					JSONFields: []openapi.BodyField{
+						{Name: "date", RequiredUnknown: true, Type: "string"},
+					},
+					JSONSchemaFields: []openapi.BodyField{
+						{Name: "date", RequiredUnknown: true, Type: "string"},
+					},
+				},
+			},
+		},
+	}
+
+	plan := planner.Build(doc, configgen.Config{
+		Naming: configgen.NamingConfig{
+			OperationAlias: map[string]string{
+				"POST /api-apply/v2/get/supplierDelState": "kanban-delivery",
+			},
+		},
+		Overrides: configgen.OverrideConfig{
+			BodyFields: map[string][]configgen.BodyField{
+				"skills.kanban-delivery": {
+					{Name: "date", Required: &required, Description: "拉取日期", Type: "string"},
+				},
+			},
+		},
+	})
+
+	if len(plan.Groups) != 1 {
+		t.Fatalf("groups = %d want 1", len(plan.Groups))
+	}
+	if plan.Groups[0].Name != "skills-api" {
+		t.Fatalf("group name = %q want %q", plan.Groups[0].Name, "skills-api")
+	}
+	if got := plan.Groups[0].Operations[0].CommandName; got != "kanban-delivery" {
+		t.Fatalf("command name = %q want %q", got, "kanban-delivery")
+	}
+	field := plan.Groups[0].Operations[0].BodyFields[0]
+	if field.Name != "date" || !field.Required || field.RequiredUnknown || field.Description != "拉取日期" {
+		t.Fatalf("body field override by original tag should still match after reserved rename: %+v", field)
+	}
+}
+
 func TestBuildUsesMCPToolNameForCLICommand(t *testing.T) {
 	doc := openapi.Document{
 		Operations: []openapi.Operation{
@@ -406,5 +461,34 @@ func TestBuildMakesCommandNamesIdentifierSafeAndUniquePerGroup(t *testing.T) {
 		if got := group.Operations[i].CommandName; got != want {
 			t.Fatalf("command %d = %q want %q", i, got, want)
 		}
+	}
+}
+
+func TestBuildRenamesReservedGroupName(t *testing.T) {
+	doc := openapi.Document{
+		Operations: []openapi.Operation{
+			{Method: "GET", Path: "/skills/items", Tag: "skills", OperationID: "listSkills"},
+			{Method: "GET", Path: "/orders", Tag: "orders", OperationID: "listOrders"},
+		},
+	}
+
+	plan := planner.Build(doc, configgen.Config{})
+	if len(plan.Groups) != 2 {
+		t.Fatalf("groups = %d want 2", len(plan.Groups))
+	}
+	var skillsGroup model.Group
+	for _, g := range plan.Groups {
+		if g.RenamedFrom != "" {
+			skillsGroup = g
+		}
+	}
+	if skillsGroup.Name != "skills-api" {
+		t.Fatalf("reserved group name = %q want %q", skillsGroup.Name, "skills-api")
+	}
+	if skillsGroup.RenamedFrom != "skills" {
+		t.Fatalf("renamed-from = %q want %q", skillsGroup.RenamedFrom, "skills")
+	}
+	if skillsGroup.PackageName != "skills_api" {
+		t.Fatalf("package name = %q want %q", skillsGroup.PackageName, "skills_api")
 	}
 }

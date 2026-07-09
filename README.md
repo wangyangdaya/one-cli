@@ -435,6 +435,8 @@ my-cli/
 │       ├── service.go     # HTTP 请求实现
 │       └── types.go       # 类型定义
 ├── skills/
+│   ├── SKILL.md           # 多分组时生成：Agent loader 入口 / Skill 路由
+│   ├── README.md          # Skill 索引
 │   └── users/
 │       ├── SKILL.md
 │       ├── README.md
@@ -465,6 +467,8 @@ my-cli-rs/
 │       ├── mod.rs
 │       └── users.rs
 ├── skills/
+│   ├── SKILL.md           # 多分组时生成：Agent loader 入口 / Skill 路由
+│   ├── README.md          # Skill 索引
 │   └── users/
 │       ├── SKILL.md
 │       ├── README.md
@@ -479,7 +483,18 @@ my-cli-rs/
 └── README.md
 ```
 
-`skills/<group>/` 是标准化 Skill 工作包。`SKILL.md` 是 Agent 入口，`README.md` 说明交付和修改流程，`assets/demo-request.json` 是可立即用于 `--file` 示例的合法 JSON 占位文件，`references/` 用于补充命令路由、业务流程和生产验收清单，`generation-report.md` 用于列出 API/MCP 输入中缺失的 group、命令、参数或请求体字段描述。
+多分组项目会生成根级 `skills/SKILL.md`，作为给 agent loader 使用的路由入口，用于兼容要求所选文件夹下必须存在 `SKILL.md` 的应用。`skills/README.md` 是轻量 Skill 索引。`skills/<group>/` 是标准化 Skill 工作包。分组 `SKILL.md` 是具体 Agent 入口，`README.md` 说明交付和修改流程，`assets/demo-request.json` 是可立即用于 `--file` 示例的合法 JSON 占位文件，`references/` 用于补充命令路由、业务流程和生产验收清单，`generation-report.md` 用于列出 API/MCP 输入中缺失的 group、命令、参数或请求体字段描述。
+
+生成的 CLI 还提供读取命令：
+
+```bash
+mycli skills list
+mycli skills read users
+mycli skills read users references/command-routing.md
+mycli skills --skills-dir /path/to/skills read users
+```
+
+这些命令读取磁盘上的 `skills/` 文件夹，因此业务调整后的 `SKILL.md` 会立即对 AI agent 生效。默认从当前工作目录读取 `./skills`；如果 CLI 安装在 `/usr/bin`、`/usr/local/bin` 或不在生成项目根目录运行，使用 `--skills-dir /path/to/skills` 显式指定。
 
 中文 Skill 文档可通过 `--skill-lang zh` 生成。风险等级按 HTTP 方法轻量标注：`GET/HEAD/OPTIONS` 为只读，`POST/PUT/PATCH` 为写入，`DELETE` 为高风险；不会按命令名猜测业务语义。
 
@@ -725,7 +740,8 @@ go build -o bin/petcli ./cmd/petcli
 - [x] 命名自定义
 - [x] 多种 body 处理模式
 - [x] 生成项目 `--version` 支持（Go/Rust）
-- [x] 标准化 Skill 工作包生成（Go/Rust，含 `assets/demo-request.json`、`generation-report.md`，支持 `--skill-lang en|zh`）
+- [x] 标准化 Skill 工作包生成（Go/Rust，含 `skills/README.md`、`assets/demo-request.json`、`generation-report.md`，支持 `--skill-lang en|zh`）
+- [x] Go/Rust 生成项目支持 `skills list/read` 查看生成的 Skill 文档
 
 ### 计划中 🚧
 - [ ] `opencli init` 命令实现

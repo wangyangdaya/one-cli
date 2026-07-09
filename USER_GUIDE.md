@@ -406,9 +406,10 @@ overrides:
 
 ```text
 my-cli/
+├── bin/                    # 本地调试启动脚本
 ├── cmd/                    # 生成 CLI 的入口
 ├── internal/               # 命令、接口调用、配置、输出等实现
-├── skills/                 # 按命令组生成的技能文档
+├── skills/                 # Skill 索引和按命令组生成的技能文档；多分组时含 agent loader 入口
 ├── README.md               # 生成项目说明
 ├── go.mod                  # Go 目标项目依赖声明
 └── ...
@@ -418,13 +419,51 @@ my-cli/
 
 | 文件或目录 | 用途 | 是否建议人工确认 |
 | --- | --- | --- |
+| `bin/<app>` | macOS、Linux、Git Bash 等 shell 环境的本地启动脚本 | 了解用途即可 |
+| `bin/<app>.cmd` | Windows CMD 或 PowerShell 的本地启动脚本 | 了解用途即可 |
 | `README.md` | 生成项目使用说明 | 是 |
+| `skills/SKILL.md` | 多分组时生成；Agent loader 入口和命令组路由索引 | 是 |
+| `skills/README.md` | 生成 Skill 的轻量索引 | 是 |
 | `skills/<group>/SKILL.md` | 每个命令组的操作说明和示例 | 是 |
 | `internal/<group>/command.go` | 命令、参数、帮助信息 | 必要时由开发或交付人员确认 |
 | `internal/<group>/service*.go` | 实际请求实现 | 认证、签名、地址异常时确认 |
 | `opencli.yaml` | 生成配置源文件 | 是，建议纳入交付物 |
 
 不建议直接修改大量生成代码来修正文档问题。优先修正 OpenAPI/Swagger 文档或 `opencli.yaml` 后重新生成，这样结果更稳定，也便于后续接口变更时再次生成。
+
+### 6.1 `bin` 目录里的文件如何使用
+
+Go 目标项目生成后，`bin` 目录中通常会有两个启动脚本。它们不是最终编译出来的可执行文件，而是用于本地调试的快捷入口，会在内部执行 `go run ./cmd/<app>`。
+
+假设生成时使用 `--app mycli`，常见文件如下：
+
+| 文件 | 适用平台 | 运行示例 |
+| --- | --- | --- |
+| `bin/mycli` | macOS、Linux、Git Bash、WSL | `./bin/mycli --help` |
+| `bin/mycli.cmd` | Windows CMD、PowerShell | `.\bin\mycli.cmd --help` |
+
+Windows 示例：
+
+```powershell
+cd .\my-cli
+.\bin\mycli.cmd --help
+.\bin\mycli.cmd users list
+```
+
+macOS 或 Linux 示例：
+
+```bash
+cd ./my-cli
+./bin/mycli --help
+./bin/mycli users list
+```
+
+说明：
+
+- 启动脚本依赖本机已经安装 Go，并且能正常执行 `go run`。
+- `bin/mycli.cmd` 适合 Windows 终端使用；`bin/mycli` 适合 macOS、Linux 或类 Unix shell 使用。
+- 如果要交付给没有 Go 环境的最终用户，应先按第 4.4 节编译成真正的可执行文件，例如 Windows 下的 `mycli.exe`。
+- Windows 平台最终交付文件建议使用 `.exe`，例如 `go build -o dist/windows-amd64/mycli.exe ./cmd/mycli`。
 
 ## 7. 使用生成后的 CLI
 
@@ -473,6 +512,22 @@ mycli --json users list
 ```bash
 mycli --trace users list
 ```
+
+查看生成的 Skill 文档：
+
+```bash
+mycli skills list
+mycli skills read users
+mycli skills read users references/command-routing.md
+mycli skills --skills-dir /path/to/skills read users
+```
+
+说明：
+
+- `skills list` 会列出磁盘 `skills/` 目录中的 Skill。
+- `skills read <skill>` 默认打印该 Skill 的 `SKILL.md`。
+- `skills read <skill> <path>` 可以读取该 Skill 下的 reference 文件，例如 `references/command-routing.md`。
+- 该命令默认读取当前工作目录的 `./skills`；如果二进制安装在其他位置或不在生成项目根目录运行，传 `--skills-dir /path/to/skills`。这样业务调整后的 `SKILL.md` 会立即对 AI agent 生效。
 
 认证相关环境变量：
 
@@ -528,6 +583,8 @@ OpenCLI 不会凭空知道真实业务规则，它主要根据接口文档生成
 | `opencli.yaml` | 命令命名、认证模式、签名规则、请求体模式、字段补充说明 | 业务使用方、交付方 |
 | MCP 配置文件 | 服务名、transport、URL、command、args、headers、env | MCP 服务提供方、实施方 |
 | 生成项目 `README.md` | 安装方式、运行方式、环境变量、示例命令是否符合交付场景 | 交付方、使用方 |
+| `skills/SKILL.md` | 多分组时确认：Agent 应用添加 `skills/` 文件夹时能否识别，以及路由说明是否清晰 | 交付方、使用方 |
+| `skills/README.md` | Skill 分组索引是否便于定位目标命令组 | 交付方、使用方 |
 | `skills/<group>/SKILL.md` | 命令说明、风险提示、示例参数、业务术语是否准确 | 业务使用方、测试方 |
 | 示例 JSON 文件 | 请求体字段、枚举值、日期格式、金额单位、组织或租户字段 | 业务使用方、接口提供方 |
 | 环境变量说明 | token、AK/SK、租户、网关、代理等配置是否完整 | 运维方、安全负责人 |
@@ -554,7 +611,7 @@ OpenCLI 不会凭空知道真实业务规则，它主要根据接口文档生成
 4. 编写或更新 `opencli.yaml`。
 5. 使用 `opencli generate` 生成 CLI 项目。
 6. 进入生成目录，使用 `go build` 或 `cargo build` 编译生成可执行文件。
-7. 查看生成项目的 `README.md` 和 `skills/<group>/SKILL.md`。
+7. 查看生成项目的 `README.md`、`skills/README.md` 和 `skills/<group>/SKILL.md`；多分组项目还要查看 `skills/SKILL.md`。
 8. 使用测试环境执行关键命令，覆盖查询、写入、更新、删除等场景。
 9. 根据测试结果修正接口文档或 `opencli.yaml`，然后重新生成并重新编译。
 10. 形成交付版本，并附上确认后的使用说明、环境变量和示例命令。
@@ -623,6 +680,8 @@ overrides:
 - 查询、写入、更新、删除等关键命令均已在测试环境验证。
 - 认证环境变量和额外请求头说明完整。
 - 生成项目 `README.md` 已按实际交付方式修订。
+- 多分组项目的 `skills/SKILL.md` 可作为 agent loader 入口，并能路由到正确命令组。
+- `skills/README.md` 能帮助使用方快速找到对应命令组。
 - `skills/<group>/SKILL.md` 中的业务说明、风险提示和示例命令已确认。
 - 示例 JSON 请求体已使用真实业务字段更新。
 - 已注明生成结果受接口文档准确性影响，接口文档变更后需要重新生成或重新确认。
