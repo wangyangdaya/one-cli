@@ -103,12 +103,20 @@ func TestRenderProject(t *testing.T) {
 	}
 	for _, want := range []string{
 		"## Global Request Headers",
-		`-H "ACCESS-STATUS=inner"`,
-		`--header "ACCESS-STATUS=inner"`,
-		`--header "Name: Value"`,
+		`one leave <command> -H "ACCESS-STATUS=inner"`,
+		`one leave <command> --header "ACCESS-STATUS=inner"`,
+		`one leave <command> --header "Name: Value"`,
 	} {
 		if !strings.Contains(skillText, want) {
 			t.Fatalf("generated skill markdown missing global header usage %q:\n%s", want, skillText)
+		}
+	}
+	for _, unwanted := range []string{
+		`one -H "ACCESS-STATUS=inner" leave <command>`,
+		`one --header "ACCESS-STATUS=inner" leave <command>`,
+	} {
+		if strings.Contains(skillText, unwanted) {
+			t.Fatalf("generated skill markdown should recommend header flags after the leaf command, found %q:\n%s", unwanted, skillText)
 		}
 	}
 	readmeContent, err := os.ReadFile(filepath.Join(dir, "README.md"))
@@ -237,6 +245,7 @@ func TestApplyHeadersAcceptsEqualsSyntax(t *testing.T) {
 	commandHelpText := string(out)
 	for _, want := range []string{
 		"--header",
+		"-H,",
 		"Name: Value",
 		"Name=Value",
 	} {

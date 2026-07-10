@@ -83,7 +83,7 @@ func new{{ .CommandName | pascal }}Command() *cobra.Command {
 	cmd.Flags().StringVar(&bodyFile, "file", "", "Path to JSON request body file")
 {{- end }}
 {{- if operationHasHeaderParams . }}
-	cmd.Flags().StringArrayVar(&headers, "header", nil, "Request header in 'Name: Value' format; repeatable")
+	cmd.Flags().StringArrayVarP(&headers, "header", "H", nil, "Request header in 'Name: Value' format; repeatable")
 {{- end }}
 {{- range .Parameters }}
 {{- if eq .In "path" }}

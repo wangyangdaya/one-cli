@@ -113,7 +113,7 @@ Simple JSON body endpoints accept top-level flags plus raw JSON input modes:
 HTTP commands accept repeatable `-H` / `--header` flags:
 
 ```bash
-./bin/{{ .App.Name }} -H "ACCESS-STATUS=inner" auth me
+./bin/{{ .App.Name }} auth me -H "ACCESS-STATUS=inner"
 ./bin/{{ .App.Name }} auth me --header "ACCESS-STATUS=inner"
 ```
 

@@ -78,6 +78,28 @@ func TestGenerateRustOpenAPISmoke(t *testing.T) {
 		t.Fatalf("single-group Rust project should not generate skills router, got err: %v", err)
 	}
 
+	readmeContent, err := os.ReadFile(filepath.Join(dir, "README.md"))
+	if err != nil {
+		t.Fatalf("read generated Rust README: %v", err)
+	}
+	readmeText := string(readmeContent)
+	for _, want := range []string{
+		`cargo run -- <group> <command> -H "ACCESS-STATUS=inner"`,
+		`cargo run -- <group> <command> --header "ACCESS-STATUS=inner"`,
+	} {
+		if !strings.Contains(readmeText, want) {
+			t.Fatalf("generated Rust README missing header example %q:\n%s", want, readmeText)
+		}
+	}
+	for _, unwanted := range []string{
+		`cargo run -- -H "ACCESS-STATUS=inner" <group> <command>`,
+		`cargo run -- --header "ACCESS-STATUS=inner" <group> <command>`,
+	} {
+		if strings.Contains(readmeText, unwanted) {
+			t.Fatalf("generated Rust README should recommend header flags after the leaf command, found %q:\n%s", unwanted, readmeText)
+		}
+	}
+
 	cargoContent, err := os.ReadFile(filepath.Join(dir, "Cargo.toml"))
 	if err != nil {
 		t.Fatalf("read Cargo.toml: %v", err)

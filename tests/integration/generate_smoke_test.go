@@ -73,7 +73,7 @@ func TestGenerateSmokeIncludesHeaderFlagsAndDocs(t *testing.T) {
 	commandText := string(commandContent)
 	for _, want := range []string{
 		`var headers []string`,
-		`cmd.Flags().StringArrayVar(&headers, "header", nil, "Request header in 'Name: Value' format; repeatable")`,
+		`cmd.Flags().StringArrayVarP(&headers, "header", "H", nil, "Request header in 'Name: Value' format; repeatable")`,
 		`Headers: headers,`,
 	} {
 		if !strings.Contains(commandText, want) {
@@ -85,8 +85,12 @@ func TestGenerateSmokeIncludesHeaderFlagsAndDocs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read readme: %v", err)
 	}
-	if !strings.Contains(string(readmeContent), `--header "ACCESS-STATUS=inner"`) {
+	readmeText := string(readmeContent)
+	if !strings.Contains(readmeText, `./bin/openapi-cli auth me --header "ACCESS-STATUS=inner"`) {
 		t.Fatalf("generated README missing header example:\n%s", string(readmeContent))
+	}
+	if strings.Contains(readmeText, `./bin/openapi-cli --header "ACCESS-STATUS=inner" auth me`) {
+		t.Fatalf("generated README should recommend header flags after the leaf command:\n%s", string(readmeContent))
 	}
 
 	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "auth", "SKILL.md"))

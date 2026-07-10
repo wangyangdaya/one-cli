@@ -76,8 +76,8 @@ This CLI does not inject authentication headers. Use `-H` / `--header` only when
 HTTP commands accept repeatable `-H` / `--header` flags:
 
 ```bash
-cargo run -- -H "ACCESS-STATUS=inner" <group> <command>
-cargo run -- --header "ACCESS-STATUS=inner" <group> <command>
+cargo run -- <group> <command> -H "ACCESS-STATUS=inner"
+cargo run -- <group> <command> --header "ACCESS-STATUS=inner"
 ```
 
 ## Generated Skills

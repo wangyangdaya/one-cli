@@ -73,11 +73,11 @@ This is a generated OpenCLI skill package. It contains API-derived facts and man
 
 ## Global Request Headers
 
-All HTTP commands accept repeatable global request headers. Use `-H "Name: Value"`, `--header "Name: Value"`, or `--header "Name=Value"` before or after the subcommand as needed.
+All HTTP commands accept repeatable request headers. Prefer placing `-H "Name: Value"`, `--header "Name: Value"`, or `--header "Name=Value"` after the full command so the command intent comes first.
 
 ```bash
-{{ .App.Name }} -H "ACCESS-STATUS=inner" {{ .Group.Name }} <command>
-{{ .App.Name }} --header "ACCESS-STATUS=inner" {{ .Group.Name }} <command>
+{{ .App.Name }} {{ .Group.Name }} <command> -H "ACCESS-STATUS=inner"
+{{ .App.Name }} {{ .Group.Name }} <command> --header "ACCESS-STATUS=inner"
 {{ .App.Name }} {{ .Group.Name }} <command> --header "Name: Value"
 ```
 

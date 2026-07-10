@@ -73,11 +73,11 @@ metadata:
 
 ## 全局请求头
 
-所有 HTTP 命令都支持可重复的全局请求头。可使用 `-H "Name: Value"`、`--header "Name: Value"` 或 `--header "Name=Value"`，按需要放在子命令前后。
+所有 HTTP 命令都支持可重复的请求头。推荐把 `-H "Name: Value"`、`--header "Name: Value"` 或 `--header "Name=Value"` 放在完整命令之后，让命令意图先出现。
 
 ```bash
-{{ .App.Name }} -H "ACCESS-STATUS=inner" {{ .Group.Name }} <command>
-{{ .App.Name }} --header "ACCESS-STATUS=inner" {{ .Group.Name }} <command>
+{{ .App.Name }} {{ .Group.Name }} <command> -H "ACCESS-STATUS=inner"
+{{ .App.Name }} {{ .Group.Name }} <command> --header "ACCESS-STATUS=inner"
 {{ .App.Name }} {{ .Group.Name }} <command> --header "Name: Value"
 ```
 

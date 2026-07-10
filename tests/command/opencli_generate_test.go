@@ -313,11 +313,14 @@ func TestGenerateCommandAcceptsNoAuthForGo(t *testing.T) {
 		"## Auth",
 		"Mode: `none`",
 		"This CLI does not inject authentication headers.",
-		`--header "ACCESS-STATUS=inner"`,
+		`./bin/petcli auth me --header "ACCESS-STATUS=inner"`,
 	} {
 		if !strings.Contains(readmeText, want) {
 			t.Fatalf("generated no-auth README missing %q:\n%s", want, readmeText)
 		}
+	}
+	if strings.Contains(readmeText, `./bin/petcli --header "ACCESS-STATUS=inner" auth me`) {
+		t.Fatalf("generated no-auth README should recommend header flags after the leaf command:\n%s", readmeText)
 	}
 	if strings.Contains(readmeText, "OPENCLI_AUTH_TOKEN") {
 		t.Fatalf("generated no-auth README should not require OPENCLI_AUTH_TOKEN:\n%s", readmeText)
@@ -373,11 +376,14 @@ func TestGenerateCommandAcceptsNoAuthForRust(t *testing.T) {
 		"## Auth",
 		"Mode: `none`",
 		"This CLI does not inject authentication headers.",
-		`--header "ACCESS-STATUS=inner"`,
+		`cargo run -- <group> <command> --header "ACCESS-STATUS=inner"`,
 	} {
 		if !strings.Contains(readmeText, want) {
 			t.Fatalf("generated no-auth README missing %q:\n%s", want, readmeText)
 		}
+	}
+	if strings.Contains(readmeText, `cargo run -- --header "ACCESS-STATUS=inner" <group> <command>`) {
+		t.Fatalf("generated no-auth README should recommend header flags after the leaf command:\n%s", readmeText)
 	}
 	if strings.Contains(readmeText, "OPENCLI_AUTH_TOKEN") {
 		t.Fatalf("generated no-auth README should not require OPENCLI_AUTH_TOKEN:\n%s", readmeText)
