@@ -10,19 +10,14 @@ boundaries, so the two targets do not follow one naming contract.
 
 ## Naming contract
 
-Parameter names are split into words at punctuation, array brackets, underscores,
-dashes, whitespace, and lower-to-upper camel-case transitions. For example,
-`dept.children[0].createBy` becomes the words `dept`, `children`, `0`, `create`,
-`by`.
+Generated identifiers treat every non-letter and non-digit as a separator. For
+example, `dept.children[0].createBy` becomes a valid Go identifier such as
+`DeptChildren0Createby` and a valid Rust identifier such as
+`dept_children_0_createby`.
 
-Those words are rendered per destination:
-
-- Go identifier: `DeptChildren0CreateBy`
-- Rust identifier: `dept_children_0_create_by`
-- CLI flag: `dept-children-0-create-by`
-
-The original OpenAPI name remains the HTTP path/query/header key. Sanitized names
-are only used for generated source identifiers and CLI-facing flag names.
+The original OpenAPI name remains the HTTP path/query/header key. Existing
+target-specific CLI flag conventions remain unchanged; this fix does not reinterpret
+query parameters as a JSON request body.
 
 Identifiers must also remain valid when the source begins with a digit, contains
 only punctuation, or matches a target-language keyword. Existing target-specific
@@ -30,24 +25,16 @@ fallback and keyword behavior remains in force.
 
 ## Implementation shape
 
-A shared word-splitting helper defines punctuation and camel-case boundaries.
-Small target-specific helpers render those words as Go PascalCase, Rust snake_case,
-or CLI kebab-case. Templates call the destination-specific helper instead of using
-raw parameter names for identifiers.
+The existing Go `pascal` helper is broadened to use the same punctuation boundary
+rule already used by Rust. No new normalization layer or JSON-to-query adapter is
+introduced.
 
 This change is limited to parameter and body-field naming. Command/group naming
 and HTTP serialization behavior are outside its scope.
 
 ## Testing
 
-Regression tests cover the shared word sequence and generated Go/Rust naming for:
-
-- nested array notation (`dept.children[0].createBy`)
-- repeated/nested punctuation
-- leading digits
-- keyword and empty-name fallbacks
-
-Generation tests assert that both targets successfully generate the problematic
-OpenAPI shape, preserve the original HTTP key, and expose matching kebab-case CLI
-flags. Final verification generates `tw.openapi.yaml` for both targets, compiles
-the generated projects, rebuilds `dist/opencli`, and repeats the user's command.
+A focused generation test asserts that both targets accept nested array notation
+such as `dept.children[0].createBy`, emit legal source identifiers, and preserve
+the original HTTP query key. Final verification generates `tw.openapi.yaml` for
+both targets, rebuilds `dist/opencli`, and repeats the user's command.

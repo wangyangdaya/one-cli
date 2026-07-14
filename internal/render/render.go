@@ -142,7 +142,7 @@ func bodyRequiredLabel(field model.BodyField, lang string) string {
 
 func pascal(value string) string {
 	parts := strings.FieldsFunc(value, func(r rune) bool {
-		return r == '-' || r == '_' || r == ' ' || r == '.'
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
 	for i, part := range parts {
 		runes := []rune(part)

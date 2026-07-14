@@ -646,6 +646,7 @@ make clean
 
 - `dist/opencli` - 当前主机版本
 - `dist/opencli_darwin_arm64` - macOS ARM64
+- `dist/opencli_darwin_amd64` - macOS Intel AMD64
 - `dist/opencli_linux_amd64` - Linux AMD64
 - `dist/opencli_windows_amd64.exe` - Windows AMD64
 
@@ -653,6 +654,7 @@ make clean
 ```bash
 make build-host              # 当前主机
 make build-darwin-arm64      # macOS ARM64
+make build-darwin-amd64      # macOS Intel AMD64
 make build-linux-amd64       # Linux AMD64
 make build-windows-amd64     # Windows AMD64
 ```

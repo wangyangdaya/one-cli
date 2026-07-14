@@ -959,6 +959,59 @@ func TestRenderRustProjectSkillFlagNamesMatchCodeForUnderscoreNames(t *testing.T
 	}
 }
 
+func TestRenderProjectsHandleFlattenedQueryParameterNames(t *testing.T) {
+	app := model.App{
+		Name: "mycli",
+		Groups: []model.Group{{
+			Name: "role",
+			Operations: []model.Operation{{
+				CommandName: "allocated-list",
+				Method:      "GET",
+				Path:        "/role/authUser/allocatedList",
+				Parameters: []model.Parameter{{
+					Name: "dept.children[0].createBy",
+					In:   "query",
+					Type: "string",
+				}},
+			}},
+		}},
+	}
+
+	goDir := t.TempDir()
+	if err := render.Project(goDir, "github.com/example/tw-cli", app, "go"); err != nil {
+		t.Fatalf("render Go project: %v", err)
+	}
+	goCommand, err := os.ReadFile(filepath.Join(goDir, "internal", "role", "command.go"))
+	if err != nil {
+		t.Fatalf("read generated Go command: %v", err)
+	}
+	goService, err := os.ReadFile(filepath.Join(goDir, "internal", "role", "service.go"))
+	if err != nil {
+		t.Fatalf("read generated Go service: %v", err)
+	}
+	if !strings.Contains(string(goCommand), "paramDeptChildren0Createby string") {
+		t.Fatalf("generated Go command does not sanitize flattened query identifier:\n%s", goCommand)
+	}
+	if !strings.Contains(string(goService), `query.Set("dept.children[0].createBy", input.DeptChildren0Createby)`) {
+		t.Fatalf("generated Go service does not preserve query wire name:\n%s", goService)
+	}
+
+	rustDir := t.TempDir()
+	if err := render.Project(rustDir, "github.com/example/tw-cli", app, "rust"); err != nil {
+		t.Fatalf("render Rust project: %v", err)
+	}
+	rustCommand, err := os.ReadFile(filepath.Join(rustDir, "src", "commands", "role.rs"))
+	if err != nil {
+		t.Fatalf("read generated Rust command: %v", err)
+	}
+	if !strings.Contains(string(rustCommand), "pub dept_children_0_createby: Option<String>") {
+		t.Fatalf("generated Rust command does not sanitize flattened query identifier:\n%s", rustCommand)
+	}
+	if !strings.Contains(string(rustCommand), `("dept.children[0].createBy".to_string(), value.to_string())`) {
+		t.Fatalf("generated Rust command does not preserve query wire name:\n%s", rustCommand)
+	}
+}
+
 func TestRenderProjectCompilesWhenGroupNameContainsHyphen(t *testing.T) {
 	dir := t.TempDir()
 	app := model.App{

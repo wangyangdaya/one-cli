@@ -223,6 +223,7 @@ var reservedGroupNames = map[string]string{
 	"help":       "help-group",
 	"completion": "completion-group",
 	"version":    "version-group",
+	"config":     "config-api",
 }
 
 func reserveGroupName(name string) (string, string) {

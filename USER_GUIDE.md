@@ -55,6 +55,7 @@ opencli --help
 | --- | --- | --- |
 | `opencli` | 当前构建机器对应的系统 | 在终端中执行 `./opencli --help` |
 | `opencli_darwin_arm64` | macOS，Apple Silicon 芯片，例如 M1/M2/M3/M4 | 在终端中执行 `./opencli_darwin_arm64 --help` |
+| `opencli_darwin_amd64` | macOS，Intel 芯片 | 在终端中执行 `./opencli_darwin_amd64 --help` |
 | `opencli_linux_amd64` | Linux，x86_64 服务器或电脑 | 在终端中执行 `./opencli_linux_amd64 --help` |
 | `opencli_windows_amd64.exe` | Windows，x86_64 电脑 | 在 PowerShell 中执行 `.\opencli_windows_amd64.exe --help` |
 
@@ -77,7 +78,7 @@ macOS 使用方式：
 cd ~/Downloads/dist
 ```
 
-3. 第一次运行前，如果系统提示没有执行权限，先执行：
+3. 根据芯片选择 `opencli_darwin_arm64`（Apple Silicon）或 `opencli_darwin_amd64`（Intel）。第一次运行前，如果系统提示没有执行权限，先执行，例如：
 
 ```bash
 chmod +x ./opencli_darwin_arm64
@@ -271,6 +272,9 @@ go build -o bin/mycli ./cmd/mycli
 # macOS Apple Silicon
 GOOS=darwin GOARCH=arm64 go build -o dist/darwin-arm64/mycli ./cmd/mycli
 
+# macOS Intel
+GOOS=darwin GOARCH=amd64 go build -o dist/darwin-amd64/mycli ./cmd/mycli
+
 # Linux x86_64
 GOOS=linux GOARCH=amd64 go build -o dist/linux-amd64/mycli ./cmd/mycli
 
@@ -408,6 +412,11 @@ overrides:
 my-cli/
 ├── bin/                    # 本地调试启动脚本
 ├── cmd/                    # 生成 CLI 的入口
+├── dist/                   # 编译后按平台存放可执行文件（需执行第 4.4 节的构建命令）
+│   ├── darwin-arm64/       # macOS Apple Silicon
+│   ├── darwin-amd64/       # macOS Intel
+│   ├── linux-amd64/        # Linux x86_64
+│   └── windows-amd64/      # Windows x86_64
 ├── internal/               # 命令、接口调用、配置、输出等实现
 ├── skills/                 # Skill 索引和按命令组生成的技能文档；多分组时含 agent loader 入口
 ├── README.md               # 生成项目说明
@@ -421,6 +430,7 @@ my-cli/
 | --- | --- | --- |
 | `bin/<app>` | macOS、Linux、Git Bash 等 shell 环境的本地启动脚本 | 了解用途即可 |
 | `bin/<app>.cmd` | Windows CMD 或 PowerShell 的本地启动脚本 | 了解用途即可 |
+| `dist/<platform>/<app>` | 按平台编译的最终可执行文件；Windows 文件名为 `<app>.exe` | 是，交付前确认平台与芯片架构 |
 | `README.md` | 生成项目使用说明 | 是 |
 | `skills/SKILL.md` | 多分组时生成；Agent loader 入口和命令组路由索引 | 是 |
 | `skills/README.md` | 生成 Skill 的轻量索引 | 是 |

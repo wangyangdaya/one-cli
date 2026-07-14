@@ -281,9 +281,9 @@ func TestGenerateExamplesRustLeaveMakeupAvoidsEmptyBodyMutability(t *testing.T) 
 	root := workspaceRoot(t)
 	outDir := tmpDir(t, "leave-makeup-rust")
 
-	inputPath := filepath.Join(root, "examples", "leave_makeup.yaml")
+	inputPath := filepath.Join(root, "examples", "leave-makeup.yaml")
 	if err := app.RunGenerate(inputPath, "", outDir, "one-ai", "one-ai", "", "rust"); err != nil {
-		t.Fatalf("generate rust from leave_makeup.yaml: %v", err)
+		t.Fatalf("generate rust from leave-makeup.yaml: %v", err)
 	}
 
 	for _, rel := range []string{

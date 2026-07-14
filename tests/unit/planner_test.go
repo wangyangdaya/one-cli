@@ -468,18 +468,22 @@ func TestBuildRenamesReservedGroupName(t *testing.T) {
 	doc := openapi.Document{
 		Operations: []openapi.Operation{
 			{Method: "GET", Path: "/skills/items", Tag: "skills", OperationID: "listSkills"},
+			{Method: "GET", Path: "/config", Tag: "config", OperationID: "getConfig"},
 			{Method: "GET", Path: "/orders", Tag: "orders", OperationID: "listOrders"},
 		},
 	}
 
 	plan := planner.Build(doc, configgen.Config{})
-	if len(plan.Groups) != 2 {
-		t.Fatalf("groups = %d want 2", len(plan.Groups))
+	if len(plan.Groups) != 3 {
+		t.Fatalf("groups = %d want 3", len(plan.Groups))
 	}
-	var skillsGroup model.Group
+	var skillsGroup, configGroup model.Group
 	for _, g := range plan.Groups {
-		if g.RenamedFrom != "" {
+		switch g.RenamedFrom {
+		case "skills":
 			skillsGroup = g
+		case "config":
+			configGroup = g
 		}
 	}
 	if skillsGroup.Name != "skills-api" {
@@ -490,5 +494,8 @@ func TestBuildRenamesReservedGroupName(t *testing.T) {
 	}
 	if skillsGroup.PackageName != "skills_api" {
 		t.Fatalf("package name = %q want %q", skillsGroup.PackageName, "skills_api")
+	}
+	if configGroup.Name != "config-api" || configGroup.PackageName != "config_api" {
+		t.Fatalf("config group = %+v want config-api/config_api", configGroup)
 	}
 }
