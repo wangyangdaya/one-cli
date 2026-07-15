@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"one-cli/internal/output"
+	runtimecli "one-cli/internal/render/runtime/cli"
 )
 
 func TestJSONSuccessEnvelope(t *testing.T) {
@@ -59,6 +60,33 @@ func TestJSONErrorEnvelope(t *testing.T) {
 	}
 	if envelope.Error.Message != "bad input" {
 		t.Fatalf("unexpected error message: %q", envelope.Error.Message)
+	}
+}
+
+func TestGeneratorAndRuntimeJSONEnvelopesStayInSync(t *testing.T) {
+	data := map[string]string{"key": "value"}
+	generatorSuccess, err := output.JSONSuccess("mycli users list", "done", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeSuccess, err := runtimecli.JSONSuccess("mycli users list", "done", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if generatorSuccess != runtimeSuccess {
+		t.Fatalf("success envelopes differ:\ngenerator: %s\nruntime:   %s", generatorSuccess, runtimeSuccess)
+	}
+
+	generatorError, err := output.JSONError("mycli users create", "validation_error", "bad input")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeError, err := runtimecli.JSONError("mycli users create", "validation_error", "bad input")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if generatorError != runtimeError {
+		t.Fatalf("error envelopes differ:\ngenerator: %s\nruntime:   %s", generatorError, runtimeError)
 	}
 }
 

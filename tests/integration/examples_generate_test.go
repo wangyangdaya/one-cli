@@ -94,7 +94,12 @@ func TestGenerateExamplesGoOpenAPI(t *testing.T) {
 	outDir := tmpDir(t, "openapi-go")
 
 	inputPath := filepath.Join(root, "examples", "openapi.json")
-	if err := app.RunGenerate(inputPath, "", outDir, "github.com/acme/openapi-cli", "openapi-cli", ""); err != nil {
+	if err := app.RunGenerate(app.GenerateOptions{
+		Input:   inputPath,
+		Output:  outDir,
+		Module:  "github.com/acme/openapi-cli",
+		AppName: "openapi-cli",
+	}); err != nil {
 		t.Fatalf("generate go from openapi.json: %v", err)
 	}
 
@@ -148,7 +153,12 @@ func TestGenerateExamplesGoMCP(t *testing.T) {
 	outDir := tmpDir(t, "quark-go")
 
 	configPath := filepath.Join(root, "examples", "quark.json")
-	if err := app.RunGenerate("", configPath, outDir, "github.com/acme/quark-cli", "quark-cli", ""); err != nil {
+	if err := app.RunGenerate(app.GenerateOptions{
+		MCPConfig: configPath,
+		Output:    outDir,
+		Module:    "github.com/acme/quark-cli",
+		AppName:   "quark-cli",
+	}); err != nil {
 		// The quark.json points to a live external MCP server.  If discovery
 		// fails (network unavailable, auth expired, etc.) we skip rather than
 		// fail so CI stays green in offline environments.
@@ -194,7 +204,13 @@ func TestGenerateExamplesRustOpenAPI(t *testing.T) {
 	outDir := tmpDir(t, "openapi-rust")
 
 	inputPath := filepath.Join(root, "examples", "openapi.json")
-	if err := app.RunGenerate(inputPath, "", outDir, "openapi-cli", "openapi-cli", "", "rust"); err != nil {
+	if err := app.RunGenerate(app.GenerateOptions{
+		Input:   inputPath,
+		Output:  outDir,
+		Module:  "openapi-cli",
+		AppName: "openapi-cli",
+		Target:  "rust",
+	}); err != nil {
 		t.Fatalf("generate rust from openapi.json: %v", err)
 	}
 
@@ -282,7 +298,13 @@ func TestGenerateExamplesRustLeaveMakeupAvoidsEmptyBodyMutability(t *testing.T) 
 	outDir := tmpDir(t, "leave-makeup-rust")
 
 	inputPath := filepath.Join(root, "examples", "leave-makeup.yaml")
-	if err := app.RunGenerate(inputPath, "", outDir, "one-ai", "one-ai", "", "rust"); err != nil {
+	if err := app.RunGenerate(app.GenerateOptions{
+		Input:   inputPath,
+		Output:  outDir,
+		Module:  "one-ai",
+		AppName: "one-ai",
+		Target:  "rust",
+	}); err != nil {
 		t.Fatalf("generate rust from leave-makeup.yaml: %v", err)
 	}
 
@@ -318,7 +340,13 @@ func TestGenerateExamplesRustMCP(t *testing.T) {
 	outDir := tmpDir(t, "quark-rust")
 
 	configPath := filepath.Join(root, "examples", "quark.json")
-	if err := app.RunGenerate("", configPath, outDir, "quark-cli", "quark-cli", "", "rust"); err != nil {
+	if err := app.RunGenerate(app.GenerateOptions{
+		MCPConfig: configPath,
+		Output:    outDir,
+		Module:    "quark-cli",
+		AppName:   "quark-cli",
+		Target:    "rust",
+	}); err != nil {
 		t.Skipf("generate rust from quark.json skipped (MCP discovery failed): %v", err)
 	}
 

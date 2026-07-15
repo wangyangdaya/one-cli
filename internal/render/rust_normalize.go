@@ -1,6 +1,7 @@
 package render
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -8,14 +9,19 @@ import (
 )
 
 func normalizeRustApp(app model.App) model.App {
+	app.Groups = slices.Clone(app.Groups)
 	groupNames := make(map[string]int, len(app.Groups))
 	for groupIndex := range app.Groups {
 		group := &app.Groups[groupIndex]
+		group.Operations = slices.Clone(group.Operations)
 		base := rustModuleName(*group)
 		group.PackageName = uniqueRustIdentifier(base, groupNames)
 
 		for operationIndex := range group.Operations {
-			normalizeRustOperationArgs(&group.Operations[operationIndex])
+			operation := &group.Operations[operationIndex]
+			operation.Parameters = slices.Clone(operation.Parameters)
+			operation.BodyFields = slices.Clone(operation.BodyFields)
+			normalizeRustOperationArgs(operation)
 		}
 	}
 	return app

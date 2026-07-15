@@ -15,7 +15,12 @@ import (
 
 func TestGeneratedSimpleJSONCommandBuildsBodyAndRejectsConflicts(t *testing.T) {
 	projectDir := t.TempDir()
-	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "openapi.json"), "", projectDir, "github.com/acme/generated", "openapi-cli", ""); err != nil {
+	if err := app.RunGenerate(app.GenerateOptions{
+		Input:   filepath.Join("..", "..", "examples", "openapi.json"),
+		Output:  projectDir,
+		Module:  "github.com/acme/generated",
+		AppName: "openapi-cli",
+	}); err != nil {
 		t.Fatalf("generate: %v", err)
 	}
 

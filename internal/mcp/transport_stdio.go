@@ -11,8 +11,11 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
+
+const stdioShutdownGracePeriod = 2 * time.Second
 
 func discoverStdioTools(name string, server ServerConfig) ([]Tool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -34,11 +37,7 @@ func discoverStdioTools(name string, server ServerConfig) ([]Tool, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("server %q start: %w", name, err)
 	}
-	defer func() {
-		_ = stdin.Close()
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	}()
+	defer shutdownStdioProcess(stdin, cmd, stdioShutdownGracePeriod)
 
 	reader := bufio.NewReader(stdout)
 	if _, err := doStdioRPC(stdin, reader, rpcRequest{
@@ -74,6 +73,41 @@ func discoverStdioTools(name string, server ServerConfig) ([]Tool, error) {
 	}
 
 	return parseToolsResult(result)
+}
+
+func shutdownStdioProcess(stdin io.Closer, cmd *exec.Cmd, gracePeriod time.Duration) {
+	_ = stdin.Close()
+
+	wait := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(wait)
+	}()
+
+	if waitForStdioProcess(wait, gracePeriod) {
+		return
+	}
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		_ = cmd.Process.Kill()
+		<-wait
+		return
+	}
+	if waitForStdioProcess(wait, gracePeriod) {
+		return
+	}
+	_ = cmd.Process.Kill()
+	<-wait
+}
+
+func waitForStdioProcess(wait <-chan struct{}, timeout time.Duration) bool {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-wait:
+		return true
+	case <-timer.C:
+		return false
+	}
 }
 
 func doStdioRPC(stdin io.Writer, reader *bufio.Reader, request rpcRequest) (map[string]any, error) {

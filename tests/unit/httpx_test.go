@@ -26,6 +26,14 @@ func TestJSONHeaders(t *testing.T) {
 	}
 }
 
+func TestJSONHeadersOmitsEmptyAuthorization(t *testing.T) {
+	headers := httpx.JSONHeaders("")
+
+	if _, ok := headers["Authorization"]; ok {
+		t.Fatal("Authorization header should be absent when no token is configured")
+	}
+}
+
 func TestNewClientUsesDefaultTimeout(t *testing.T) {
 	client := httpx.NewClient()
 	if client.Timeout != httpx.DefaultTimeout {

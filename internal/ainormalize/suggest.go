@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -95,7 +96,7 @@ func ValidateSuggestion(inventory Inventory, suggestion Suggestion) (configgen.C
 		}
 	}
 
-	for _, key := range sortedKeys(suggestion.TagAlias) {
+	for _, key := range slices.Sorted(maps.Keys(suggestion.TagAlias)) {
 		alias := strings.TrimSpace(suggestion.TagAlias[key])
 		if _, ok := knownTags[key]; !ok {
 			diagnostics.reject("tag_alias", key, alias, "unknown tag")
@@ -109,7 +110,7 @@ func ValidateSuggestion(inventory Inventory, suggestion Suggestion) (configgen.C
 	}
 
 	seenByGroup := map[string]map[string]string{}
-	for _, key := range sortedKeys(suggestion.OperationAlias) {
+	for _, key := range slices.Sorted(maps.Keys(suggestion.OperationAlias)) {
 		alias := strings.TrimSpace(suggestion.OperationAlias[key])
 		matches, ok := operationsByKey[key]
 		if !ok {
@@ -287,15 +288,6 @@ func isCLIName(value string) bool {
 		}
 	}
 	return true
-}
-
-func sortedKeys(values map[string]string) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 func chatCompletionsEndpoint(base string) (string, error) {

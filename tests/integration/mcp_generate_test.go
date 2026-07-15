@@ -87,7 +87,12 @@ func TestGenerateFromMCPConfig(t *testing.T) {
 	}
 
 	outDir := filepath.Join(tempDir, "generated")
-	if err := app.RunGenerate("", configPath, outDir, "github.com/acme/generated", "searchcli", ""); err != nil {
+	if err := app.RunGenerate(app.GenerateOptions{
+		MCPConfig: configPath,
+		Output:    outDir,
+		Module:    "github.com/acme/generated",
+		AppName:   "searchcli",
+	}); err != nil {
 		t.Fatalf("run generate: %v", err)
 	}
 
@@ -265,7 +270,12 @@ func TestGeneratedMCPCLIInvokesToolOverStreamableHTTP(t *testing.T) {
 	}
 
 	outDir := filepath.Join(tempDir, "generated")
-	if err := app.RunGenerate("", configPath, outDir, "github.com/acme/generated", "searchcli", ""); err != nil {
+	if err := app.RunGenerate(app.GenerateOptions{
+		MCPConfig: configPath,
+		Output:    outDir,
+		Module:    "github.com/acme/generated",
+		AppName:   "searchcli",
+	}); err != nil {
 		t.Fatalf("run generate: %v", err)
 	}
 

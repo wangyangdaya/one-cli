@@ -4,6 +4,7 @@ import (
 	"embed"
 	"io/fs"
 	"os"
+	"path/filepath"
 
 	"one-cli/internal/model"
 )
@@ -48,4 +49,36 @@ func listEmbedDir(fsys embed.FS, dir string) ([]string, error) {
 	}
 
 	return paths, nil
+}
+
+func writeRuntime(outputDir string) error {
+	paths, err := listEmbedDir(embeddedFS, "runtime")
+	if err != nil {
+		return err
+	}
+
+	for _, path := range paths {
+		content, err := embeddedFS.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		// Strip the "runtime/" prefix to get the relative path
+		relative := path[len("runtime/"):]
+		if err := writeFile(filepath.Join(outputDir, "internal", relative), content, 0); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func writeFile(path string, content []byte, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	if mode == 0 {
+		mode = 0o644
+	}
+	return os.WriteFile(path, content, mode)
 }

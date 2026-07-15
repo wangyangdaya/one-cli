@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"one-cli/internal/httpx"
 )
 
 func LoadHTTP(rawURL string) ([]byte, error) {
-	resp, err := http.Get(rawURL)
+	resp, err := httpx.NewClient().Get(rawURL)
 	if err != nil {
 		return nil, err
 	}

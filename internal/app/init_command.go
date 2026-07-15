@@ -13,7 +13,7 @@ func NewInitCommand() *cobra.Command {
 		Use:   "init",
 		Short: "Initialize an opencli configuration",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if JSONEnabled() {
+			if JSONEnabled(cmd) {
 				rendered, err := outjson.JSONSuccess(cmd.CommandPath(), "init is not yet implemented", map[string]bool{
 					"implemented": false,
 				})

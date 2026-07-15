@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 
@@ -278,7 +280,7 @@ func convertOperations(paths *openapi3.Paths) []Operation {
 	}
 	var ops []Operation
 	pathMap := paths.Map()
-	for _, path := range sortedKeys(pathMap) {
+	for _, path := range slices.Sorted(maps.Keys(pathMap)) {
 		item := pathMap[path]
 		methods := []struct {
 			name string
@@ -419,7 +421,7 @@ func exampleObjectFields(example any) []exampleField {
 	case string:
 		return exampleObjectStringFields(value)
 	case map[string]any:
-		keys := sortedKeys(value)
+		keys := slices.Sorted(maps.Keys(value))
 		fields := make([]exampleField, 0, len(keys))
 		for _, key := range keys {
 			fields = append(fields, exampleField{Name: key, Value: value[key]})
@@ -520,7 +522,7 @@ func collectJSONSchemaFields(schema *openapi3.Schema) []BodyField {
 		requiredSet[strings.TrimSpace(name)] = true
 	}
 
-	keys := sortedKeys(properties)
+	keys := slices.Sorted(maps.Keys(properties))
 	fields := make([]BodyField, 0, len(keys))
 	for _, key := range keys {
 		propRef := properties[key]
@@ -597,7 +599,7 @@ func classifySimpleJSON(schema *openapi3.Schema) (bool, []BodyField) {
 		requiredSet[strings.TrimSpace(name)] = true
 	}
 
-	keys := sortedKeys(properties)
+	keys := slices.Sorted(maps.Keys(properties))
 	fields := make([]BodyField, 0, len(keys))
 	for _, key := range keys {
 		propRef := properties[key]
@@ -651,16 +653,4 @@ func schemaType(schema *openapi3.Schema) string {
 		return strings.TrimSpace(types[0])
 	}
 	return ""
-}
-
-func sortedKeys[T any](values map[string]T) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

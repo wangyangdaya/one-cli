@@ -9,7 +9,7 @@ import (
 
 func ExecuteRoot(cmd *cobra.Command) int {
 	if err := cmd.Execute(); err != nil {
-		if JSONEnabled() {
+		if JSONEnabled(cmd) {
 			rendered, renderErr := JSONError(cmd.CommandPath(), "command_error", err.Error())
 			if renderErr == nil {
 				_, _ = fmt.Fprintln(os.Stderr, rendered)

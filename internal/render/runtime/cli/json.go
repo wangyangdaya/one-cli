@@ -1,8 +1,10 @@
 package cli
 
-import "encoding/json"
+import (
+	"encoding/json"
 
-var jsonOutput bool
+	"github.com/spf13/cobra"
+)
 
 type ErrorBody struct {
 	Code    string `json:"code"`
@@ -22,8 +24,9 @@ type ErrorEnvelope struct {
 	Error   ErrorBody `json:"error"`
 }
 
-func JSONEnabled() bool {
-	return jsonOutput
+func JSONEnabled(cmd *cobra.Command) bool {
+	enabled, err := cmd.Root().PersistentFlags().GetBool("json")
+	return err == nil && enabled
 }
 
 func JSONSuccess(command, message string, data any) (string, error) {

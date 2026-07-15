@@ -71,7 +71,7 @@ runtime:
   auth_header: Authorization
 overrides:
   body_mode:
-    submit: json
+    submit: flags
 `))
 	if err != nil {
 		t.Fatalf("load yaml config: %v", err)
@@ -107,7 +107,7 @@ overrides:
 	if cfg.Naming.TagAlias["pet"] != "pets" {
 		t.Fatalf("unexpected tag alias: %q", cfg.Naming.TagAlias["pet"])
 	}
-	if cfg.Overrides.BodyMode["submit"] != "json" {
+	if cfg.Overrides.BodyMode["submit"] != "flags" {
 		t.Fatalf("unexpected body mode: %q", cfg.Overrides.BodyMode["submit"])
 	}
 }

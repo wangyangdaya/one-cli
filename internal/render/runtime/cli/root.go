@@ -15,7 +15,6 @@ func BindTrace(setter func(bool)) {
 
 func NewRootCommand(use, short, version string) *cobra.Command {
 	var trace bool
-	jsonOutput = false
 	requestHeaders = nil
 
 	cmd := &cobra.Command{
@@ -37,7 +36,7 @@ func NewRootCommand(use, short, version string) *cobra.Command {
 	cmd.CompletionOptions.DisableDefaultCmd = true
 	cmd.PersistentFlags().StringArrayVarP(&requestHeaders, "header", "H", nil, "Request header in 'Name: Value' or 'Name=Value' format; repeatable")
 	cmd.PersistentFlags().BoolVar(&trace, "trace", false, "Print HTTP request and response trace logs")
-	cmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "Print command output as JSON")
+	cmd.PersistentFlags().Bool("json", false, "Print command output as JSON")
 	return cmd
 }
 

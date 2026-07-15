@@ -244,7 +244,7 @@ func isGenericVerb(word string) bool {
 }
 
 func filterEmptySegments(values []string) []string {
-	out := values[:0]
+	out := make([]string, 0, len(values))
 	for _, value := range values {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
 			out = append(out, trimmed)

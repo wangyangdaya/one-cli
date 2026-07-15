@@ -16,6 +16,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type GenerateOptions struct {
+	Input      string
+	MCPConfig  string
+	Output     string
+	Module     string
+	AppName    string
+	AppVersion string
+	ConfigPath string
+	SkillLang  string
+	Auth       string
+	Signer     string
+	Target     string
+}
+
 func NewGenerateCommand() *cobra.Command {
 	var input string
 	var mcpConfig string
@@ -33,10 +47,22 @@ func NewGenerateCommand() *cobra.Command {
 		Use:   "generate",
 		Short: "Generate a Go CLI project from Swagger/OpenAPI or MCP",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := RunGenerateWithVersionSkillLangAuthAndSigner(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang, auth, signer, target); err != nil {
+			if err := RunGenerate(GenerateOptions{
+				Input:      input,
+				MCPConfig:  mcpConfig,
+				Output:     output,
+				Module:     module,
+				AppName:    appName,
+				AppVersion: appVersion,
+				ConfigPath: configPath,
+				SkillLang:  skillLang,
+				Auth:       auth,
+				Signer:     signer,
+				Target:     target,
+			}); err != nil {
 				return err
 			}
-			if JSONEnabled() {
+			if JSONEnabled(cmd) {
 				selectedTarget := strings.TrimSpace(target)
 				if selectedTarget == "" {
 					selectedTarget = "go"
@@ -83,49 +109,33 @@ func validateGenerateSources(input, mcpConfig string) error {
 	return nil
 }
 
-func RunGenerate(input, mcpConfig, output, module, appName, configPath string, targets ...string) error {
-	return RunGenerateWithVersion(input, mcpConfig, output, module, appName, "", configPath, targets...)
-}
-
-func RunGenerateWithVersion(input, mcpConfig, output, module, appName, appVersion, configPath string, targets ...string) error {
-	return RunGenerateWithVersionAndSkillLang(input, mcpConfig, output, module, appName, appVersion, configPath, "en", targets...)
-}
-
-func RunGenerateWithVersionAndSkillLang(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang string, targets ...string) error {
-	return RunGenerateWithVersionSkillLangAndAuth(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang, "", targets...)
-}
-
-func RunGenerateWithVersionSkillLangAndAuth(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang, auth string, targets ...string) error {
-	return RunGenerateWithVersionSkillLangAuthAndSigner(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang, auth, "", targets...)
-}
-
-func RunGenerateWithVersionSkillLangAuthAndSigner(input, mcpConfig, output, module, appName, appVersion, configPath, skillLang, auth, signer string, targets ...string) error {
-	if err := validateGenerateSources(input, mcpConfig); err != nil {
+func RunGenerate(opts GenerateOptions) error {
+	if err := validateGenerateSources(opts.Input, opts.MCPConfig); err != nil {
 		return err
 	}
 
-	cfg, err := configgen.Load(strings.TrimSpace(configPath))
+	cfg, err := configgen.Load(strings.TrimSpace(opts.ConfigPath))
 	if err != nil {
 		return err
 	}
-	if trimmed := strings.TrimSpace(appVersion); trimmed != "" {
+	if trimmed := strings.TrimSpace(opts.AppVersion); trimmed != "" {
 		cfg.App.Version = trimmed
 	}
-	auth = resolveAuth(auth, cfg)
-	signer = resolveSigner(signer, cfg)
+	auth := resolveAuth(opts.Auth, cfg)
+	signer := resolveSigner(opts.Signer, cfg)
 	signerConfig, err := resolveSignerConfig(auth, signer, cfg)
 	if err != nil {
 		return err
 	}
 
 	var doc openapi.Document
-	if strings.TrimSpace(mcpConfig) != "" {
-		doc, err = mcp.DiscoverDocument(strings.TrimSpace(mcpConfig))
+	if strings.TrimSpace(opts.MCPConfig) != "" {
+		doc, err = mcp.DiscoverDocument(strings.TrimSpace(opts.MCPConfig))
 		if err != nil {
 			return err
 		}
 	} else {
-		raw, err := loaders.Load(strings.TrimSpace(input))
+		raw, err := loaders.Load(strings.TrimSpace(opts.Input))
 		if err != nil {
 			return err
 		}
@@ -137,15 +147,11 @@ func RunGenerateWithVersionSkillLangAuthAndSigner(input, mcpConfig, output, modu
 	}
 
 	plan := planner.Build(doc, cfg)
-	plan.Name = strings.TrimSpace(appName)
+	plan.Name = strings.TrimSpace(opts.AppName)
 	plan.Auth.Type = auth
 	plan.Auth.SignerProfile = signerConfig.Profile
 	plan.Auth.Signer = signerConfig
-	target := "go"
-	if len(targets) > 0 {
-		target = strings.TrimSpace(targets[0])
-	}
-	return render.Project(strings.TrimSpace(output), strings.TrimSpace(module), plan, target, strings.TrimSpace(skillLang))
+	return render.Project(strings.TrimSpace(opts.Output), strings.TrimSpace(opts.Module), plan, strings.TrimSpace(opts.Target), strings.TrimSpace(opts.SkillLang))
 }
 
 func resolveAuth(flag string, cfg configgen.Config) string {
@@ -226,7 +232,7 @@ func signerFromConfig(cfg configgen.SignerConfig) model.Signer {
 func withSupplierEDIDefaults(signer model.Signer) model.Signer {
 	signer = withSignerDefaults(signer)
 	if signer.Algorithm == "" {
-		signer.Algorithm = "sha512_hex"
+		signer.Algorithm = model.SignerAlgorithmSHA512Hex
 	}
 	if signer.PathStripPrefix == "" {
 		signer.PathStripPrefix = "/api-apply"

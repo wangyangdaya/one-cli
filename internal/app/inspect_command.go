@@ -34,13 +34,13 @@ func NewInspectCommand() *cobra.Command {
 			}
 
 			if aiSuggestConfig {
-				if JSONEnabled() {
+				if JSONEnabled(cmd) {
 					return fmt.Errorf("--ai-suggest-config does not support --json")
 				}
 				return runAISuggestConfig(cmd, doc, strings.TrimSpace(output))
 			}
 
-			if JSONEnabled() {
+			if JSONEnabled(cmd) {
 				operations := make([]inspectOperation, 0, len(doc.Operations))
 				for _, op := range doc.Operations {
 					operations = append(operations, inspectOperation{

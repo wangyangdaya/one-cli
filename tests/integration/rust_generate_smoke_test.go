@@ -16,7 +16,13 @@ import (
 
 func TestGenerateRustOpenAPISmoke(t *testing.T) {
 	dir := t.TempDir()
-	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "petstore.yaml"), "", dir, "petcli", "petcli", "", "rust"); err != nil {
+	if err := app.RunGenerate(app.GenerateOptions{
+		Input:   filepath.Join("..", "..", "examples", "petstore.yaml"),
+		Output:  dir,
+		Module:  "petcli",
+		AppName: "petcli",
+		Target:  "rust",
+	}); err != nil {
 		t.Fatalf("run rust generate: %v", err)
 	}
 
@@ -122,7 +128,13 @@ func TestGenerateRustOpenAPISmoke(t *testing.T) {
 
 func TestGenerateRustHTTPTraceIncludesQueryAndHeaders(t *testing.T) {
 	dir := t.TempDir()
-	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "petstore.yaml"), "", dir, "petcli", "petcli", "", "rust"); err != nil {
+	if err := app.RunGenerate(app.GenerateOptions{
+		Input:   filepath.Join("..", "..", "examples", "petstore.yaml"),
+		Output:  dir,
+		Module:  "petcli",
+		AppName: "petcli",
+		Target:  "rust",
+	}); err != nil {
 		t.Fatalf("run rust generate: %v", err)
 	}
 
@@ -145,7 +157,13 @@ func TestGenerateRustHTTPTraceIncludesQueryAndHeaders(t *testing.T) {
 
 func TestGenerateRustIncludesJSONOutputMode(t *testing.T) {
 	dir := t.TempDir()
-	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "petstore.yaml"), "", dir, "petcli", "petcli", "", "rust"); err != nil {
+	if err := app.RunGenerate(app.GenerateOptions{
+		Input:   filepath.Join("..", "..", "examples", "petstore.yaml"),
+		Output:  dir,
+		Module:  "petcli",
+		AppName: "petcli",
+		Target:  "rust",
+	}); err != nil {
 		t.Fatalf("run rust generate: %v", err)
 	}
 
@@ -171,7 +189,13 @@ func TestGenerateRustIncludesJSONOutputMode(t *testing.T) {
 
 func TestGenerateRustHTTPClientUsesDefaultTimeout(t *testing.T) {
 	dir := t.TempDir()
-	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "petstore.yaml"), "", dir, "petcli", "petcli", "", "rust"); err != nil {
+	if err := app.RunGenerate(app.GenerateOptions{
+		Input:   filepath.Join("..", "..", "examples", "petstore.yaml"),
+		Output:  dir,
+		Module:  "petcli",
+		AppName: "petcli",
+		Target:  "rust",
+	}); err != nil {
 		t.Fatalf("run rust generate: %v", err)
 	}
 
@@ -195,7 +219,13 @@ func TestGenerateRustHTTPClientUsesDefaultTimeout(t *testing.T) {
 
 func TestGenerateRustHTTPFormatsTimeoutErrors(t *testing.T) {
 	dir := t.TempDir()
-	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "petstore.yaml"), "", dir, "petcli", "petcli", "", "rust"); err != nil {
+	if err := app.RunGenerate(app.GenerateOptions{
+		Input:   filepath.Join("..", "..", "examples", "petstore.yaml"),
+		Output:  dir,
+		Module:  "petcli",
+		AppName: "petcli",
+		Target:  "rust",
+	}); err != nil {
 		t.Fatalf("run rust generate: %v", err)
 	}
 
@@ -219,7 +249,13 @@ func TestGenerateRustHTTPFormatsTimeoutErrors(t *testing.T) {
 
 func TestGenerateRustHTTPTraceLogsRequestFailures(t *testing.T) {
 	dir := t.TempDir()
-	if err := app.RunGenerate(filepath.Join("..", "..", "examples", "petstore.yaml"), "", dir, "petcli", "petcli", "", "rust"); err != nil {
+	if err := app.RunGenerate(app.GenerateOptions{
+		Input:   filepath.Join("..", "..", "examples", "petstore.yaml"),
+		Output:  dir,
+		Module:  "petcli",
+		AppName: "petcli",
+		Target:  "rust",
+	}); err != nil {
 		t.Fatalf("run rust generate: %v", err)
 	}
 
@@ -308,7 +344,13 @@ func TestGenerateRustMCPSmoke(t *testing.T) {
 	}
 
 	outDir := filepath.Join(dir, "generated")
-	if err := app.RunGenerate("", configPath, outDir, "quark", "quark", "", "rust"); err != nil {
+	if err := app.RunGenerate(app.GenerateOptions{
+		MCPConfig: configPath,
+		Output:    outDir,
+		Module:    "quark",
+		AppName:   "quark",
+		Target:    "rust",
+	}); err != nil {
 		t.Fatalf("run rust MCP generate: %v", err)
 	}
 

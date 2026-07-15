@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"one-cli/internal/httpx"
 	"one-cli/internal/loaders"
 )
 
@@ -67,6 +69,40 @@ func TestLoadSourceReadsFileAndURL(t *testing.T) {
 	}
 	if string(got) != "openapi: 3.0.0\ninfo:\n  title: Remote\n" {
 		t.Fatalf("load url = %q", string(got))
+	}
+}
+
+func TestLoadHTTPAppliesDefaultRequestDeadline(t *testing.T) {
+	originalTransport := http.DefaultTransport
+	defer func() {
+		http.DefaultTransport = originalTransport
+	}()
+
+	var hasDeadline bool
+	var remaining time.Duration
+	http.DefaultTransport = roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		deadline, ok := req.Context().Deadline()
+		hasDeadline = ok
+		if ok {
+			remaining = time.Until(deadline)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body:       ioNopCloser{Reader: bytes.NewReader([]byte("openapi: 3.0.0\n"))},
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})
+
+	if _, err := loaders.LoadHTTP("https://example.com/openapi.yaml"); err != nil {
+		t.Fatalf("load HTTP: %v", err)
+	}
+	if !hasDeadline {
+		t.Fatal("expected HTTP load request to have a deadline")
+	}
+	if remaining <= 0 || remaining > httpx.DefaultTimeout {
+		t.Fatalf("request deadline remaining = %v, want within %v", remaining, httpx.DefaultTimeout)
 	}
 }
 
