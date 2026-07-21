@@ -95,6 +95,8 @@ func rustBodyFlagName(field model.BodyField) string {
 	return rustFlagName(field.Name)
 }
 
+func rustBodyFieldHasFlag(field model.BodyField) bool { return strings.TrimSpace(field.FlagName) != "" }
+
 func rustFlagName(value string) string {
 	return strings.ReplaceAll(rustFieldName(value), "_", "-")
 }

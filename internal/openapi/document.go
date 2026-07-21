@@ -26,6 +26,7 @@ type Operation struct {
 	Env         map[string]string
 	Parameters  []Parameter
 	RequestBody RequestBody
+	Responses   []Response
 }
 
 type Parameter struct {
@@ -43,6 +44,7 @@ type RequestBody struct {
 	IsSimpleJSON     bool
 	JSONFields       []BodyField
 	JSONSchemaFields []BodyField
+	FileFields       []BodyField
 }
 
 type BodyField struct {
@@ -51,4 +53,26 @@ type BodyField struct {
 	Required        bool
 	RequiredUnknown bool
 	Type            string
+	Format          string
+}
+
+type Response struct {
+	Status      string
+	ContentType string
+	Description string
+	Schemas     []Schema
+}
+
+type Schema struct {
+	Name        string
+	Description string
+	Type        string
+	Fields      []SchemaField
+}
+
+type SchemaField struct {
+	Name        string
+	Description string
+	Required    bool
+	Type        string
 }

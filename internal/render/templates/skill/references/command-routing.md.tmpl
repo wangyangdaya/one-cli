@@ -40,3 +40,10 @@ Generated API descriptions can list commands, but they cannot know which command
 - If multiple matches are found, ask the user to choose.
 - If the operation changes data, show the target and action before executing.
 -->
+
+## Request Input Rules
+
+- Use `--data '<json>'` for inline JSON, `--data @path.json` for a JSON file, or `--data -` for stdin.
+- Use `--file path` only when the command declares a binary upload field; use `--file field=path` when it declares multiple file fields.
+- For multipart commands, pass text form fields through `--data` and binary content through `--file`.
+- Do not combine `--data -` and `--file -`; stdin can be consumed only once.

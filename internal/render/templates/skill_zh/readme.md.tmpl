@@ -7,7 +7,7 @@
 ## 目录
 
 ```text
-skills/{{ groupPackageName .Group }}/
+skills/{{ skillName .Group }}/
 ├── SKILL.md
 ├── README.md
 ├── assets/
@@ -25,7 +25,7 @@ skills/{{ groupPackageName .Group }}/
 | --- | --- | --- |
 | `SKILL.md` | Skill 维护者 | Agent 入口。保留触发规则、硬性安全规则、命令索引和短工作流摘要。 |
 | `README.md` | 所有人 | 说明包结构和交接流程。 |
-| `assets/demo-request.json` | 工程 + QA | 支持 `--file` 示例、演示和手工编辑请求体的有效占位 JSON 文件。 |
+| `assets/demo-request.json` | 工程 + QA | 支持 `--data @文件` 示例、演示和手工编辑请求体的有效占位 JSON 文件。 |
 | `references/command-routing.md` | 产品 + Skill 维护者 | 把用户意图映射到正确的生成 CLI 命令。生产使用前必须补全。 |
 | `references/workflows.md` | 产品 + 工程 + QA | 定义真实的多命令业务流程，包括确认和回读校验。 |
 | `references/production-checklist.md` | QA + 维护者 | Skill 被视为生产可用前的验收清单。 |
@@ -35,7 +35,7 @@ skills/{{ groupPackageName .Group }}/
 
 1. 运行 `{{ .App.Name }} {{ .Group.Name }} --help` 和每个命令的 `--help`，验证生成的命令表面。
 2. 对照 `generation-report.md`，决定修复源 API/MCP 描述，还是在 Skill 中手工补充。
-3. 对支持 `--file` 的命令，用 `assets/demo-request.json` 作为请求体起点。
+3. 对 JSON 请求命令，用 `--data @assets/demo-request.json` 作为请求体起点。
 4. 在 `references/command-routing.md` 中补充常见用户请求、同义词和容易误用的命令。
 5. 在 `references/workflows.md` 中补充最常用的 3-5 个业务流程。
 6. 只把最短、最重要的路由和工作流规则写回 `SKILL.md`。

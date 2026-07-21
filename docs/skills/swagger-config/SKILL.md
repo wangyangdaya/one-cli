@@ -24,7 +24,8 @@ Use this skill to turn a Swagger/OpenAPI document into an `opencli.yaml` config 
    - Use `naming.operation_alias` for command names.
    - `operation_alias` keys may be `operationId`, `METHOD /path`, or `/path`.
    - Prefer `METHOD /path` for path-based aliases because it is unambiguous.
-   - Use `overrides.body_mode` only when the default body mode is wrong.
+- Use `overrides.body_mode` only when the default body mode is wrong.
+- `file-or-data` is a compatibility name for raw JSON input; it does not by itself mean that `--file` should be generated.
    - If the Swagger export only contains a raw JSON example but the source UI shows body field requiredness or descriptions, preserve that information in `overrides.body_fields`.
    - Do not infer requiredness from examples alone. Examples prove shape and order, not required semantics.
    - For repeated body shapes, define one YAML anchor and reuse it across aliases instead of copying fields.
@@ -96,7 +97,8 @@ overrides:
 - Use `overrides.body_fields` to restore missing body metadata from Apipost/Swagger UI tables.
 - Prefer keys in this order: `group.command` for readability, or `"METHOD /path"` when the command alias is not stable yet.
 - For simple JSON bodies, `body_fields` controls generated flag docs such as `--date | 是`.
-- For complex JSON bodies, `body_fields` documents top-level request body fields under Request Body Schema; the CLI still uses `--file` / `--data`.
+- For complex JSON bodies, `body_fields` documents top-level request body fields under Request Body Schema; the CLI uses `--data` (inline, `@file`, or stdin).
+- Use `--file [field=]path` only when the schema declares binary upload fields; for multipart requests, `--data` carries text fields and `--file` carries binary parts.
 - Mark only truly required fields with `required: true`. Do not write “nullable” unless the source schema explicitly allows `null`.
 
 Repeated pull API example:

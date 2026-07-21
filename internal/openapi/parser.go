@@ -314,11 +314,158 @@ func convertOperation(path, method string, op *openapi3.Operation) Operation {
 		Summary:     strings.TrimSpace(op.Summary),
 		Parameters:  convertParameters(op.Parameters),
 		RequestBody: convertRequestBody(op.RequestBody),
+		Responses:   convertResponses(op.Responses),
 	}
 	if len(op.Tags) > 0 {
 		result.Tag = strings.TrimSpace(op.Tags[0])
 	}
 	return result
+}
+
+func convertResponses(responses *openapi3.Responses) []Response {
+	if responses == nil {
+		return nil
+	}
+	responseMap := responses.Map()
+	var out []Response
+	for _, status := range slices.Sorted(maps.Keys(responseMap)) {
+		ref := responseMap[status]
+		if ref == nil || ref.Value == nil {
+			continue
+		}
+		description := ""
+		if ref.Value.Description != nil {
+			description = strings.TrimSpace(*ref.Value.Description)
+		}
+		if len(ref.Value.Content) == 0 {
+			out = append(out, Response{Status: status, Description: description})
+			continue
+		}
+		for _, contentType := range slices.Sorted(maps.Keys(ref.Value.Content)) {
+			mediaType := ref.Value.Content[contentType]
+			response := Response{
+				Status:      status,
+				ContentType: strings.TrimSpace(contentType),
+				Description: description,
+			}
+			if mediaType != nil && mediaType.Schema != nil && mediaType.Schema.Value != nil {
+				response.Schemas = collectResponseSchemas(mediaType.Schema)
+			}
+			out = append(out, response)
+		}
+	}
+	return out
+}
+
+func collectResponseSchemas(root *openapi3.SchemaRef) []Schema {
+	var schemas []Schema
+	visited := make(map[string]bool)
+	collectResponseSchema(root, "response", visited, &schemas)
+	return schemas
+}
+
+func collectResponseSchema(ref *openapi3.SchemaRef, fallbackName string, visited map[string]bool, schemas *[]Schema) {
+	if ref == nil || ref.Value == nil {
+		return
+	}
+	name := schemaRefName(ref)
+	if name == "" {
+		name = strings.TrimSpace(ref.Value.Title)
+	}
+	if name == "" {
+		name = fallbackName
+	}
+	key := name
+	if visited[key] {
+		return
+	}
+	visited[key] = true
+
+	index := len(*schemas)
+	*schemas = append(*schemas, Schema{})
+	schema := Schema{
+		Name:        name,
+		Description: schemaDescription(ref.Value),
+		Type:        schemaType(ref.Value),
+	}
+
+	properties, required := responseSchemaProperties(ref.Value)
+	requiredSet := make(map[string]bool, len(required))
+	for _, fieldName := range required {
+		requiredSet[strings.TrimSpace(fieldName)] = true
+	}
+	for _, fieldName := range slices.Sorted(maps.Keys(properties)) {
+		fieldRef := properties[fieldName]
+		if fieldRef == nil || fieldRef.Value == nil {
+			continue
+		}
+		schema.Fields = append(schema.Fields, SchemaField{
+			Name:        strings.TrimSpace(fieldName),
+			Description: schemaDescription(fieldRef.Value),
+			Required:    requiredSet[strings.TrimSpace(fieldName)],
+			Type:        responseSchemaType(fieldRef),
+		})
+		collectReferencedResponseSchemas(fieldRef, visited, schemas)
+	}
+	(*schemas)[index] = schema
+}
+
+func collectReferencedResponseSchemas(ref *openapi3.SchemaRef, visited map[string]bool, schemas *[]Schema) {
+	if ref == nil || ref.Value == nil {
+		return
+	}
+	if schemaRefName(ref) != "" {
+		collectResponseSchema(ref, "", visited, schemas)
+		return
+	}
+	if ref.Value.Items != nil {
+		collectReferencedResponseSchemas(ref.Value.Items, visited, schemas)
+	}
+}
+
+func responseSchemaProperties(schema *openapi3.Schema) (openapi3.Schemas, []string) {
+	if len(schema.AllOf) > 0 {
+		return flattenAllOf(schema)
+	}
+	return schema.Properties, schema.Required
+}
+
+func responseSchemaType(ref *openapi3.SchemaRef) string {
+	if name := schemaRefName(ref); name != "" {
+		return name
+	}
+	if ref == nil || ref.Value == nil {
+		return ""
+	}
+	if ref.Value.Items != nil {
+		itemType := responseSchemaType(ref.Value.Items)
+		if itemType == "" {
+			itemType = "unknown"
+		}
+		return itemType + "[]"
+	}
+	return schemaType(ref.Value)
+}
+
+func schemaRefName(ref *openapi3.SchemaRef) string {
+	if ref == nil {
+		return ""
+	}
+	value := strings.TrimSpace(ref.Ref)
+	if index := strings.LastIndex(value, "/"); index >= 0 {
+		value = value[index+1:]
+	}
+	return strings.TrimSpace(value)
+}
+
+func schemaDescription(schema *openapi3.Schema) string {
+	if schema == nil {
+		return ""
+	}
+	if description := strings.TrimSpace(schema.Description); description != "" {
+		return description
+	}
+	return strings.TrimSpace(schema.Title)
 }
 
 // convertParameters maps kin-openapi Parameters to our internal Parameter slice.
@@ -374,10 +521,22 @@ func convertRequestBody(body *openapi3.RequestBodyRef) RequestBody {
 		rb.ContentTypes = append(rb.ContentTypes, ct)
 	}
 	sort.Strings(rb.ContentTypes)
+	for _, contentType := range rb.ContentTypes {
+		mediaType := content[contentType]
+		if mediaType == nil || mediaType.Schema == nil || mediaType.Schema.Value == nil {
+			continue
+		}
+		if isBinarySchema(mediaType.Schema.Value) {
+			rb.FileFields = appendUniqueBodyFields(rb.FileFields, BodyField{
+				Name: "file", Required: rb.Required, Type: "string", Format: "binary",
+			})
+		}
+	}
 
 	if mediaType, ok := content["application/json"]; ok && mediaType != nil && mediaType.Schema != nil && mediaType.Schema.Value != nil {
 		rb.HasJSONSchema = true
 		rb.JSONSchemaFields = collectJSONSchemaFields(mediaType.Schema.Value)
+		rb.FileFields = binaryBodyFields(rb.JSONSchemaFields)
 		rb.IsSimpleJSON, rb.JSONFields = classifySimpleJSON(mediaType.Schema.Value)
 		if len(rb.JSONSchemaFields) == 0 {
 			if fields := inferJSONFieldsFromExample(mediaType.Example); len(fields) > 0 {
@@ -387,7 +546,43 @@ func convertRequestBody(body *openapi3.RequestBodyRef) RequestBody {
 			}
 		}
 	}
+	if mediaType, ok := content["multipart/form-data"]; ok && mediaType != nil && mediaType.Schema != nil && mediaType.Schema.Value != nil {
+		rb.FileFields = appendUniqueBodyFields(rb.FileFields, binaryBodyFields(collectJSONSchemaFields(mediaType.Schema.Value))...)
+	}
 	return rb
+}
+
+func binaryBodyFields(fields []BodyField) []BodyField {
+	result := make([]BodyField, 0)
+	for _, field := range fields {
+		if strings.EqualFold(strings.TrimSpace(field.Format), "binary") {
+			result = append(result, field)
+		}
+	}
+	return result
+}
+
+func isBinarySchema(schema *openapi3.Schema) bool {
+	if schema == nil || schema.Type == nil || !slices.Contains(schema.Type.Slice(), "string") {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(schema.Format), "binary")
+}
+
+func appendUniqueBodyFields(fields []BodyField, additions ...BodyField) []BodyField {
+	seen := make(map[string]bool, len(fields))
+	for _, field := range fields {
+		seen[strings.TrimSpace(field.Name)] = true
+	}
+	for _, field := range additions {
+		name := strings.TrimSpace(field.Name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		fields = append(fields, field)
+	}
+	return fields
 }
 
 func inferJSONFieldsFromExample(example any) []BodyField {
@@ -535,6 +730,7 @@ func collectJSONSchemaFields(schema *openapi3.Schema) []BodyField {
 			Description: strings.TrimSpace(prop.Description),
 			Required:    requiredSet[strings.TrimSpace(key)],
 			Type:        schemaType(prop),
+			Format:      strings.TrimSpace(prop.Format),
 		})
 	}
 	return fields
@@ -625,6 +821,7 @@ func classifySimpleJSON(schema *openapi3.Schema) (bool, []BodyField) {
 			Description: strings.TrimSpace(prop.Description),
 			Required:    requiredSet[strings.TrimSpace(key)],
 			Type:        propType,
+			Format:      strings.TrimSpace(prop.Format),
 		})
 	}
 	return true, fields

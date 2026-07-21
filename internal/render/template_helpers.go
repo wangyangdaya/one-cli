@@ -54,7 +54,7 @@ func bodyFlagHelp(fields []model.BodyField) string {
 	}
 	parts := make([]string, 0, len(fields))
 	for _, field := range fields {
-		if trimmed := strings.TrimSpace(field.Name); trimmed != "" {
+		if trimmed := strings.TrimSpace(field.FlagName); trimmed != "" {
 			parts = append(parts, "--"+trimmed)
 		}
 	}
@@ -72,14 +72,14 @@ func cliParamFlagName(target string, parameter model.Parameter) string {
 	if strings.EqualFold(strings.TrimSpace(target), "rust") {
 		return rustParamFlagName(parameter)
 	}
-	return strings.TrimSpace(parameter.Name)
+	return goParamFlagName(parameter)
 }
 
 func cliBodyFlagName(target string, field model.BodyField) string {
 	if strings.EqualFold(strings.TrimSpace(target), "rust") {
 		return rustBodyFlagName(field)
 	}
-	return strings.TrimSpace(field.Name)
+	return goBodyFlagName(field)
 }
 
 func goType(value string) string {
@@ -142,6 +142,41 @@ func groupPackageName(group model.Group) string {
 	value = strings.ReplaceAll(value, ".", "_")
 	value = strings.ReplaceAll(value, " ", "_")
 	return strings.ToLower(value)
+}
+
+func skillName(group model.Group) string {
+	name := normalizeSkillName(group.Name)
+	if name == "" {
+		name = normalizeSkillName(group.PackageName)
+	}
+	if name == "" {
+		name = "skill"
+	}
+	if len(name) > 64 {
+		name = strings.TrimRight(name[:64], "-")
+	}
+	return name
+}
+
+func normalizeSkillName(value string) string {
+	var builder strings.Builder
+	lastHyphen := false
+	for _, r := range strings.TrimSpace(value) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			builder.WriteRune(r)
+			lastHyphen = false
+		case r >= 'A' && r <= 'Z':
+			builder.WriteRune(r + ('a' - 'A'))
+			lastHyphen = false
+		default:
+			if builder.Len() > 0 && !lastHyphen {
+				builder.WriteByte('-')
+				lastHyphen = true
+			}
+		}
+	}
+	return strings.Trim(builder.String(), "-")
 }
 
 func appHasMCPHTTP(app model.App) bool {
@@ -246,11 +281,26 @@ func operationHasUserHeaders(app model.App, operation model.Operation) bool {
 	return false
 }
 
+func groupHasUserHeaders(app model.App, group model.Group) bool {
+	for _, operation := range group.Operations {
+		if operationHasUserHeaders(app, operation) {
+			return true
+		}
+	}
+	return false
+}
+
 func isHiddenAuthHeader(app model.App, parameter model.Parameter) bool {
-	if !appUsesAKSK(app) || strings.TrimSpace(parameter.In) != "header" {
+	if strings.TrimSpace(parameter.In) != "header" {
 		return false
 	}
 	name := strings.ToLower(strings.TrimSpace(parameter.Name))
+	if appUsesToken(app) && name == "authorization" {
+		return true
+	}
+	if !appUsesAKSK(app) {
+		return false
+	}
 	signer := app.Auth.Signer
 	for _, candidate := range []string{
 		signer.AccessKeyHeader,
@@ -271,6 +321,22 @@ func operationHasPathParams(operation model.Operation) bool {
 
 func operationHasQueryParams(operation model.Operation) bool {
 	return operationHasParamsIn(operation, "query")
+}
+
+func groupHasFileFields(group model.Group) bool {
+	for _, operation := range group.Operations {
+		if len(operation.FileFields) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func defaultFileField(operation model.Operation) string {
+	if len(operation.FileFields) == 1 {
+		return strings.TrimSpace(operation.FileFields[0].Name)
+	}
+	return ""
 }
 
 func exampleValue(fieldType, fieldName string) string {

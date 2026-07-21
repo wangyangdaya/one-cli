@@ -37,6 +37,102 @@ func TestBuildGroupsOperationsAndNamesCommands(t *testing.T) {
 	}
 }
 
+func TestBuildUsesSemanticSubjectsForCollidingGenericCommands(t *testing.T) {
+	doc := openapi.Document{
+		Operations: []openapi.Operation{
+			{Method: "GET", Path: "/cheryGlobal/aiAgent/mis", Tag: "全球一块屏-ai agent", OperationID: "getMis"},
+			{Method: "GET", Path: "/cheryGlobal/aiAgent/qulity", Tag: "全球一块屏-ai agent", OperationID: "getQuality"},
+			{Method: "GET", Path: "/cheryGlobal/aiAgent/sale", Tag: "全球一块屏-ai agent", OperationID: "getSale"},
+			{Method: "GET", Path: "/cheryGlobal/aiAgent/send", Tag: "全球一块屏-ai agent", OperationID: "getSend"},
+		},
+	}
+
+	plan := planner.Build(doc, configgen.Config{})
+
+	if len(plan.Groups) != 1 {
+		t.Fatalf("groups = %d want 1", len(plan.Groups))
+	}
+	want := []string{"mis", "quality", "sale", "send"}
+	for i, operation := range plan.Groups[0].Operations {
+		if operation.CommandName != want[i] {
+			t.Fatalf("command %d = %q want %q", i, operation.CommandName, want[i])
+		}
+	}
+}
+
+func TestBuildPreservesResponseSchemas(t *testing.T) {
+	doc := openapi.Document{
+		Operations: []openapi.Operation{
+			{
+				Method:      "GET",
+				Path:        "/quality",
+				Tag:         "quality",
+				OperationID: "getQuality",
+				Responses: []openapi.Response{
+					{
+						Status:      "200",
+						ContentType: "*/*",
+						Description: "OK",
+						Schemas: []openapi.Schema{
+							{
+								Name: "ResultAiQualityVO",
+								Type: "object",
+								Fields: []openapi.SchemaField{
+									{Name: "code", Type: "integer"},
+									{Name: "data", Type: "AiQualityVO"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	plan := planner.Build(doc, configgen.Config{})
+	responses := plan.Groups[0].Operations[0].Responses
+	if len(responses) != 1 || len(responses[0].Schemas) != 1 {
+		t.Fatalf("unexpected planned responses: %+v", responses)
+	}
+	if responses[0].Schemas[0].Fields[1].Type != "AiQualityVO" {
+		t.Fatalf("unexpected planned response fields: %+v", responses[0].Schemas[0].Fields)
+	}
+}
+
+func TestBuildSeparatesBinaryFileFieldsFromJSONBodyFlags(t *testing.T) {
+	doc := openapi.Document{Operations: []openapi.Operation{{
+		Method:      "POST",
+		Path:        "/imports",
+		Tag:         "imports",
+		OperationID: "importData",
+		RequestBody: openapi.RequestBody{
+			Required:      true,
+			HasJSONSchema: true,
+			IsSimpleJSON:  true,
+			JSONFields: []openapi.BodyField{
+				{Name: "file", Type: "string", Format: "binary", Required: true},
+				{Name: "description", Type: "string"},
+			},
+			JSONSchemaFields: []openapi.BodyField{
+				{Name: "file", Type: "string", Format: "binary", Required: true},
+				{Name: "description", Type: "string"},
+			},
+		},
+	}}}
+
+	plan := planner.Build(doc, configgen.Config{})
+	op := plan.Groups[0].Operations[0]
+	if len(op.FileFields) != 1 || op.FileFields[0].Name != "file" || op.FileFields[0].Format != "binary" {
+		t.Fatalf("file fields = %+v", op.FileFields)
+	}
+	if len(op.BodyFields) != 1 || op.BodyFields[0].Name != "description" {
+		t.Fatalf("JSON body flags should exclude binary fields: %+v", op.BodyFields)
+	}
+	if len(op.BodySchemaFields) != 2 {
+		t.Fatalf("body schema fields = %d want 2", len(op.BodySchemaFields))
+	}
+}
+
 func TestBuildUsesConfiguredAppVersion(t *testing.T) {
 	doc := openapi.Document{
 		Title: "Pet Store",
@@ -239,6 +335,20 @@ func TestBuildChoosesBodyModeConservativelyAndHonorsOverrides(t *testing.T) {
 	}
 	if got := plan.Groups[2].Operations[0].BodyMode; got != "flags" {
 		t.Fatalf("override body mode = %q want %q", got, "flags")
+	}
+}
+
+func TestBuildExposesRawDataForBodyCapableMethodsWithoutDocumentedBody(t *testing.T) {
+	doc := openapi.Document{Operations: []openapi.Operation{
+		{Method: "POST", Path: "/jobs", OperationID: "createJob"},
+		{Method: "GET", Path: "/jobs", OperationID: "listJobs"},
+	}}
+	plan := planner.Build(doc, configgen.Config{})
+	if got := plan.Groups[0].Operations[0].BodyMode; got != model.BodyModeFileOrData {
+		t.Fatalf("POST without requestBody mode = %q, want %q", got, model.BodyModeFileOrData)
+	}
+	if got := plan.Groups[0].Operations[1].BodyMode; got != "" {
+		t.Fatalf("GET without requestBody mode = %q, want empty", got)
 	}
 }
 

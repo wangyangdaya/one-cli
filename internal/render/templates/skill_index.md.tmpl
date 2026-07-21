@@ -11,5 +11,5 @@ Use this file as a lightweight index. Read the per-group `SKILL.md` before actin
 | Skill | Commands | Guide |
 | --- | ---: | --- |
 {{- range .App.Groups }}
-| `{{ if eq $.Target "rust" }}{{ rustModuleName . }}{{ else }}{{ groupPackageName . }}{{ end }}` | {{ len .Operations }} | [`SKILL.md`]({{ if eq $.Target "rust" }}{{ rustModuleName . }}{{ else }}{{ groupPackageName . }}{{ end }}/SKILL.md) |
+| `{{ skillName . }}` | {{ len .Operations }} | [`SKILL.md`]({{ skillName . }}/SKILL.md) |
 {{- end }}

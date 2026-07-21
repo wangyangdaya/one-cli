@@ -8,6 +8,7 @@ import (
 )
 
 func writeGoProject(outputDir, module string, app model.App, skillLang string) error {
+	app = normalizeGoApp(app)
 	files := []generatedFile{
 		{Path: filepath.Join("cmd", app.Name, "main.go"), Template: "go/root_main.go.tmpl", Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}},
 		{Path: "README.md", Template: "go/readme.md.tmpl", Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}},
@@ -29,7 +30,7 @@ func writeGoProject(outputDir, module string, app model.App, skillLang string) e
 			generatedFile{Path: filepath.Join("internal", groupDir, "service.go"), Template: serviceTemplate(group), Data: data},
 			generatedFile{Path: filepath.Join("internal", groupDir, "types.go"), Template: "go/group_types.go.tmpl", Data: data},
 		)
-		files = append(files, skillPackageFiles(groupDir, data)...)
+		files = append(files, skillPackageFiles(skillName(group), data)...)
 	}
 
 	if err := writeGoMod(outputDir, module); err != nil {

@@ -85,8 +85,10 @@ Simple JSON body endpoints accept top-level flags plus raw JSON input modes:
 ```bash
 ./bin/{{ .App.Name }} auth login --email you@example.com --password secret --remember
 ./bin/{{ .App.Name }} auth login --data '{"email":"you@example.com","password":"secret","remember":true}'
-./bin/{{ .App.Name }} auth login --file login.json
+./bin/{{ .App.Name }} auth login --data @login.json
 ```
+
+Use `--data -` for stdin and `@@...` for a literal `@` value. Commands with binary upload fields expose `--file path` (or `--file field=path` when multiple fields are declared); multipart text fields belong in `--data`. Do not use `--data -` and `--file -` together.
 
 {{- if appHasAnyMCP .App }}
 ## MCP Examples
@@ -162,6 +164,6 @@ skills/
     └── generation-report.md
 ```
 
-Generated skills are API scaffolds.{{ if gt (len .App.Groups) 1 }} Root `skills/SKILL.md` is a router for agent loaders;{{ end }} per-group `SKILL.md` files hold the command guidance. `assets/demo-request.json` is valid placeholder JSON and can be used immediately in documented `--file` examples; `generation-report.md` lists source documentation gaps. Before production, fill the MANUAL sections with business intent, routing rules, workflows, safety constraints, and validation evidence.
+Generated skills are API scaffolds.{{ if gt (len .App.Groups) 1 }} Root `skills/SKILL.md` is a router for agent loaders;{{ end }} per-group `SKILL.md` files hold the command guidance. `assets/demo-request.json` is valid placeholder JSON and can be used immediately with `--data @assets/demo-request.json`; `generation-report.md` lists source documentation gaps. Before production, fill the MANUAL sections with business intent, routing rules, workflows, safety constraints, and validation evidence.
 
 `skills list` and `skills read` read the generated `skills/` folder from disk so manual business edits are visible to agents. Run them from the generated project root, or pass `--skills-dir /path/to/skills` when the CLI binary is installed elsewhere.

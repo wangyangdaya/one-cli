@@ -1,5 +1,5 @@
 ---
-name: {{ .Group.Name }}
+name: {{ skillName .Group }}
 version: 1.0.0
 description: "{{- if .Group.Description }}{{ .Group.Description }}{{- else }}{{ .Group.Name }} 是 {{ .App.Name }} 的命令组。{{ range $i, $op := .Group.Operations }}{{ if $i }}、{{ end }}{{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}{{ end }}。{{- end }}"
 metadata:
@@ -19,7 +19,7 @@ metadata:
 ## 第一步
 
 1. 选择命令前，先运行 `{{ .App.Name }} {{ .Group.Name }} --help`。
-2. 使用 `{{ .App.Name }} skills list` 发现生成的 Skill 名称，使用 `{{ .App.Name }} skills read {{ if eq .Target "rust" }}{{ rustModuleName .Group }}{{ else }}{{ groupPackageName .Group }}{{ end }}` 读取当前可编辑的 Skill 文件；如果不在生成项目根目录运行，传 `--skills-dir <skills目录>`。
+2. 使用 `{{ .App.Name }} skills list` 发现生成的 Skill 名称，使用 `{{ .App.Name }} skills read {{ skillName .Group }}` 读取当前可编辑的 Skill 文件；如果不在生成项目根目录运行，传 `--skills-dir <skills目录>`。
 3. 多个命令含义接近时，查看 [references/command-routing.md](references/command-routing.md)。
 4. 多步骤任务查看 [references/workflows.md](references/workflows.md)，生产使用前必须补全其中的 MANUAL 部分。
 5. 写入、删除、批量或不可逆操作必须遵守下面的安全规则和 [references/production-checklist.md](references/production-checklist.md)。
@@ -30,7 +30,7 @@ metadata:
 | --- | --- |
 | [README.md](README.md) | 说明如何编辑、验证和交接这个生成的 Skill 包。 |
 | [SKILL.md](SKILL.md) | Agent 入口：触发规则、前置条件、命令索引、示例和安全约束。 |
-| [assets/demo-request.json](assets/demo-request.json) | 用于演示、`--file` 示例和手工编辑的有效占位 JSON 请求文件。 |
+| [assets/demo-request.json](assets/demo-request.json) | 用于演示、`--data @文件` 示例和手工编辑的有效占位 JSON 请求文件。 |
 | [references/command-routing.md](references/command-routing.md) | 命令选择表和人工意图映射。 |
 | [references/workflows.md](references/workflows.md) | 基于生成命令集的人工业务流程槽位。 |
 | [references/production-checklist.md](references/production-checklist.md) | 生产可用前的产品、工程、QA 和维护检查清单。 |
@@ -71,15 +71,16 @@ metadata:
 {{- end }}
 {{- end }}
 
+{{- if groupHasUserHeaders .App .Group }}
+
 ## 全局请求头
 
-所有 HTTP 命令都支持可重复的请求头。推荐把 `-H "Name: Value"`、`--header "Name: Value"` 或 `--header "Name=Value"` 放在完整命令之后，让命令意图先出现。
+本分组声明了自定义请求头。需要时可重复使用 `-H`：
 
 ```bash
-{{ .App.Name }} {{ .Group.Name }} <command> -H "ACCESS-STATUS=inner"
-{{ .App.Name }} {{ .Group.Name }} <command> --header "ACCESS-STATUS=inner"
-{{ .App.Name }} {{ .Group.Name }} <command> --header "Name: Value"
+{{ .App.Name }} {{ .Group.Name }} <command> -H "Name: Value"
 ```
+{{- end }}
 
 <!-- MANUAL: 补充认证流程、前置命令、依赖说明等。 -->
 
@@ -137,29 +138,30 @@ metadata:
 ```bash
 {{- if and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) (eq .BodyMode "simple-json") }}
 # {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（必填字段）
-{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .BodyFields }}{{ if .Required }} \
+{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .BodyFields }}{{ if and .Required (rustBodyFieldHasFlag .) }} \
   --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}
 {{- if hasOptionalFields . }}
 
 # {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（含可选字段）
-{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .BodyFields }} \
-  --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}
+{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .BodyFields }}{{ if rustBodyFieldHasFlag . }} \
+  --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}
 {{- end }}
 {{- else }}
 # {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（必填字段）
 {{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .Parameters }}{{ if eq .In "path" }} \
   --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if and (eq .In "query") .Required }} \
-  --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }}{{ if .Required }} \
+  --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }}{{ if and .Required (rustBodyFieldHasFlag .) }} \
   --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ end }}{{ if eq .BodyMode "file-or-data" }} \
-  --file assets/demo-request.json{{ end }}{{ range .Parameters }}{{ if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }} \
+  --data @assets/demo-request.json{{ end }}{{ if .FileFields }} \
+  --file path/to/file{{ end }}{{ range .Parameters }}{{ if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }} \
   --header "{{ .Name }}: <value>"{{ end }}{{ end }}
 {{- if hasOptionalFields . }}
 
 # {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（含可选字段）
 {{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .Parameters }}{{ if eq .In "path" }} \
   --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if eq .In "query" }} \
-  --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }} \
-  --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }} \
+  --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }}{{ if rustBodyFieldHasFlag . }} \
+  --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ end }}{{ range .Parameters }}{{ if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }} \
   --header "{{ .Name }}: <value>"{{ end }}{{ end }}
 {{- end }}
 {{- if eq .BodyMode "file-or-data" }}
@@ -187,12 +189,16 @@ metadata:
 {{- end }}
 {{- if and (eq .BodyMode "simple-json") .BodyFields }}
 {{- range .BodyFields }}
+{{- if rustBodyFieldHasFlag . }}
 | `--{{ cliBodyFlagName $.Target . }}` | {{ bodyRequiredLabel . $.SkillLang }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }}（{{ if .Type }}{{ .Type }}{{ else }}string{{ end }}） |
 {{- end }}
 {{- end }}
+{{- end }}
 {{- if eq .BodyMode "file-or-data" }}
-| `--file` | 否 | 从 JSON 文件读取请求体，与 `--data` 互斥 |
-| `--data` | 否 | 以 JSON 字符串传入请求体，与 `--file` 互斥 |
+| `--data` | 否 | JSON 请求体：内联、`@文件` 或 `-` 标准输入 |
+{{- end }}
+{{- if .FileFields }}
+| `--file` | 否 | 以 `[字段=]路径` 上传文件 |
 {{- end }}
 
 {{- if and (eq .BodyMode "file-or-data") .BodySchemaFields }}
@@ -210,6 +216,35 @@ metadata:
 
 **返回值：**
 
+{{- range .Responses }}
+
+状态码：`{{ .Status }}`{{ if .Description }}；说明：{{ .Description }}{{ end }}
+{{- if .ContentType }}
+
+内容类型：`{{ .ContentType }}`
+{{- end }}
+{{- if .Schemas }}
+{{- range .Schemas }}
+
+**`{{ .Name }}`{{ if .Description }} — {{ .Description }}{{ end }}**
+{{- if .Fields }}
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+{{- range .Fields }}
+| `{{ .Name }}` | `{{ if .Type }}{{ .Type }}{{ else }}unknown{{ end }}` | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }} |
+{{- end }}
+{{- else }}
+
+类型：`{{ if .Type }}{{ .Type }}{{ else }}unknown{{ end }}`
+{{- end }}
+{{- end }}
+{{- else }}
+
+未声明响应 Schema。
+{{- end }}
+{{- end }}
+
 <!-- MANUAL: 补充典型返回值示例和关键字段说明。 -->
 
 **错误：**
@@ -225,16 +260,20 @@ metadata:
 
 **注意事项：**
 {{- if eq .BodyMode "file-or-data" }}
-- `--file` 和 `--data` 互斥
+- `--data` 支持内联 JSON、`@文件` 或 `-` 标准输入
+{{- end }}
+{{- if .FileFields }}
+- `--file` 仅用于二进制上传字段；声明多个文件字段时使用 `[字段=]路径`
+- multipart 请求中，文本表单字段放入 `--data`，二进制内容放入 `--file`
 {{- end }}
 {{- if operationHasUserHeaders $.App . }}
 - 使用 `-H "Name: Value"` 或 `--header "Name: Value"` 传入请求头参数，可指定多次
 {{- end }}
 {{- if and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) .BodyMode }}
-- 简单字段暴露为独立 flag；复杂输入回退到 `--data` / `--file`
+- 简单字段暴露为独立 flag；复杂输入回退到 `--data`
 {{- end }}
 {{- if and (appUsesAKSK $.App) (or (eq .BodyMode "simple-json") (eq .BodyMode "file-or-data")) }}
-- AK/SK 签名下优先用独立 flag（如 `--date`、`--pageSize`），而非 `--data`/`--file`：flag 按文档字段顺序拼装 body，签名才一致；`--data`/`--file` 的 JSON 字段顺序不受控，可能导致签名校验失败
+- AK/SK 签名下优先用独立 flag（如 `--date`、`--pageSize`），而非 `--data`：flag 按文档字段顺序拼装 body，JSON 对象顺序不受控，可能导致签名校验失败
 {{- end }}
 {{- end }}
 

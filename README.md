@@ -334,7 +334,14 @@ Rust 目标当前不支持 `stdio`。
 MCP tool 参数映射规则：
 
 - 简单 object schema 会展开为独立 flags
-- 复杂 schema 会回退为 `--data` / `--file`
+- 复杂 schema 会回退为 `--data`（支持内联 JSON、`@文件` 和 stdin）
+
+请求体输入契约：
+
+- `--data '<json>'`：内联 JSON。
+- `--data @path.json`：从 JSON 文件读取；`--data -`：从 stdin 读取；`@@...`：传递字面量 `@`。
+- `--file path` 或 `--file field=path`：仅用于 OpenAPI/MCP 声明的二进制上传字段。
+- multipart 请求中，`--data` 携带文本表单字段，`--file` 携带二进制字段；`--data -` 与 `--file -` 不能同时使用。
 
 ### `opencli init`
 
@@ -379,7 +386,7 @@ runtime:
 overrides:
   # 请求体处理模式
   body_mode:
-    users.create: file-or-data    # 支持 --file 和 --data
+    users.create: file-or-data    # 使用 --data（兼容既有配置名）
     users.update: file-or-data
     posts.create: flags            # 展开为 CLI 标志
 
@@ -406,7 +413,7 @@ overrides:
 
 | 模式 | 说明 | CLI 示例 |
 |------|------|----------|
-| `file-or-data` | 支持文件或直接数据 | `--file user.json` 或 `--data '{...}'` |
+| `file-or-data` | JSON 数据输入（兼容既有配置名） | `--data @user.json` 或 `--data '{...}'` |
 | `flags` | 展开为独立标志 | `--name John --email john@example.com` |
 
 详细配置说明请参考 [用户指南](USER_GUIDE.md) 中的“配置文件”章节。
@@ -483,7 +490,7 @@ my-cli-rs/
 └── README.md
 ```
 
-多分组项目会生成根级 `skills/SKILL.md`，作为给 agent loader 使用的路由入口，用于兼容要求所选文件夹下必须存在 `SKILL.md` 的应用。`skills/README.md` 是轻量 Skill 索引。`skills/<group>/` 是标准化 Skill 工作包。分组 `SKILL.md` 是具体 Agent 入口，`README.md` 说明交付和修改流程，`assets/demo-request.json` 是可立即用于 `--file` 示例的合法 JSON 占位文件，`references/` 用于补充命令路由、业务流程和生产验收清单，`generation-report.md` 用于列出 API/MCP 输入中缺失的 group、命令、参数或请求体字段描述。
+多分组项目会生成根级 `skills/SKILL.md`，作为给 agent loader 使用的路由入口，用于兼容要求所选文件夹下必须存在 `SKILL.md` 的应用。`skills/README.md` 是轻量 Skill 索引。`skills/<group>/` 是标准化 Skill 工作包。分组 `SKILL.md` 是具体 Agent 入口，`README.md` 说明交付和修改流程，`assets/demo-request.json` 是可立即用于 `--data @assets/demo-request.json` 的合法 JSON 占位文件，`references/` 用于补充命令路由、业务流程和生产验收清单，`generation-report.md` 用于列出 API/MCP 输入中缺失的 group、命令、参数或请求体字段描述。
 
 生成的 CLI 还提供读取命令：
 
@@ -510,7 +517,8 @@ OpenCLI 按照以下规则将 OpenAPI 或 MCP 元素映射到 CLI 命令：
 | `operationId` | 子命令 | `listUsers` → `mycli users list` |
 | `path parameters` | 必需标志 | `{userId}` → `--user-id` |
 | `query parameters` | 可选标志 | `?page=1` → `--page 1` |
-| `requestBody` | 文件或数据输入 | `--file body.json` |
+| `requestBody` | JSON 数据输入 | `--data @body.json` |
+| `requestBody` 中的二进制字段 | 文件上传 | `--file path` 或 `--file field=path` |
 | `tags` 中的 `*Controller` | 优先提取 Controller 名作为命令组 | `TeMmMriCurrentController` → `te-mm-mri-current` |
 
 MCP 映射：
@@ -525,8 +533,9 @@ MCP 映射：
 生成目录名规则：
 
 - CLI 命令组名保留短横线，例如 `te-mm-mri-current`。
-- Go package、Rust module、`skills/<group>/` 目录使用 package name：非字母数字压缩为 `_`，转小写，数字开头加 `group_`。
-- 例如：`te-mm-mri-current` → `te_mm_mri_current`，生成 `skills/te_mm_mri_current/`。
+- Go package 和 Rust module 使用语言标识符：非字母数字压缩为 `_`，转小写，必要时增加安全前缀或数字后缀。
+- `skills/<skill-name>/` 遵循 Agent Skills 规范：只使用小写字母、数字和短横线，最长 64 个字符，并与 `SKILL.md` frontmatter 的 `name` 完全一致。
+- 例如命令组 `te-mm-mri-current` 的代码目录是 `internal/te_mm_mri_current/`（Go）或对应 Rust module，Skill 目录是 `skills/te-mm-mri-current/`。
 
 ---
 
@@ -582,7 +591,7 @@ cd usercli
 go build -o bin/usercli ./cmd/usercli
 
 ./bin/usercli users list --page 2
-./bin/usercli users create --file new-user.json
+./bin/usercli users create --data @new-user.json
 ```
 
 ### 示例 2: 从远程 URL 生成
@@ -703,7 +712,7 @@ cd tmp/petcli
 go build -o bin/petcli ./cmd/petcli
 ./bin/petcli --help
 ./bin/petcli pet list
-./bin/petcli pet create --file pet.json
+./bin/petcli pet create --data @pet.json
 ./bin/petcli pet get --pet-id 123
 ```
 
@@ -734,7 +743,7 @@ go build -o bin/petcli ./cmd/petcli
 - [x] OpenAPI 2.0（Swagger）、3.0 和 3.1 全版本支持
 - [x] 基于 kin-openapi 的完整 `$ref` 解析（含嵌套引用链）
 - [x] `allOf` 属性自动合并，支持复合 schema 展开为 CLI flag
-- [x] `oneOf`/`anyOf` 正确识别并回退为 `--file`/`--data` 模式
+- [x] `oneOf`/`anyOf` 正确识别并回退为 `--data` 模式
 - [x] 本地文件和远程 URL 加载
 - [x] 命令组和子命令生成
 - [x] 参数映射（path, query, body）
@@ -763,7 +772,7 @@ go build -o bin/petcli ./cmd/petcli
 - `opencli init` 命令尚未实现
 - Rust 生成目标不支持 `--trace` flag（Go 目标已支持）
 - Rust 生成目标不支持 MCP `stdio` 传输
-- 生成的 Skill 是 API scaffold，需要补充业务意图、流程和安全边界后才算生产可用
+- 生成的 Skill 是 API scaffold，需要补充业务意图、流程和安全边界后才算生产可用；生产验收还需验证 `--data @文件`/stdin 以及二进制字段的 `--file` multipart 行为
 
 ---
 

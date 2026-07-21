@@ -2,6 +2,8 @@
 
 use reqwest::Method;
 use serde_json::{json, Value};
+use std::io::Read;
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use crate::trace::trace_log;
@@ -9,6 +11,27 @@ use crate::types::AppResult;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 static GLOBAL_HEADERS: OnceLock<Mutex<Vec<(String, String)>>> = OnceLock::new();
+
+pub fn resolve_input(raw: &str) -> AppResult<String> {
+    if raw == "-" {
+        let mut content = String::new();
+        std::io::stdin().read_to_string(&mut content).map_err(|err| err.to_string())?;
+        return Ok(content);
+    }
+    if let Some(literal) = raw.strip_prefix("@@") {
+        return Ok(format!("@{literal}"));
+    }
+    if let Some(path) = raw.strip_prefix('@') {
+        if path.is_empty() {
+            return Err("missing file path after @".to_string());
+        }
+        return std::fs::read_to_string(path).map_err(|err| format!("read {path}: {err}"));
+    }
+    if raw.len() >= 2 && raw.starts_with('\'') && raw.ends_with('\'') {
+        return Ok(raw[1..raw.len() - 1].to_string());
+    }
+    Ok(raw.to_string())
+}
 
 pub fn set_global_headers(headers: Vec<(String, String)>) {
     let store = GLOBAL_HEADERS.get_or_init(|| Mutex::new(Vec::new()));
@@ -88,6 +111,87 @@ pub async fn request_json_text(
 
     trace_log!("[opencli][http] response\n  status: {status}\n  body: {}", preview(&text));
 
+    if !status.is_success() {
+        return Err(format!("request failed: {status}"));
+    }
+    if text.trim().is_empty() {
+        return Ok(json!({ "status": status.as_u16() }));
+    }
+    serde_json::from_str(&text).or_else(|_| Ok(json!({ "message": text })))
+}
+
+pub async fn request_multipart(
+    method: &str,
+    path: &str,
+    query: Vec<(String, String)>,
+    headers: Vec<(String, String)>,
+    file_spec: &str,
+    default_field: &str,
+    data: Option<String>,
+) -> AppResult<Value> {
+    let (field, file_path) = match file_spec.split_once('=') {
+        Some((field, path)) if !field.trim().is_empty() => (field.trim(), path),
+        _ if !default_field.is_empty() => (default_field, file_spec),
+        _ => return Err("--file requires field=path when the operation has multiple file fields".to_string()),
+    };
+    if file_path.trim().is_empty() {
+        return Err("--file path must not be empty".to_string());
+    }
+    let file_bytes = if file_path == "-" {
+        let mut bytes = Vec::new();
+        std::io::stdin().read_to_end(&mut bytes).map_err(|err| err.to_string())?;
+        bytes
+    } else {
+        std::fs::read(file_path).map_err(|err| format!("read {file_path}: {err}"))?
+    };
+    let file_name = if file_path == "-" {
+        "stdin".to_string()
+    } else {
+        Path::new(file_path).file_name().and_then(|value| value.to_str()).unwrap_or("upload").to_string()
+    };
+    let part = reqwest::multipart::Part::bytes(file_bytes).file_name(file_name);
+    let mut form = reqwest::multipart::Form::new().part(field.to_string(), part);
+    if let Some(ref raw) = data {
+        let value = serde_json::from_str::<Value>(raw).map_err(|err| err.to_string())?;
+        let object = value.as_object().ok_or_else(|| "--data must be a JSON object when used with --file".to_string())?;
+        for (name, value) in object {
+            let text = value.as_str().map(str::to_string).unwrap_or_else(|| value.to_string());
+            form = form.text(name.clone(), text);
+        }
+    }
+
+    let base_url = std::env::var("OPENCLI_BASE_URL")
+        .map_err(|_| "missing OPENCLI_BASE_URL".to_string())?;
+    let {{ if or (appUsesAKSK .App) (appUsesToken .App) }}mut {{ end }}headers = merged_headers(headers);
+{{- if appUsesAKSK .App }}
+    crate::auth::apply_aksk(&mut headers, method, path, data.as_deref())?;
+{{- else if appUsesToken .App }}
+    if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("Authorization")) {
+        if let Ok(token) = std::env::var("OPENCLI_AUTH_TOKEN") {
+            let token = token.trim();
+            if !token.is_empty() {
+                headers.push(("Authorization".to_string(), format!("Bearer {token}")));
+            }
+        }
+    }
+{{- end }}
+    let trimmed = base_url.trim_end_matches('/');
+    let mut url = reqwest::Url::parse(&format!("{trimmed}{path}")).map_err(|err| err.to_string())?;
+    {
+        let mut pairs = url.query_pairs_mut();
+        for (name, value) in &query {
+            pairs.append_pair(name, value);
+        }
+    }
+    let method = Method::from_bytes(method.as_bytes()).map_err(|err| err.to_string())?;
+    let client = new_http_client()?;
+    let mut req = client.request(method, url).multipart(form);
+    for (name, value) in &headers {
+        req = req.header(name, value);
+    }
+    let response = req.send().await.map_err(format_request_error)?;
+    let status = response.status();
+    let text = response.text().await.map_err(|err| err.to_string())?;
     if !status.is_success() {
         return Err(format!("request failed: {status}"));
     }

@@ -23,12 +23,24 @@ func bodyMode(op openapi.Operation, groupName, commandName string, cfg configgen
 		return override
 	}
 	if len(op.RequestBody.ContentTypes) == 0 {
+		if methodAcceptsBody(op.Method) {
+			return model.BodyModeFileOrData
+		}
 		return ""
 	}
 	if op.RequestBody.HasJSONSchema && op.RequestBody.IsSimpleJSON {
 		return model.BodyModeSimpleJSON
 	}
 	return model.BodyModeFileOrData
+}
+
+func methodAcceptsBody(method string) bool {
+	switch strings.ToUpper(strings.TrimSpace(method)) {
+	case "POST", "PUT", "PATCH", "DELETE":
+		return true
+	default:
+		return false
+	}
 }
 
 func bodyModeOverride(op openapi.Operation, groupName, commandName string, cfg configgen.Config) (string, bool) {

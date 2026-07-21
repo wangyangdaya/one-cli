@@ -23,10 +23,24 @@ func Build(doc openapi.Document, cfg configgen.Config) Plan {
 	for _, tag := range doc.Tags {
 		groupDescriptions[strings.TrimSpace(tag.Name)] = strings.TrimSpace(tag.Description)
 	}
+	groupCandidateCounts := make(map[string]map[string]int)
+	for _, op := range doc.Operations {
+		plannedGroupName, _ := reserveGroupName(groupName(op, cfg, groupDescriptions))
+		candidate, _ := commandNameCandidate(op, cfg)
+		candidate = commandIdentifier(candidate)
+		if groupCandidateCounts[plannedGroupName] == nil {
+			groupCandidateCounts[plannedGroupName] = make(map[string]int)
+		}
+		groupCandidateCounts[plannedGroupName][candidate]++
+	}
 	for _, op := range doc.Operations {
 		groupName := groupName(op, cfg, groupDescriptions)
 		groupName, renamedFrom := reserveGroupName(groupName)
-		commandName := uniqueCommandName(commandName(op, cfg), groupName, groupCommandCounts)
+		commandCandidate, explicitAlias := commandNameCandidate(op, cfg)
+		if !explicitAlias && groupCandidateCounts[groupName][commandIdentifier(commandCandidate)] > 1 {
+			commandCandidate = semanticCommandName(op, commandCandidate)
+		}
+		commandName := uniqueCommandName(commandCandidate, groupName, groupCommandCounts)
 
 		plannedOp := model.Operation{
 			Method:           strings.ToUpper(strings.TrimSpace(op.Method)),
@@ -37,17 +51,41 @@ func Build(doc openapi.Document, cfg configgen.Config) Plan {
 			BodyMode:         bodyMode(op, groupName, commandName, cfg),
 			BodyRequired:     op.RequestBody.Required,
 			BodyFields:       make([]model.BodyField, 0, len(op.RequestBody.JSONFields)),
+			FileFields:       make([]model.BodyField, 0, len(op.RequestBody.FileFields)),
 			BodySchemaFields: make([]model.BodyField, 0, len(op.RequestBody.JSONSchemaFields)),
 			Parameters:       make([]model.Parameter, 0, len(op.Parameters)),
+			Responses:        planResponses(op.Responses),
 		}
+		plannedFileFields := make(map[string]bool)
 		for _, field := range op.RequestBody.JSONFields {
-			plannedOp.BodyFields = append(plannedOp.BodyFields, model.BodyField{
+			plannedField := model.BodyField{
 				Name:            field.Name,
 				Description:     field.Description,
 				Required:        field.Required,
 				RequiredUnknown: field.RequiredUnknown,
 				Type:            field.Type,
+				Format:          field.Format,
+			}
+			if strings.EqualFold(strings.TrimSpace(field.Format), "binary") {
+				plannedOp.FileFields = append(plannedOp.FileFields, plannedField)
+				plannedFileFields[strings.TrimSpace(plannedField.Name)] = true
+				continue
+			}
+			plannedOp.BodyFields = append(plannedOp.BodyFields, plannedField)
+		}
+		for _, field := range op.RequestBody.FileFields {
+			if plannedFileFields[strings.TrimSpace(field.Name)] {
+				continue
+			}
+			plannedOp.FileFields = append(plannedOp.FileFields, model.BodyField{
+				Name:            field.Name,
+				Description:     field.Description,
+				Required:        field.Required,
+				RequiredUnknown: field.RequiredUnknown,
+				Type:            field.Type,
+				Format:          field.Format,
 			})
+			plannedFileFields[strings.TrimSpace(field.Name)] = true
 		}
 		for _, field := range op.RequestBody.JSONSchemaFields {
 			plannedOp.BodySchemaFields = append(plannedOp.BodySchemaFields, model.BodyField{
@@ -56,6 +94,7 @@ func Build(doc openapi.Document, cfg configgen.Config) Plan {
 				Required:        field.Required,
 				RequiredUnknown: field.RequiredUnknown,
 				Type:            field.Type,
+				Format:          field.Format,
 			})
 		}
 		applyBodyFieldOverrides(op, groupName, commandName, cfg, &plannedOp)
@@ -91,6 +130,37 @@ func Build(doc openapi.Document, cfg configgen.Config) Plan {
 	}
 
 	return app
+}
+
+func planResponses(responses []openapi.Response) []model.Response {
+	planned := make([]model.Response, 0, len(responses))
+	for _, response := range responses {
+		plannedResponse := model.Response{
+			Status:      response.Status,
+			ContentType: response.ContentType,
+			Description: response.Description,
+			Schemas:     make([]model.Schema, 0, len(response.Schemas)),
+		}
+		for _, schema := range response.Schemas {
+			plannedSchema := model.Schema{
+				Name:        schema.Name,
+				Description: schema.Description,
+				Type:        schema.Type,
+				Fields:      make([]model.SchemaField, 0, len(schema.Fields)),
+			}
+			for _, field := range schema.Fields {
+				plannedSchema.Fields = append(plannedSchema.Fields, model.SchemaField{
+					Name:        field.Name,
+					Description: field.Description,
+					Required:    field.Required,
+					Type:        field.Type,
+				})
+			}
+			plannedResponse.Schemas = append(plannedResponse.Schemas, plannedSchema)
+		}
+		planned = append(planned, plannedResponse)
+	}
+	return planned
 }
 
 func applyBodyFieldOverrides(op openapi.Operation, groupName, commandName string, cfg configgen.Config, plannedOp *model.Operation) {

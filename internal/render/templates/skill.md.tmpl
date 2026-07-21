@@ -1,5 +1,5 @@
 ---
-name: {{ .Group.Name }}
+name: {{ skillName .Group }}
 version: 1.0.0
 description: "{{- if .Group.Description }}{{ .Group.Description }}{{- else }}{{ .Group.Name }} commands for {{ .App.Name }}. {{ range $i, $op := .Group.Operations }}{{ if $i }}, {{ end }}{{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}{{ end }}.{{- end }}"
 metadata:
@@ -19,7 +19,7 @@ This is a generated OpenCLI skill package. It contains API-derived facts and man
 ## First Steps
 
 1. Run `{{ .App.Name }} {{ .Group.Name }} --help` before choosing a command.
-2. Use `{{ .App.Name }} skills list` to discover generated skill names and `{{ .App.Name }} skills read {{ if eq .Target "rust" }}{{ rustModuleName .Group }}{{ else }}{{ groupPackageName .Group }}{{ end }}` to read the current editable skill file. If not running from the generated project root, pass `--skills-dir <path-to-skills>`.
+2. Use `{{ .App.Name }} skills list` to discover generated skill names and `{{ .App.Name }} skills read {{ skillName .Group }}` to read the current editable skill file. If not running from the generated project root, pass `--skills-dir <path-to-skills>`.
 3. Use [references/command-routing.md](references/command-routing.md) when multiple commands look similar.
 4. Use [references/workflows.md](references/workflows.md) for multi-step work; fill its MANUAL sections before relying on business flows.
 5. For write, delete, bulk, or irreversible actions, follow the safety rules below and [references/production-checklist.md](references/production-checklist.md).
@@ -30,7 +30,7 @@ This is a generated OpenCLI skill package. It contains API-derived facts and man
 | --- | --- |
 | [README.md](README.md) | Explains how to edit, validate, and hand off this generated skill package. |
 | [SKILL.md](SKILL.md) | Agent entrypoint: trigger rules, prerequisites, command index, examples, and safety constraints. |
-| [assets/demo-request.json](assets/demo-request.json) | Valid placeholder JSON request file for demos, `--file` examples, and manual editing. |
+| [assets/demo-request.json](assets/demo-request.json) | Valid placeholder JSON request file for demos, `--data @file` examples, and manual editing. |
 | [references/command-routing.md](references/command-routing.md) | Command selection table and manual intent mapping. |
 | [references/workflows.md](references/workflows.md) | Manual business workflow slots built from the generated command set. |
 | [references/production-checklist.md](references/production-checklist.md) | Product, engineering, QA, and maintenance checklist for making the skill production-ready. |
@@ -71,15 +71,16 @@ This is a generated OpenCLI skill package. It contains API-derived facts and man
 {{- end }}
 {{- end }}
 
+{{- if groupHasUserHeaders .App .Group }}
+
 ## Global Request Headers
 
-All HTTP commands accept repeatable request headers. Prefer placing `-H "Name: Value"`, `--header "Name: Value"`, or `--header "Name=Value"` after the full command so the command intent comes first.
+This group declares custom request headers. Repeat `-H` when more than one is needed:
 
 ```bash
-{{ .App.Name }} {{ .Group.Name }} <command> -H "ACCESS-STATUS=inner"
-{{ .App.Name }} {{ .Group.Name }} <command> --header "ACCESS-STATUS=inner"
-{{ .App.Name }} {{ .Group.Name }} <command> --header "Name: Value"
+{{ .App.Name }} {{ .Group.Name }} <command> -H "Name: Value"
 ```
+{{- end }}
 
 <!-- MANUAL: 补充认证流程、前置命令、依赖说明等 -->
 
@@ -137,29 +138,30 @@ Generated APIs do not contain enough business semantics to infer real workflows.
 ```bash
 {{- if and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) (eq .BodyMode "simple-json") }}
 # {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（必填字段）
-{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .BodyFields }}{{ if .Required }} \
+{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .BodyFields }}{{ if and .Required (rustBodyFieldHasFlag .) }} \
   --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}
 {{- if hasOptionalFields . }}
 
 # {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（含可选字段）
-{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .BodyFields }} \
-  --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}
+{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .BodyFields }}{{ if rustBodyFieldHasFlag . }} \
+  --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}
 {{- end }}
 {{- else }}
 # {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（必填字段）
 {{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .Parameters }}{{ if eq .In "path" }} \
   --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if and (eq .In "query") .Required }} \
-  --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }}{{ if .Required }} \
+  --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }}{{ if and .Required (rustBodyFieldHasFlag .) }} \
   --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ end }}{{ if eq .BodyMode "file-or-data" }} \
-  --file assets/demo-request.json{{ end }}{{ range .Parameters }}{{ if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }} \
+  --data @assets/demo-request.json{{ end }}{{ if .FileFields }} \
+  --file path/to/file{{ end }}{{ range .Parameters }}{{ if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }} \
   --header "{{ .Name }}: <value>"{{ end }}{{ end }}
 {{- if hasOptionalFields . }}
 
 # {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（含可选字段）
 {{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .Parameters }}{{ if eq .In "path" }} \
   --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if eq .In "query" }} \
-  --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }} \
-  --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }} \
+  --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }}{{ if rustBodyFieldHasFlag . }} \
+  --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ end }}{{ range .Parameters }}{{ if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }} \
   --header "{{ .Name }}: <value>"{{ end }}{{ end }}
 {{- end }}
 {{- if eq .BodyMode "file-or-data" }}
@@ -187,12 +189,16 @@ Generated APIs do not contain enough business semantics to infer real workflows.
 {{- end }}
 {{- if and (eq .BodyMode "simple-json") .BodyFields }}
 {{- range .BodyFields }}
+{{- if rustBodyFieldHasFlag . }}
 | `--{{ cliBodyFlagName $.Target . }}` | {{ bodyRequiredLabel . $.SkillLang }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }} ({{ if .Type }}{{ .Type }}{{ else }}string{{ end }}) |
 {{- end }}
 {{- end }}
+{{- end }}
 {{- if eq .BodyMode "file-or-data" }}
-| `--file` | no | Read request body from JSON file, mutually exclusive with `--data` |
-| `--data` | no | Pass request body as JSON string, mutually exclusive with `--file` |
+| `--data` | no | JSON body: inline, `@file`, or `-` for stdin |
+{{- end }}
+{{- if .FileFields }}
+| `--file` | no | Upload a file as `[field=]path` |
 {{- end }}
 
 {{- if and (eq .BodyMode "file-or-data") .BodySchemaFields }}
@@ -209,6 +215,35 @@ Generated APIs do not contain enough business semantics to infer real workflows.
 <!-- MANUAL: 补充参数的业务约束、格式要求、取值范围等 -->
 
 **Return Value:**
+
+{{- range .Responses }}
+
+Status: `{{ .Status }}`{{ if .Description }}; description: {{ .Description }}{{ end }}
+{{- if .ContentType }}
+
+Content type: `{{ .ContentType }}`
+{{- end }}
+{{- if .Schemas }}
+{{- range .Schemas }}
+
+**`{{ .Name }}`{{ if .Description }} — {{ .Description }}{{ end }}**
+{{- if .Fields }}
+
+| Field | Type | Description |
+|-------|------|-------------|
+{{- range .Fields }}
+| `{{ .Name }}` | `{{ if .Type }}{{ .Type }}{{ else }}unknown{{ end }}` | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }} |
+{{- end }}
+{{- else }}
+
+Type: `{{ if .Type }}{{ .Type }}{{ else }}unknown{{ end }}`
+{{- end }}
+{{- end }}
+{{- else }}
+
+No response schema is declared.
+{{- end }}
+{{- end }}
 
 <!-- MANUAL: 补充典型的返回值示例和关键字段说明。示例：
 ```json
@@ -232,16 +267,20 @@ Generated APIs do not contain enough business semantics to infer real workflows.
 
 **Notes:**
 {{- if eq .BodyMode "file-or-data" }}
-- `--file` and `--data` are mutually exclusive
+- `--data` accepts inline JSON, `@file`, or `-` for stdin
+{{- end }}
+{{- if .FileFields }}
+- `--file` is reserved for binary upload fields; use `[field=]path` when multiple file fields are declared
+- For multipart requests, put text form fields in `--data` and binary content in `--file`
 {{- end }}
 {{- if operationHasUserHeaders $.App . }}
 - Use `-H "Name: Value"` or `--header "Name: Value"` for header parameters; can be specified multiple times
 {{- end }}
 {{- if and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) .BodyMode }}
-- Simple fields are exposed as individual flags; complex input falls back to `--data` / `--file`
+- Simple fields are exposed as individual flags; complex input falls back to `--data`
 {{- end }}
 {{- if and (appUsesAKSK $.App) (or (eq .BodyMode "simple-json") (eq .BodyMode "file-or-data")) }}
-- For AK/SK signing, prefer individual flags (e.g. `--date`, `--pageSize`) over `--data`/`--file`: flags preserve the spec field order the signer expects, while `--data`/`--file` JSON may reorder fields and break the signature
+- For AK/SK signing, prefer individual flags (e.g. `--date`, `--pageSize`) over `--data`: flags preserve the spec field order the signer expects, while JSON object order may break the signature
 {{- end }}
 {{- end }}
 

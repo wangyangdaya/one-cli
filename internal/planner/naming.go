@@ -9,20 +9,36 @@ import (
 )
 
 func commandName(op openapi.Operation, cfg configgen.Config) string {
+	name, _ := commandNameCandidate(op, cfg)
+	return name
+}
+
+func commandNameCandidate(op openapi.Operation, cfg configgen.Config) (string, bool) {
 	for _, key := range operationAliasKeys(op) {
 		if alias, ok := cfg.Naming.OperationAlias[key]; ok {
 			if trimmed := strings.TrimSpace(alias); trimmed != "" {
-				return trimmed
+				return trimmed, true
 			}
 		}
 	}
 	if trimmed := strings.TrimSpace(op.OperationID); trimmed != "" {
 		if strings.EqualFold(strings.TrimSpace(op.Method), "MCP") || strings.HasPrefix(strings.TrimSpace(op.Backend), "mcp-") {
-			return mcpToolCommandName(trimmed)
+			return mcpToolCommandName(trimmed), false
 		}
-		return simplifyOperationID(trimmed)
+		return simplifyOperationID(trimmed), false
 	}
-	return deriveFromMethodPath(op.Method, op.Path)
+	return deriveFromMethodPath(op.Method, op.Path), false
+}
+
+func semanticCommandName(op openapi.Operation, fallback string) string {
+	if strings.EqualFold(strings.TrimSpace(op.Method), "MCP") || strings.HasPrefix(strings.TrimSpace(op.Backend), "mcp-") {
+		return fallback
+	}
+	parts := splitIdentifier(stripOperationIDNoise(op.OperationID))
+	if len(parts) < 2 || !isGenericVerb(parts[0]) {
+		return fallback
+	}
+	return strings.Join(parts[1:], "-")
 }
 
 func operationAliasKeys(op openapi.Operation) []string {

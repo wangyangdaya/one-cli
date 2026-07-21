@@ -55,3 +55,45 @@ func TestNormalizeRustAppDoesNotModifyInput(t *testing.T) {
 		t.Fatalf("normalized body field names = %q/%q", normalizedBodyField.FieldName, normalizedBodyField.FlagName)
 	}
 }
+
+func TestNormalizeRustAppReservesDataAndFileForTheirInputRoles(t *testing.T) {
+	app := model.App{Groups: []model.Group{{Operations: []model.Operation{{
+		BodyMode: model.BodyModeSimpleJSON,
+		Parameters: []model.Parameter{
+			{Name: "data", In: "query"},
+			{Name: "file", In: "query"},
+		},
+		BodyFields: []model.BodyField{{Name: "data"}, {Name: "description"}},
+		FileFields: []model.BodyField{{Name: "asset", Format: "binary"}},
+	}}}}}
+
+	op := normalizeRustApp(app).Groups[0].Operations[0]
+	if op.Parameters[0].FlagName != "query-data" {
+		t.Fatalf("query data flag = %q, want query-data", op.Parameters[0].FlagName)
+	}
+	if op.Parameters[1].FlagName != "query-file" {
+		t.Fatalf("query file flag = %q, want query-file", op.Parameters[1].FlagName)
+	}
+	if op.BodyFields[0].FlagName != "" {
+		t.Fatalf("body data flag = %q, want fallback to --data", op.BodyFields[0].FlagName)
+	}
+	if op.FileFields[0].FlagName != "file" {
+		t.Fatalf("upload flag = %q, want file", op.FileFields[0].FlagName)
+	}
+}
+
+func TestNormalizeRustAppReservesFileWithoutBinaryFields(t *testing.T) {
+	app := model.App{Groups: []model.Group{{Operations: []model.Operation{{
+		BodyMode:   model.BodyModeSimpleJSON,
+		Parameters: []model.Parameter{{Name: "file", In: "query"}},
+		BodyFields: []model.BodyField{{Name: "file", Type: "string"}},
+	}}}}}
+
+	op := normalizeRustApp(app).Groups[0].Operations[0]
+	if got := op.Parameters[0].FlagName; got != "query-file" {
+		t.Fatalf("query file flag = %q, want query-file", got)
+	}
+	if got := op.BodyFields[0].FlagName; got != "" {
+		t.Fatalf("JSON body file flag = %q, want fallback to --data", got)
+	}
+}

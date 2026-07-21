@@ -21,6 +21,7 @@ func normalizeRustApp(app model.App) model.App {
 			operation := &group.Operations[operationIndex]
 			operation.Parameters = slices.Clone(operation.Parameters)
 			operation.BodyFields = slices.Clone(operation.BodyFields)
+			operation.FileFields = slices.Clone(operation.FileFields)
 			normalizeRustOperationArgs(operation)
 		}
 	}
@@ -28,13 +29,17 @@ func normalizeRustApp(app model.App) model.App {
 }
 
 func normalizeRustOperationArgs(operation *model.Operation) {
-	fieldNames := map[string]int{
-		"body_data": 1,
-		"body_file": 1,
+	fieldNames := make(map[string]int)
+	// --file is reserved for binary uploads, even when this operation has no
+	// binary field. A JSON property or request parameter named "file" must not
+	// silently acquire upload semantics.
+	flagNames := map[string]int{"file": 1}
+	if operation.BodyMode != "" {
+		fieldNames["body_data"] = 1
+		flagNames["data"] = 1
 	}
-	flagNames := map[string]int{
-		"data": 1,
-		"file": 1,
+	if len(operation.FileFields) > 0 {
+		fieldNames["upload_file"] = 1
 	}
 	if operationHasHeaderParams(*operation) {
 		fieldNames["header"] = 1
@@ -67,9 +72,19 @@ func normalizeRustOperationArgs(operation *model.Operation) {
 
 		baseFlag := rustFlagName(field.Name)
 		if flagNames[baseFlag] > 0 {
+			if baseFlag == "data" || baseFlag == "file" {
+				field.FlagName = ""
+				continue
+			}
 			baseFlag = "body-" + baseFlag
 		}
 		field.FlagName = uniqueRustFlag(baseFlag, flagNames)
+	}
+
+	for index := range operation.FileFields {
+		field := &operation.FileFields[index]
+		field.FieldName = uniqueRustIdentifier("file_"+rustFieldName(field.Name), fieldNames)
+		field.FlagName = "file"
 	}
 }
 

@@ -157,6 +157,75 @@ paths:
 	}
 }
 
+func TestParseDocumentCapturesMultipartBinaryFields(t *testing.T) {
+	doc, err := openapi.Parse([]byte(`
+openapi: 3.0.0
+info:
+  title: Upload API
+  version: "1.0"
+paths:
+  /assets:
+    post:
+      operationId: uploadAsset
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [asset]
+              properties:
+                asset:
+                  type: string
+                  format: binary
+                description:
+                  type: string
+      responses:
+        "200":
+          description: ok
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	body := doc.Operations[0].RequestBody
+	if len(body.FileFields) != 1 {
+		t.Fatalf("file fields = %+v, want one binary field", body.FileFields)
+	}
+	if got := body.FileFields[0]; got.Name != "asset" || got.Format != "binary" || !got.Required {
+		t.Fatalf("unexpected file field: %+v", got)
+	}
+}
+
+func TestParseDocumentCapturesRawBinaryRequestBody(t *testing.T) {
+	doc, err := openapi.Parse([]byte(`
+openapi: 3.0.0
+info:
+  title: Raw Upload API
+  version: "1.0"
+paths:
+  /asset:
+    put:
+      operationId: replaceAsset
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "204":
+          description: replaced
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	body := doc.Operations[0].RequestBody
+	if len(body.FileFields) != 1 || body.FileFields[0].Name != "file" || body.FileFields[0].Format != "binary" {
+		t.Fatalf("unexpected raw binary fields: %+v", body.FileFields)
+	}
+}
+
 func TestParseDocumentInfersSimpleJSONBodyFieldsFromExample(t *testing.T) {
 	doc, err := openapi.Parse([]byte(`
 openapi: 3.0.0
@@ -305,6 +374,122 @@ components:
 	}
 	if header.Description != "Bearer token" {
 		t.Fatalf("description = %q want %q", header.Description, "Bearer token")
+	}
+}
+
+func TestParseDocumentResolvesReferencedResponseSchemas(t *testing.T) {
+	doc, err := openapi.Parse([]byte(`
+openapi: 3.0.0
+info:
+  title: Chery Global API
+  version: "1.0"
+paths:
+  /cheryGlobal/aiAgent/qulity:
+    get:
+      operationId: getQuality
+      responses:
+        "200":
+          description: OK
+          content:
+            "*/*":
+              schema:
+                $ref: '#/components/schemas/ResultAiQualityVO'
+components:
+  schemas:
+    ResultAiQualityVO:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+        msg:
+          type: string
+        data:
+          $ref: '#/components/schemas/AiQualityVO'
+    AiQualityVO:
+      type: object
+      description: 质量
+      properties:
+        type:
+          title: 类型
+          type: string
+        qualityPerformanceVOS:
+          title: 价值链信息
+          type: array
+          items:
+            $ref: '#/components/schemas/QualityPerformanceVO'
+    QualityPerformanceVO:
+      type: object
+      properties:
+        name:
+          title: 指标名称
+          type: string
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	responses := doc.Operations[0].Responses
+	if len(responses) != 1 {
+		t.Fatalf("responses = %d want 1", len(responses))
+	}
+	response := responses[0]
+	if response.Status != "200" || response.ContentType != "*/*" || response.Description != "OK" {
+		t.Fatalf("unexpected response metadata: %+v", response)
+	}
+	if len(response.Schemas) != 3 {
+		t.Fatalf("response schemas = %d want 3: %+v", len(response.Schemas), response.Schemas)
+	}
+	if response.Schemas[0].Name != "ResultAiQualityVO" || response.Schemas[0].Fields[2].Name != "msg" {
+		t.Fatalf("unexpected root response schema: %+v", response.Schemas[0])
+	}
+	quality := response.Schemas[1]
+	if quality.Name != "AiQualityVO" || quality.Description != "质量" {
+		t.Fatalf("unexpected referenced schema: %+v", quality)
+	}
+	if quality.Fields[0].Name != "qualityPerformanceVOS" || quality.Fields[0].Type != "QualityPerformanceVO[]" || quality.Fields[0].Description != "价值链信息" {
+		t.Fatalf("unexpected referenced array field: %+v", quality.Fields[0])
+	}
+	if response.Schemas[2].Name != "QualityPerformanceVO" || response.Schemas[2].Fields[0].Description != "指标名称" {
+		t.Fatalf("unexpected nested response schema: %+v", response.Schemas[2])
+	}
+}
+
+func TestParseDocumentPreservesBinaryBodyFieldFormat(t *testing.T) {
+	doc, err := openapi.Parse([]byte(`
+openapi: 3.0.0
+info:
+  title: Upload API
+  version: "1.0"
+paths:
+  /imports:
+    post:
+      operationId: importData
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: OK
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	fields := doc.Operations[0].RequestBody.JSONSchemaFields
+	if len(fields) != 1 {
+		t.Fatalf("body fields = %d want 1: %+v", len(fields), fields)
+	}
+	if fields[0].Name != "file" || fields[0].Type != "string" || fields[0].Format != "binary" {
+		t.Fatalf("binary field metadata lost: %+v", fields[0])
 	}
 }
 

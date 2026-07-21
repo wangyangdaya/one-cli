@@ -57,12 +57,11 @@ func TestGenerateSmokeIncludesSimpleJSONBodyFlags(t *testing.T) {
 
 	text := string(content)
 	for _, want := range []string{
-		`cmd.Flags().StringVar(&bodyData, "data", "", "Raw JSON request body")`,
-		`cmd.Flags().StringVar(&bodyFile, "file", "", "Path to JSON request body file")`,
+		`cmd.Flags().StringVar(&bodyData, "data", "", "JSON request body; use @file or - for stdin")`,
 		`cmd.Flags().StringVar(&bodyEmail, "email", "", "JSON body field: email")`,
 		`cmd.Flags().StringVar(&bodyPassword, "password", "", "JSON body field: password")`,
 		`cmd.Flags().BoolVar(&bodyRemember, "remember", false, "JSON body field: remember")`,
-		`Body input: --email/--password/--remember, --data, or --file`,
+		`Body input: --email/--password/--remember, or --data (inline JSON, @file, or - for stdin)`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("generated command missing %q", want)
@@ -118,11 +117,20 @@ func TestGenerateSmokeIncludesHeaderFlagsAndDocs(t *testing.T) {
 		"## Commands",
 		"## Core Concepts",
 		"### openapi-cli auth me",
-		`--header "authorization: <value>"`,
+		"OPENCLI_AUTH_TOKEN",
 		"<!-- MANUAL:",
 	} {
 		if !strings.Contains(skillText, want) {
 			t.Fatalf("generated SKILL.md missing %q:\n%s", want, skillText)
+		}
+	}
+	for _, unwanted := range []string{
+		"## Global Request Headers",
+		`--header "authorization: <value>"`,
+		"ACCESS-STATUS",
+	} {
+		if strings.Contains(skillText, unwanted) {
+			t.Fatalf("generated SKILL.md should omit token header guidance %q:\n%s", unwanted, skillText)
 		}
 	}
 }

@@ -18,7 +18,10 @@
 - [ ] `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }} --help` 可用。
 {{- end }}
 - [ ] `SKILL.md` 中的必填参数、请求体字段和 header 规则与 CLI 一致。
-- [ ] 复杂 JSON 输入清楚记录了 `--data` / `--file` 形状。
+- [ ] JSON 请求体统一记录 `--data` 用法：内联 JSON、`@文件` 或 `-` 标准输入。
+- [ ] 只有声明二进制上传字段的操作才记录 `--file`；多文件时记录 `[字段=]路径`。
+- [ ] multipart 操作明确哪些文本字段放入 `--data`，哪些二进制字段使用 `--file`。
+- [ ] 不要同时让 `--data -` 和 `--file -` 读取标准输入；一次只能消费一个 stdin 流。
 - [ ] 认证、环境变量和 base URL 设置准确。
 
 ## 安全
@@ -44,4 +47,3 @@
 - [ ] CLI 命令重命名会更新 `SKILL.md` 和 `references/`。
 - [ ] 业务规则变更会更新 workflow 和 routing 文档。
 - [ ] PR 或发布说明中记录了验证证据。
-

@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+{{- if groupHasFileFields .Group }}
+	"mime/multipart"
+{{- end }}
 	"net/http"
 	"net/url"
-{{- if or (groupHasBodyInput .Group) }}
+{{- if groupHasFileFields .Group }}
 	"os"
+	"path/filepath"
 {{- end }}
 	"strings"
 {{- if appUsesAKSK .App }}
@@ -29,7 +33,7 @@ import (
 type {{ .CommandName | pascal }}Input struct {
 {{- range .Parameters }}
 {{- if or (eq .In "path") (eq .In "query") }}
-	{{ .Name | pascal }} {{ goType .Type }}
+	{{ goInputFieldName . }} {{ goType .Type }}
 {{- end }}
 {{- end }}
 {{- if operationHasHeaderParams . }}
@@ -37,10 +41,12 @@ type {{ .CommandName | pascal }}Input struct {
 {{- end }}
 {{- if .BodyMode }}
 	BodyData string
-	BodyFile string
+{{- end }}
+{{- if .FileFields }}
+	UploadFile string
 {{- end }}
 {{- range .BodyFields }}
-	{{ .Name | pascal }} {{ goType .Type }}
+	{{ goInputFieldName . }} {{ goType .Type }}
 {{- end }}
 }
 
@@ -50,7 +56,7 @@ func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (
 		return Result{}, err
 	}
 
-	body, err := build{{ .CommandName | pascal }}Body(input)
+	body, contentType, err := build{{ .CommandName | pascal }}RequestBody(input)
 	if err != nil {
 		return Result{}, err
 	}
@@ -64,8 +70,8 @@ func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (
 	if err != nil {
 		return Result{}, fmt.Errorf("build request: %w", err)
 	}
-	if len(body) > 0 {
-		req.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 	if err := applyHeaders(req, cli.RequestHeaders()); err != nil {
 		return Result{}, err
@@ -111,6 +117,28 @@ func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (
 	return Result{Message: strings.TrimSpace(string(payload))}, nil
 }
 
+func build{{ .CommandName | pascal }}RequestBody(input {{ .CommandName | pascal }}Input) ([]byte, string, error) {
+{{- if .FileFields }}
+	hasUpload := strings.TrimSpace(input.UploadFile) != ""
+	body, err := build{{ .CommandName | pascal }}Body(input, hasUpload)
+{{- else }}
+	body, err := build{{ .CommandName | pascal }}Body(input)
+{{- end }}
+	if err != nil {
+		return nil, "", err
+	}
+{{- if .FileFields }}
+	if hasUpload {
+		body, contentType, err := buildMultipartBody(input.UploadFile, {{ printf "%q" (defaultFileField .) }}, string(body))
+		return body, contentType, err
+	}
+{{- end }}
+	if len(body) == 0 {
+		return nil, "", nil
+	}
+	return body, "application/json", nil
+}
+
 func build{{ .CommandName | pascal }}URL(input {{ .CommandName | pascal }}Input) (string, error) {
 	baseURL := strings.TrimSpace(config.Lookup("OPENCLI_BASE_URL"))
 	if baseURL == "" {
@@ -123,27 +151,27 @@ func build{{ .CommandName | pascal }}URL(input {{ .CommandName | pascal }}Input)
 	}
 {{- range .Parameters }}
 {{- if eq .In "path" }}
-	requestURL.Path = strings.ReplaceAll(requestURL.Path, {{ printf "%q" (printf "{%s}" .Name) }}, url.PathEscape(fmt.Sprint(input.{{ .Name | pascal }})))
+	requestURL.Path = strings.ReplaceAll(requestURL.Path, {{ printf "%q" (printf "{%s}" .Name) }}, url.PathEscape(fmt.Sprint(input.{{ goInputFieldName . }})))
 {{- end }}
 {{- end }}
 	query := requestURL.Query()
 {{- range .Parameters }}
 {{- if eq .In "query" }}
 {{- if eq (goType .Type) "string" }}
-	if strings.TrimSpace(input.{{ .Name | pascal }}) != "" {
-		query.Set("{{ .Name }}", input.{{ .Name | pascal }})
+	if strings.TrimSpace(input.{{ goInputFieldName . }}) != "" {
+		query.Set("{{ .Name }}", input.{{ goInputFieldName . }})
 	}
 {{- else if eq (goType .Type) "int" }}
-	if input.{{ .Name | pascal }} != 0 {
-		query.Set("{{ .Name }}", fmt.Sprint(input.{{ .Name | pascal }}))
+	if input.{{ goInputFieldName . }} != 0 {
+		query.Set("{{ .Name }}", fmt.Sprint(input.{{ goInputFieldName . }}))
 	}
 {{- else if eq (goType .Type) "float64" }}
-	if input.{{ .Name | pascal }} != 0 {
-		query.Set("{{ .Name }}", fmt.Sprint(input.{{ .Name | pascal }}))
+	if input.{{ goInputFieldName . }} != 0 {
+		query.Set("{{ .Name }}", fmt.Sprint(input.{{ goInputFieldName . }}))
 	}
 {{- else if eq (goType .Type) "bool" }}
-	if input.{{ .Name | pascal }} {
-		query.Set("{{ .Name }}", fmt.Sprint(input.{{ .Name | pascal }}))
+	if input.{{ goInputFieldName . }} {
+		query.Set("{{ .Name }}", fmt.Sprint(input.{{ goInputFieldName . }}))
 	}
 {{- end }}
 {{- end }}
@@ -152,52 +180,53 @@ func build{{ .CommandName | pascal }}URL(input {{ .CommandName | pascal }}Input)
 	return requestURL.String(), nil
 }
 
-func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input) ([]byte, error) {
+func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input{{ if .FileFields }}, allowEmpty bool{{ end }}) ([]byte, error) {
 {{- if not .BodyMode }}
+{{- if .FileFields }}
+	_ = allowEmpty
+{{- end }}
 	return nil, nil
 {{- else }}
 	hasData := strings.TrimSpace(input.BodyData) != ""
-	hasFile := strings.TrimSpace(input.BodyFile) != ""
 	hasFlagBody := false
 {{- range .BodyFields }}
 {{- if eq (goType .Type) "string" }}
-	hasFlagBody = hasFlagBody || strings.TrimSpace(input.{{ .Name | pascal }}) != ""
+	hasFlagBody = hasFlagBody || strings.TrimSpace(input.{{ goInputFieldName . }}) != ""
 {{- else if eq (goType .Type) "int" }}
-	hasFlagBody = hasFlagBody || input.{{ .Name | pascal }} != 0
+	hasFlagBody = hasFlagBody || input.{{ goInputFieldName . }} != 0
 {{- else if eq (goType .Type) "float64" }}
-	hasFlagBody = hasFlagBody || input.{{ .Name | pascal }} != 0
+	hasFlagBody = hasFlagBody || input.{{ goInputFieldName . }} != 0
 {{- else if eq (goType .Type) "bool" }}
-	hasFlagBody = hasFlagBody || input.{{ .Name | pascal }}
+	hasFlagBody = hasFlagBody || input.{{ goInputFieldName . }}
 {{- end }}
 {{- end }}
 
 	switch {
-	case hasData && hasFile:
-		return nil, fmt.Errorf("--data and --file are mutually exclusive")
-	case hasFlagBody && (hasData || hasFile):
-		return nil, fmt.Errorf("body input flags cannot be combined with --data or --file")
+	case hasFlagBody && hasData:
+		return nil, fmt.Errorf("body input flags cannot be combined with --data")
 	case hasData:
+		if !json.Valid([]byte(input.BodyData)) {
+			return nil, fmt.Errorf("--data invalid JSON format")
+		}
 		return []byte(input.BodyData), nil
-	case hasFile:
-		return os.ReadFile(input.BodyFile)
 {{- if eq .BodyMode "simple-json" }}
 	case hasFlagBody:
 {{- range .BodyFields }}
 {{- if .Required }}
 {{- if eq (goType .Type) "string" }}
-		if strings.TrimSpace(input.{{ .Name | pascal }}) == "" {
+		if strings.TrimSpace(input.{{ goInputFieldName . }}) == "" {
 			return nil, fmt.Errorf("missing required body field: {{ .Name }}")
 		}
 {{- else if eq (goType .Type) "int" }}
-		if input.{{ .Name | pascal }} == 0 {
+		if input.{{ goInputFieldName . }} == 0 {
 			return nil, fmt.Errorf("missing required body field: {{ .Name }}")
 		}
 {{- else if eq (goType .Type) "float64" }}
-		if input.{{ .Name | pascal }} == 0 {
+		if input.{{ goInputFieldName . }} == 0 {
 			return nil, fmt.Errorf("missing required body field: {{ .Name }}")
 		}
 {{- else if eq (goType .Type) "bool" }}
-		if !input.{{ .Name | pascal }} {
+		if !input.{{ goInputFieldName . }} {
 			return nil, fmt.Errorf("missing required body field: {{ .Name }}")
 		}
 {{- end }}
@@ -206,32 +235,32 @@ func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input
 		var parts []string
 {{- range .BodyFields }}
 {{- if eq (goType .Type) "string" }}
-		if strings.TrimSpace(input.{{ .Name | pascal }}) != "" {
-			value, err := json.Marshal(input.{{ .Name | pascal }})
+		if strings.TrimSpace(input.{{ goInputFieldName . }}) != "" {
+			value, err := json.Marshal(input.{{ goInputFieldName . }})
 			if err != nil {
 				return nil, fmt.Errorf("encode body field {{ .Name }}: %w", err)
 			}
 			parts = append(parts, {{ printf "%q" (printf "\"%s\":" .Name) }}+string(value))
 		}
 {{- else if eq (goType .Type) "int" }}
-		if input.{{ .Name | pascal }} != 0 {
-			value, err := json.Marshal(input.{{ .Name | pascal }})
+		if input.{{ goInputFieldName . }} != 0 {
+			value, err := json.Marshal(input.{{ goInputFieldName . }})
 			if err != nil {
 				return nil, fmt.Errorf("encode body field {{ .Name }}: %w", err)
 			}
 			parts = append(parts, {{ printf "%q" (printf "\"%s\":" .Name) }}+string(value))
 		}
 {{- else if eq (goType .Type) "float64" }}
-		if input.{{ .Name | pascal }} != 0 {
-			value, err := json.Marshal(input.{{ .Name | pascal }})
+		if input.{{ goInputFieldName . }} != 0 {
+			value, err := json.Marshal(input.{{ goInputFieldName . }})
 			if err != nil {
 				return nil, fmt.Errorf("encode body field {{ .Name }}: %w", err)
 			}
 			parts = append(parts, {{ printf "%q" (printf "\"%s\":" .Name) }}+string(value))
 		}
 {{- else if eq (goType .Type) "bool" }}
-		if input.{{ .Name | pascal }} {
-			value, err := json.Marshal(input.{{ .Name | pascal }})
+		if input.{{ goInputFieldName . }} {
+			value, err := json.Marshal(input.{{ goInputFieldName . }})
 			if err != nil {
 				return nil, fmt.Errorf("encode body field {{ .Name }}: %w", err)
 			}
@@ -243,6 +272,11 @@ func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input
 {{- end }}
 	default:
 {{- if .BodyRequired }}
+{{- if .FileFields }}
+		if allowEmpty {
+			return nil, nil
+		}
+{{- end }}
 		return nil, fmt.Errorf("request body is required")
 {{- else }}
 		return nil, nil
@@ -251,6 +285,70 @@ func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input
 {{- end }}
 }
 {{ end -}}
+
+{{- if groupHasFileFields .Group }}
+func buildMultipartBody(fileSpec, defaultField, data string) ([]byte, string, error) {
+	fieldName := strings.TrimSpace(defaultField)
+	filePath := strings.TrimSpace(fileSpec)
+	if explicitField, explicitPath, ok := strings.Cut(fileSpec, "="); ok && strings.TrimSpace(explicitField) != "" {
+		fieldName = strings.TrimSpace(explicitField)
+		filePath = strings.TrimSpace(explicitPath)
+	}
+	if fieldName == "" {
+		return nil, "", fmt.Errorf("--file requires field=path when the operation declares multiple file fields")
+	}
+	if filePath == "" {
+		return nil, "", fmt.Errorf("--file path is empty")
+	}
+
+	var file io.Reader
+	fileName := filepath.Base(filePath)
+	if filePath == "-" {
+		file = os.Stdin
+		fileName = "stdin"
+	} else {
+		opened, err := os.Open(filePath)
+		if err != nil {
+			return nil, "", fmt.Errorf("open upload file %q: %w", filePath, err)
+		}
+		defer opened.Close()
+		file = opened
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile(fieldName, fileName)
+	if err != nil {
+		return nil, "", fmt.Errorf("create multipart file field %q: %w", fieldName, err)
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		return nil, "", fmt.Errorf("read upload file %q: %w", filePath, err)
+	}
+	if strings.TrimSpace(data) != "" {
+		var fields map[string]any
+		if err := json.Unmarshal([]byte(data), &fields); err != nil {
+			return nil, "", fmt.Errorf("--data must be a JSON object when used with --file: %w", err)
+		}
+		for name, value := range fields {
+			encoded, err := json.Marshal(value)
+			if err != nil {
+				return nil, "", fmt.Errorf("encode multipart field %q: %w", name, err)
+			}
+			text := string(encoded)
+			if value, ok := value.(string); ok {
+				text = value
+			}
+			if err := writer.WriteField(name, text); err != nil {
+				return nil, "", fmt.Errorf("write multipart field %q: %w", name, err)
+			}
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, "", fmt.Errorf("close multipart body: %w", err)
+	}
+	return body.Bytes(), writer.FormDataContentType(), nil
+}
+{{- end }}
 
 {{- if appUsesToken .App }}
 func applyAuthToken(req *http.Request) {

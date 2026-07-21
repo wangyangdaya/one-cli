@@ -11,5 +11,5 @@
 | Skill | 命令数 | 说明 |
 | --- | ---: | --- |
 {{- range .App.Groups }}
-| `{{ if eq $.Target "rust" }}{{ rustModuleName . }}{{ else }}{{ groupPackageName . }}{{ end }}` | {{ len .Operations }} | [`SKILL.md`]({{ if eq $.Target "rust" }}{{ rustModuleName . }}{{ else }}{{ groupPackageName . }}{{ end }}/SKILL.md) |
+| `{{ skillName . }}` | {{ len .Operations }} | [`SKILL.md`]({{ skillName . }}/SKILL.md) |
 {{- end }}

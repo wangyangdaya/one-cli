@@ -27,5 +27,5 @@ metadata:
 | Skill | 命令数 | 说明 |
 | --- | ---: | --- |
 {{- range .App.Groups }}
-| `{{ if eq $.Target "rust" }}{{ rustModuleName . }}{{ else }}{{ groupPackageName . }}{{ end }}` | {{ len .Operations }} | [`{{ if eq $.Target "rust" }}{{ rustModuleName . }}{{ else }}{{ groupPackageName . }}{{ end }}/SKILL.md`]({{ if eq $.Target "rust" }}{{ rustModuleName . }}{{ else }}{{ groupPackageName . }}{{ end }}/SKILL.md) |
+| `{{ skillName . }}` | {{ len .Operations }} | [`{{ skillName . }}/SKILL.md`]({{ skillName . }}/SKILL.md) |
 {{- end }}

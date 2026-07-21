@@ -120,7 +120,7 @@ func TestGenerateFromMCPConfig(t *testing.T) {
 	text := string(content)
 	for _, want := range []string{
 		`cmd.Flags().StringVar(&bodyQuery, "query", "", "JSON body field: query")`,
-		`Body input: --query, --data, or --file`,
+		`Body input: --query, or --data (inline JSON, @file, or - for stdin)`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("generated command missing %q", want)

@@ -7,9 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-{{- if groupHasBodyInput .Group }}
-	"os"
-{{- end }}
 	"strings"
 
 	"{{ .Module }}/internal/config"
@@ -19,15 +16,14 @@ import (
 type {{ .CommandName | pascal }}Input struct {
 {{- range .Parameters }}
 {{- if or (eq .In "path") (eq .In "query") }}
-	{{ .Name | pascal }} {{ goType .Type }}
+	{{ goInputFieldName . }} {{ goType .Type }}
 {{- end }}
 {{- end }}
 {{- if .BodyMode }}
 	BodyData string
-	BodyFile string
 {{- end }}
 {{- range .BodyFields }}
-	{{ .Name | pascal }} {{ goType .Type }}
+	{{ goInputFieldName . }} {{ goType .Type }}
 {{- end }}
 }
 
@@ -40,35 +36,30 @@ func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input
 	return nil, nil
 {{- else }}
 	hasData := strings.TrimSpace(input.BodyData) != ""
-	hasFile := strings.TrimSpace(input.BodyFile) != ""
 	hasFlagBody := false
 {{- range .BodyFields }}
 {{- if eq (goType .Type) "string" }}
-	hasFlagBody = hasFlagBody || strings.TrimSpace(input.{{ .Name | pascal }}) != ""
+	hasFlagBody = hasFlagBody || strings.TrimSpace(input.{{ goInputFieldName . }}) != ""
 {{- else if eq (goType .Type) "int" }}
-	hasFlagBody = hasFlagBody || input.{{ .Name | pascal }} != 0
+	hasFlagBody = hasFlagBody || input.{{ goInputFieldName . }} != 0
 {{- else if eq (goType .Type) "float64" }}
-	hasFlagBody = hasFlagBody || input.{{ .Name | pascal }} != 0
+	hasFlagBody = hasFlagBody || input.{{ goInputFieldName . }} != 0
 {{- else if eq (goType .Type) "bool" }}
-	hasFlagBody = hasFlagBody || input.{{ .Name | pascal }}
+	hasFlagBody = hasFlagBody || input.{{ goInputFieldName . }}
 {{- end }}
 {{- end }}
 
 	switch {
-	case hasData && hasFile:
-		return nil, fmt.Errorf("--data and --file are mutually exclusive")
-	case hasFlagBody && (hasData || hasFile):
-		return nil, fmt.Errorf("body input flags cannot be combined with --data or --file")
+	case hasFlagBody && hasData:
+		return nil, fmt.Errorf("body input flags cannot be combined with --data")
 	case hasData:
 		return []byte(input.BodyData), nil
-	case hasFile:
-		return os.ReadFile(input.BodyFile)
 {{- if eq .BodyMode "simple-json" }}
 	case hasFlagBody:
 {{- range .BodyFields }}
 {{- if .Required }}
 {{- if eq (goType .Type) "string" }}
-		if strings.TrimSpace(input.{{ .Name | pascal }}) == "" {
+		if strings.TrimSpace(input.{{ goInputFieldName . }}) == "" {
 			return nil, fmt.Errorf("missing required body field: {{ .Name }}")
 		}
 {{- end }}
@@ -77,20 +68,20 @@ func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input
 		payload := map[string]any{}
 {{- range .BodyFields }}
 {{- if eq (goType .Type) "string" }}
-		if strings.TrimSpace(input.{{ .Name | pascal }}) != "" {
-			payload["{{ .Name }}"] = input.{{ .Name | pascal }}
+		if strings.TrimSpace(input.{{ goInputFieldName . }}) != "" {
+			payload["{{ .Name }}"] = input.{{ goInputFieldName . }}
 		}
 {{- else if eq (goType .Type) "int" }}
-		if input.{{ .Name | pascal }} != 0 {
-			payload["{{ .Name }}"] = input.{{ .Name | pascal }}
+		if input.{{ goInputFieldName . }} != 0 {
+			payload["{{ .Name }}"] = input.{{ goInputFieldName . }}
 		}
 {{- else if eq (goType .Type) "float64" }}
-		if input.{{ .Name | pascal }} != 0 {
-			payload["{{ .Name }}"] = input.{{ .Name | pascal }}
+		if input.{{ goInputFieldName . }} != 0 {
+			payload["{{ .Name }}"] = input.{{ goInputFieldName . }}
 		}
 {{- else if eq (goType .Type) "bool" }}
-		if input.{{ .Name | pascal }} {
-			payload["{{ .Name }}"] = input.{{ .Name | pascal }}
+		if input.{{ goInputFieldName . }} {
+			payload["{{ .Name }}"] = input.{{ goInputFieldName . }}
 		}
 {{- end }}
 {{- end }}

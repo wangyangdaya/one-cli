@@ -47,16 +47,25 @@ pub struct {{ rustTypeName .CommandName }}Args {
 {{- if .BodyMode }}
     #[arg(long = "data")]
     pub body_data: Option<String>,
+{{- end }}
+{{- if .FileFields }}
     #[arg(long = "file")]
-    pub body_file: Option<String>,
+    pub upload_file: Option<String>,
 {{- end }}
 {{- range .BodyFields }}
+{{- if rustBodyFieldHasFlag . }}
     #[arg(long = "{{ rustBodyFlagName . }}")]
     pub {{ rustBodyFieldName . }}: Option<{{ rustType .Type }}>,
+{{- end }}
 {{- end }}
 }
 
 async fn run_{{ rustFieldName .CommandName }}(args: {{ rustTypeName .CommandName }}Args) -> AppResult<()> {
+{{- if .FileFields }}
+    if args.body_data.as_deref() == Some("-") && args.upload_file.as_deref() == Some("-") {
+        return Err("--data and --file cannot both read from stdin".to_string());
+    }
+{{- end }}
 {{- if groupUsesMCPStdio $.Group }}
     let arguments = build_{{ rustFieldName .CommandName }}_body(&args)?.unwrap_or_else(|| Value::Object(Map::new()));
     let response = client::call_mcp_stdio_tool(
@@ -120,31 +129,31 @@ async fn run_{{ rustFieldName .CommandName }}(args: {{ rustTypeName .CommandName
 {{- else }}
     let headers = Vec::new();
 {{- end }}
-    let body = build_{{ rustFieldName .CommandName }}_http_body(&args)?;
+    let body = build_{{ rustFieldName .CommandName }}_http_body(&args{{ if .FileFields }}, args.upload_file.is_some(){{ end }})?;
+{{- if .FileFields }}
+    let response = if let Some(file) = &args.upload_file {
+        client::request_multipart("{{ .Method }}", &path, query, headers, file, "{{ defaultFileField . }}", body).await?
+    } else {
+        client::request_json_text("{{ .Method }}", &path, query, headers, body).await?
+    };
+{{- else }}
     let response = client::request_json_text("{{ .Method }}", &path, query, headers, body).await?;
+{{- end }}
 {{- end }}
     output::print_output("{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}", &response)
 }
 
 {{- if not (or (groupUsesMCPStdio $.Group) (groupUsesMCPHTTP $.Group)) }}
-fn build_{{ rustFieldName .CommandName }}_http_body(args: &{{ rustTypeName .CommandName }}Args) -> AppResult<Option<String>> {
+fn build_{{ rustFieldName .CommandName }}_http_body(args: &{{ rustTypeName .CommandName }}Args{{ if .FileFields }}, allow_empty: bool{{ end }}) -> AppResult<Option<String>> {
+{{- if .FileFields }}
+    let _ = allow_empty;
+{{- end }}
 {{- if not .BodyMode }}
     let _ = args;
     Ok(None)
 {{- else }}
-    let has_data = args.body_data.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false);
-    let has_file = args.body_file.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false);
-    if has_data && has_file {
-        return Err("--data and --file are mutually exclusive".to_string());
-    }
-
     if let Some(data) = &args.body_data {
-        let parsed = serde_json::from_str::<Value>(data).map_err(|err| err.to_string())?;
-        let _ = parsed;
-        return Ok(Some(data.trim().to_string()));
-    }
-    if let Some(path) = &args.body_file {
-        let content = std::fs::read_to_string(path).map_err(|err| err.to_string())?;
+        let content = client::resolve_input(data)?;
         let parsed = serde_json::from_str::<Value>(&content).map_err(|err| err.to_string())?;
         let _ = parsed;
         return Ok(Some(content.trim().to_string()));
@@ -154,19 +163,23 @@ fn build_{{ rustFieldName .CommandName }}_http_body(args: &{{ rustTypeName .Comm
     let mut parts: Vec<String> = Vec::new();
     let mut has_flag_body = false;
 {{- range rustBodyFieldsForSigner $.App .BodyFields }}
+{{- if rustBodyFieldHasFlag . }}
     if let Some(value) = &args.{{ rustBodyFieldName . }} {
         let value = serde_json::to_string(value).map_err(|err| err.to_string())?;
         parts.push(format!("\"{{ .Name }}\":{value}"));
         has_flag_body = true;
     }
 {{- end }}
+{{- end }}
 {{- if eq .BodyMode "simple-json" }}
     if has_flag_body {
 {{- range .BodyFields }}
+{{- if rustBodyFieldHasFlag . }}
 {{- if .Required }}
         if args.{{ rustBodyFieldName . }}.is_none() {
             return Err("missing required body field: {{ .Name }}".to_string());
         }
+{{- end }}
 {{- end }}
 {{- end }}
         return Ok(Some("{".to_string() + &parts.join(",") + "}"));
@@ -178,6 +191,11 @@ fn build_{{ rustFieldName .CommandName }}_http_body(args: &{{ rustTypeName .Comm
 {{- end }}
 {{- end }}
 {{- if .BodyRequired }}
+{{- if .FileFields }}
+    if allow_empty {
+        return Ok(None);
+    }
+{{- end }}
     Err("request body is required".to_string())
 {{- else }}
     Ok(None)
@@ -192,18 +210,8 @@ fn build_{{ rustFieldName .CommandName }}_body(args: &{{ rustTypeName .CommandNa
     let _ = args;
     Ok(None)
 {{- else }}
-    let has_data = args.body_data.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false);
-    let has_file = args.body_file.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false);
-    if has_data && has_file {
-        return Err("--data and --file are mutually exclusive".to_string());
-    }
-
     if let Some(data) = &args.body_data {
-        let parsed = serde_json::from_str::<Value>(data).map_err(|err| err.to_string())?;
-        return Ok(Some(parsed));
-    }
-    if let Some(path) = &args.body_file {
-        let content = std::fs::read_to_string(path).map_err(|err| err.to_string())?;
+        let content = client::resolve_input(data)?;
         let parsed = serde_json::from_str::<Value>(&content).map_err(|err| err.to_string())?;
         return Ok(Some(parsed));
     }
@@ -212,18 +220,22 @@ fn build_{{ rustFieldName .CommandName }}_body(args: &{{ rustTypeName .CommandNa
     let mut payload = Map::new();
     let mut has_flag_body = false;
 {{- range .BodyFields }}
+{{- if rustBodyFieldHasFlag . }}
     if let Some(value) = &args.{{ rustBodyFieldName . }} {
         payload.insert("{{ .Name }}".to_string(), serde_json::json!(value));
         has_flag_body = true;
     }
 {{- end }}
+{{- end }}
 {{- if eq .BodyMode "simple-json" }}
     if has_flag_body {
 {{- range .BodyFields }}
+{{- if rustBodyFieldHasFlag . }}
 {{- if .Required }}
         if args.{{ rustBodyFieldName . }}.is_none() {
             return Err("missing required body field: {{ .Name }}".to_string());
         }
+{{- end }}
 {{- end }}
 {{- end }}
         return Ok(Some(Value::Object(payload)));

@@ -91,8 +91,10 @@ type Operation struct {
 	BodyMode         string
 	BodyRequired     bool
 	BodyFields       []BodyField
+	FileFields       []BodyField
 	BodySchemaFields []BodyField
 	Parameters       []Parameter
+	Responses        []Response
 }
 
 type Parameter struct {
@@ -113,4 +115,26 @@ type BodyField struct {
 	Required        bool
 	RequiredUnknown bool
 	Type            string
+	Format          string
+}
+
+type Response struct {
+	Status      string
+	ContentType string
+	Description string
+	Schemas     []Schema
+}
+
+type Schema struct {
+	Name        string
+	Description string
+	Type        string
+	Fields      []SchemaField
+}
+
+type SchemaField struct {
+	Name        string
+	Description string
+	Required    bool
+	Type        string
 }

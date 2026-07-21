@@ -33,8 +33,7 @@ func writeRustProject(outputDir, module string, app model.App, skillLang string)
 			Template: "rust/group_command.rs.tmpl",
 			Data:     templateData{Module: module, Target: "rust", SkillLang: skillLang, App: app, Group: group},
 		})
-		groupDir := rustModuleName(group)
-		files = append(files, skillPackageFiles(groupDir, templateData{Module: module, Target: "rust", SkillLang: skillLang, App: app, Group: group})...)
+		files = append(files, skillPackageFiles(skillName(group), templateData{Module: module, Target: "rust", SkillLang: skillLang, App: app, Group: group})...)
 	}
 
 	return writeTemplates(outputDir, files)

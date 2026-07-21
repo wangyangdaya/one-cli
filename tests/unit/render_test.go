@@ -101,22 +101,12 @@ func TestRenderProject(t *testing.T) {
 	if !strings.Contains(skillText, "assets/demo-request.json") {
 		t.Fatalf("generated skill markdown missing demo request reference:\n%s", skillText)
 	}
-	for _, want := range []string{
-		"## Global Request Headers",
-		`one leave <command> -H "ACCESS-STATUS=inner"`,
-		`one leave <command> --header "ACCESS-STATUS=inner"`,
-		`one leave <command> --header "Name: Value"`,
-	} {
-		if !strings.Contains(skillText, want) {
-			t.Fatalf("generated skill markdown missing global header usage %q:\n%s", want, skillText)
-		}
-	}
 	for _, unwanted := range []string{
-		`one -H "ACCESS-STATUS=inner" leave <command>`,
-		`one --header "ACCESS-STATUS=inner" leave <command>`,
+		"## Global Request Headers",
+		"ACCESS-STATUS",
 	} {
 		if strings.Contains(skillText, unwanted) {
-			t.Fatalf("generated skill markdown should recommend header flags after the leaf command, found %q:\n%s", unwanted, skillText)
+			t.Fatalf("generated skill markdown should omit unused header guidance %q:\n%s", unwanted, skillText)
 		}
 	}
 	readmeContent, err := os.ReadFile(filepath.Join(dir, "README.md"))
@@ -175,6 +165,7 @@ func TestApplyHeadersAcceptsEqualsSyntax(t *testing.T) {
 		t.Fatalf("ACCESS-STATUS = %q, want inner", got)
 	}
 }
+
 `
 	if err := os.WriteFile(headerTestPath, []byte(headerTest), 0o644); err != nil {
 		t.Fatalf("write generated header test: %v", err)
@@ -325,6 +316,134 @@ func TestApplyHeadersAcceptsEqualsSyntax(t *testing.T) {
 	}
 	if got := string(out); !strings.Contains(got, "name: leave") || !strings.Contains(got, "Manual business edit.") {
 		t.Fatalf("nested generated skills read output missing SKILL.md content:\n%s", got)
+	}
+}
+
+func TestRenderGoProjectCompilesBodyAndFileNameCollisions(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name: "collision-cli",
+		Groups: []model.Group{{
+			Name: "imports",
+			Operations: []model.Operation{{
+				CommandName:  "create",
+				Method:       "POST",
+				Path:         "/imports",
+				BodyMode:     model.BodyModeSimpleJSON,
+				BodyRequired: true,
+				Parameters: []model.Parameter{
+					{Name: "data", In: "query", Type: "string"},
+					{Name: "user.id", In: "query", Type: "string"},
+					{Name: "user-id", In: "query", Type: "string"},
+				},
+				BodyFields: []model.BodyField{
+					{Name: "data", Type: "string"},
+					{Name: "description", Type: "string"},
+				},
+				FileFields: []model.BodyField{{Name: "file", Type: "string", Format: "binary"}},
+			}},
+		}},
+	}
+	if err := render.Project(dir, "github.com/acme/collision-cli", app); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+
+	command, err := os.ReadFile(filepath.Join(dir, "internal", "imports", "command.go"))
+	if err != nil {
+		t.Fatalf("read command: %v", err)
+	}
+	text := string(command)
+	if strings.Count(text, `"data"`) == 0 || strings.Contains(text, `JSON body field: data`) {
+		t.Fatalf("body field data should fall back to --data without duplicate registration:\n%s", text)
+	}
+	if !strings.Contains(text, `StringVar(&uploadFile, "file", "", "File upload`) {
+		t.Fatalf("binary body field should register a real --file upload flag:\n%s", text)
+	}
+	service, err := os.ReadFile(filepath.Join(dir, "internal", "imports", "service.go"))
+	if err != nil {
+		t.Fatalf("read service: %v", err)
+	}
+	if !strings.Contains(string(service), "multipart.NewWriter") {
+		t.Fatalf("binary body field should generate multipart request construction:\n%s", service)
+	}
+
+	cmd := exec.Command("go", "test", "./...")
+	cmd.Dir = dir
+	cmd.Env = append(cmd.Environ(), "GOCACHE="+filepath.Join(t.TempDir(), "gocache"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated collision project should compile: %v\n%s", err, out)
+	}
+}
+
+func TestGeneratedSkillDocumentsResponseSchemas(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name: "analysis-cli",
+		Groups: []model.Group{
+			{
+				Name: "chery-global",
+				Operations: []model.Operation{
+					{
+						CommandName: "quality",
+						Method:      "GET",
+						Path:        "/cheryGlobal/aiAgent/qulity",
+						Summary:     "质量",
+						Responses: []model.Response{
+							{
+								Status:      "200",
+								ContentType: "*/*",
+								Description: "OK",
+								Schemas: []model.Schema{
+									{
+										Name: "ResultAiQualityVO",
+										Type: "object",
+										Fields: []model.SchemaField{
+											{Name: "code", Type: "integer"},
+											{Name: "data", Type: "AiQualityVO"},
+										},
+									},
+									{
+										Name:        "AiQualityVO",
+										Description: "质量",
+										Type:        "object",
+										Fields: []model.SchemaField{
+											{Name: "qualityPerformanceVOS", Type: "QualityPerformanceVO[]", Description: "价值链信息"},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := render.Project(dir, "github.com/acme/analysis-cli", app, "go", "zh"); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "chery-global", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated skill: %v", err)
+	}
+	skillText := string(skillContent)
+	for _, want := range []string{
+		"name: chery-global",
+		"analysis-cli skills read chery-global",
+		"状态码：`200`",
+		"内容类型：`*/*`",
+		"`ResultAiQualityVO`",
+		"| `data` | `AiQualityVO` |",
+		"`AiQualityVO` — 质量",
+		"| `qualityPerformanceVOS` | `QualityPerformanceVO[]` | 价值链信息 |",
+	} {
+		if !strings.Contains(skillText, want) {
+			t.Fatalf("generated skill missing response documentation %q:\n%s", want, skillText)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "skills", "chery_global")); !os.IsNotExist(err) {
+		t.Fatalf("legacy underscore skill directory should not exist, got err: %v", err)
 	}
 }
 
@@ -670,8 +789,8 @@ func TestRenderRustDisambiguatesIdentifiers(t *testing.T) {
 		"name: one-skills",
 		"Skills Router",
 		"one skills list",
-		"| `default` | 1 | [`default/SKILL.md`](default/SKILL.md) |",
-		"| `default_2` | 1 | [`default_2/SKILL.md`](default_2/SKILL.md) |",
+		"| `sps` | 1 | [`sps/SKILL.md`](sps/SKILL.md) |",
+		"| `default-2` | 1 | [`default-2/SKILL.md`](default-2/SKILL.md) |",
 	} {
 		if !strings.Contains(skillsRouterText, want) {
 			t.Fatalf("generated Rust skills router missing %q:\n%s", want, skillsRouterText)
@@ -706,6 +825,58 @@ func TestRenderRustDisambiguatesIdentifiers(t *testing.T) {
 	} {
 		if !strings.Contains(commandText, want) {
 			t.Fatalf("generated command missing %q:\n%s", want, commandText)
+		}
+	}
+}
+
+func TestRenderRustUsesDataSourcesAndReservesFileForUploads(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{Name: "assets", Groups: []model.Group{{
+		Name: "assets", Operations: []model.Operation{{
+			CommandName: "create",
+			Method:      "POST",
+			Path:        "/assets",
+			BodyMode:    model.BodyModeSimpleJSON,
+			BodyFields: []model.BodyField{
+				{Name: "data", Type: "string"},
+				{Name: "description", Type: "string"},
+			},
+			FileFields: []model.BodyField{{Name: "asset", Type: "string", Format: "binary"}},
+		}},
+	}}}
+
+	if err := render.Project(dir, "github.com/acme/assets-cli", app, "rust"); err != nil {
+		t.Fatalf("render rust: %v", err)
+	}
+	command, err := os.ReadFile(filepath.Join(dir, "src", "commands", "assets.rs"))
+	if err != nil {
+		t.Fatalf("read command: %v", err)
+	}
+	text := string(command)
+	for _, want := range []string{
+		`#[arg(long = "data")]`,
+		`#[arg(long = "file")]`,
+		`client::resolve_input(data)?`,
+		`client::request_multipart(`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated Rust command missing %q:\n%s", want, text)
+		}
+	}
+	for _, notWant := range []string{"body_file", `#[arg(long = "body-data")]`} {
+		if strings.Contains(text, notWant) {
+			t.Fatalf("generated Rust command contains legacy/colliding %q:\n%s", notWant, text)
+		}
+	}
+
+	client, err := os.ReadFile(filepath.Join(dir, "src", "client.rs"))
+	if err != nil {
+		t.Fatalf("read client: %v", err)
+	}
+	clientText := string(client)
+	for _, want := range []string{"pub fn resolve_input", "pub async fn request_multipart", "reqwest::multipart"} {
+		if !strings.Contains(clientText, want) {
+			t.Fatalf("generated Rust client missing %q:\n%s", want, clientText)
 		}
 	}
 }
@@ -755,7 +926,7 @@ func TestRenderProjectSkillIncludesHeaderUsageNotes(t *testing.T) {
 						Method:      "GET",
 						Path:        "/auth/me",
 						Parameters: []model.Parameter{
-							{Name: "authorization", In: "header", Type: "string"},
+							{Name: "X-Tenant-ID", In: "header", Type: "string", Description: "Tenant identifier"},
 						},
 					},
 				},
@@ -774,17 +945,63 @@ func TestRenderProjectSkillIncludesHeaderUsageNotes(t *testing.T) {
 	skillText := string(skillContent)
 	for _, want := range []string{
 		"## Commands",
+		"## Global Request Headers",
+		`one auth <command> -H "Name: Value"`,
 		"## Command Routing",
 		"## Core Concepts",
 		"## Important Notes",
 		"## Common Workflows",
 		"### one auth me",
-		`--header "authorization: <value>"`,
+		`--header "X-Tenant-ID: <value>"`,
 		"**Parameters:**",
 		"<!-- MANUAL:",
 	} {
 		if !strings.Contains(skillText, want) {
 			t.Fatalf("generated SKILL.md missing %q:\n%s", want, skillText)
+		}
+	}
+	for _, unwanted := range []string{
+		"ACCESS-STATUS",
+		`one auth <command> --header`,
+	} {
+		if strings.Contains(skillText, unwanted) {
+			t.Fatalf("generated SKILL.md should omit redundant header example %q:\n%s", unwanted, skillText)
+		}
+	}
+}
+
+func TestRenderProjectSkillOmitsTokenAuthorizationHeaderGuidance(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name: "one",
+		Groups: []model.Group{
+			{
+				Name: "auth",
+				Operations: []model.Operation{
+					{
+						CommandName: "me",
+						Method:      "GET",
+						Path:        "/auth/me",
+						Parameters: []model.Parameter{
+							{Name: "Authorization", In: "header", Type: "string"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := render.Project(dir, "github.com/acme/one-cli", app); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "auth", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated skill markdown: %v", err)
+	}
+	skillText := string(skillContent)
+	for _, unwanted := range []string{"## Global Request Headers", `--header "Authorization: <value>"`} {
+		if strings.Contains(skillText, unwanted) {
+			t.Fatalf("generated SKILL.md should rely on OPENCLI_AUTH_TOKEN instead of documenting %q:\n%s", unwanted, skillText)
 		}
 	}
 }
@@ -818,7 +1035,7 @@ func TestRenderProjectSkillDocumentsFileOrDataBodyFields(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 
-	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "te_mm_mri_current", "SKILL.md"))
+	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "te-mm-mri-current", "SKILL.md"))
 	if err != nil {
 		t.Fatalf("read generated skill markdown: %v", err)
 	}
@@ -828,14 +1045,14 @@ func TestRenderProjectSkillDocumentsFileOrDataBodyFields(t *testing.T) {
 		"| `deliveryRecId` | no | 目的地ID (integer) |",
 		"| `deliveryRecNo` | no | 目的地编号 (string) |",
 		`--data '{"deliveryRecId": 123, "deliveryRecNo": "value"}'`,
-		"--file assets/demo-request.json",
+		"--data @assets/demo-request.json",
 	} {
 		if !strings.Contains(skillText, want) {
 			t.Fatalf("generated SKILL.md missing %q:\n%s", want, skillText)
 		}
 	}
 
-	routingContent, err := os.ReadFile(filepath.Join(dir, "skills", "te_mm_mri_current", "references", "command-routing.md"))
+	routingContent, err := os.ReadFile(filepath.Join(dir, "skills", "te-mm-mri-current", "references", "command-routing.md"))
 	if err != nil {
 		t.Fatalf("read generated command routing: %v", err)
 	}
@@ -843,7 +1060,7 @@ func TestRenderProjectSkillDocumentsFileOrDataBodyFields(t *testing.T) {
 		t.Fatalf("generated command routing missing clear command:\n%s", routingContent)
 	}
 
-	demoContent, err := os.ReadFile(filepath.Join(dir, "skills", "te_mm_mri_current", "assets", "demo-request.json"))
+	demoContent, err := os.ReadFile(filepath.Join(dir, "skills", "te-mm-mri-current", "assets", "demo-request.json"))
 	if err != nil {
 		t.Fatalf("read generated demo request: %v", err)
 	}
@@ -885,7 +1102,7 @@ func TestRenderRustProjectSkillUsesActualCliFlagNames(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 
-	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "te_mm_mri_current", "SKILL.md"))
+	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "te-mm-mri-current", "SKILL.md"))
 	if err != nil {
 		t.Fatalf("read generated skill markdown: %v", err)
 	}

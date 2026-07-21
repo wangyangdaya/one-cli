@@ -62,7 +62,7 @@ func TestGeneratedSimpleJSONCommandBuildsBodyAndRejectsConflicts(t *testing.T) {
 	conflict.Dir = projectDir
 	conflict.Env = env
 	conflictOut, conflictErr := conflict.CombinedOutput()
-	if conflictErr == nil || !strings.Contains(string(conflictOut), "body input flags cannot be combined with --data or --file") {
+	if conflictErr == nil || !strings.Contains(string(conflictOut), "body input flags cannot be combined with --data") {
 		t.Fatalf("expected body conflict error, got err=%v output=%s", conflictErr, conflictOut)
 	}
 }

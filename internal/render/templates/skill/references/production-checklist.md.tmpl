@@ -18,7 +18,10 @@ This checklist turns the generated API scaffold into a business-ready skill.
 - [ ] `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }} --help` works.
 {{- end }}
 - [ ] Required parameters, body fields, and header rules in `SKILL.md` match the CLI.
-- [ ] Complex JSON input documents `--data` / `--file` shape clearly.
+- [ ] JSON body input documents `--data` consistently: inline JSON, `@file`, or `-` for stdin.
+- [ ] `--file` is documented only for operations with binary upload fields, using `[field=]path` when needed.
+- [ ] Multipart operations document which text fields belong in `--data` and which binary fields belong in `--file`.
+- [ ] `--data -` and `--file -` are not presented together; stdin can provide only one stream.
 - [ ] Authentication, environment variables, and base URL setup are accurate.
 
 ## Safety

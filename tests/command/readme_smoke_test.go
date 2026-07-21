@@ -43,7 +43,6 @@ func TestGeneratedREADMEIncludesSetupAndTraceGuidance(t *testing.T) {
 	for _, want := range []string{
 		"OPENCLI_BASE_URL",
 		"--data",
-		"--file",
 		"--trace",
 		"auth login",
 	} {
