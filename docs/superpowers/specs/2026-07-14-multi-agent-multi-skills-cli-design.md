@@ -149,6 +149,97 @@ type RuntimeConfig struct {
 
 此扩展保持现有配置兼容。
 
+### 7.1 配置和 Secret 的文件位置
+
+推荐项目采用以下布局；路径是约定而非 OpenCLI 强制要求，实际调用仍以 `--config` 参数为准：
+
+```text
+project/
+├── configs/
+│   ├── clis/
+│   │   ├── domain-a/opencli.yaml
+│   │   ├── domain-b/opencli.yaml
+│   │   └── domain-c/opencli.yaml
+│   └── teams/
+│       └── operations/agent-team.yaml
+├── generated/
+│   ├── domain-a/
+│   ├── domain-b/
+│   └── domain-c/
+└── dist/
+    └── agent-team/
+```
+
+各位置的职责如下：
+
+| 位置 | 保存内容 | 是否允许保存 Secret 值 |
+| --- | --- | --- |
+| `configs/clis/<cli>/opencli.yaml` | 单个 CLI 的环境变量名称、认证类型和生成选项 | 否 |
+| `configs/teams/<team>/agent-team.yaml` | Agent、Skills、CLI allowlist 与变量名称的绑定 | 否 |
+| `generated/<cli>/` | 单 CLI 源码、README 和原子 Skills | 否 |
+| `dist/agent-team/agents/<agent>/profile.yaml` | 组合器生成的 Agent 运行时公开声明 | 否 |
+| Agent Runtime 环境或 Secret Provider | Base URL 和 token 的真实值 | 是 |
+
+单 CLI 的源配置示例：
+
+```yaml
+# configs/clis/domain-a/opencli.yaml
+runtime:
+  base_url_env: DOMAIN_A_BASE_URL
+  auth_token_env: DOMAIN_A_TOKEN
+  default_output: json
+```
+
+Team 绑定示例：
+
+```yaml
+# configs/teams/operations/agent-team.yaml
+agents:
+  - id: domain-a-agent
+    skills:
+      - ../../../generated/domain-a/skills
+    tools:
+      - binary: domain-a-cli
+        base_url_env: DOMAIN_A_BASE_URL
+        token_env: DOMAIN_A_TOKEN
+```
+
+组合器生成的 Profile 示例：
+
+```yaml
+# dist/agent-team/agents/domain-a-agent/profile.yaml
+version: v1
+id: domain-a-agent
+tools:
+  - binary: domain-a-cli
+    env:
+      base_url: DOMAIN_A_BASE_URL
+      token: DOMAIN_A_TOKEN
+```
+
+部署时才注入真实值：
+
+```bash
+export DOMAIN_A_BASE_URL='https://domain-a.example.com'
+export DOMAIN_A_TOKEN='***'
+```
+
+本地 `.env` 只是一种部署输入，必须被 `.gitignore` 排除，并由 Agent Runtime 或启动脚本显式加载。生成 CLI 当前只读取进程环境，不自动解析 `.env`。
+
+### 7.2 生成运行时的落点
+
+实现该设计后，OpenCLI 模板根据 `model.App` 中规范化后的变量名称生成运行时代码：
+
+- Go HTTP：`internal/render/templates/go/group_service_http.go.tmpl`；
+- Go MCP HTTP：`internal/render/templates/go/group_service_mcp_http.go.tmpl`；
+- Rust：`internal/render/templates/rust/client.rs.tmpl`；
+- Skill 文档：`internal/render/templates/skill.md.tmpl` 和 `skill_zh.md.tmpl`；
+- README：Go/Rust 对应的 `readme.md.tmpl`。
+
+在生成项目中，Go 模板落到各命令组的 `internal/<group>/service.go`，Rust 模板落到 `src/client.rs`。这些生成文件负责按变量名称读取进程环境，但不包含真实值。
+
+当前代码尚未实现自定义变量名称：`internal/configgen/config.go` 的 `RuntimeConfig` 只有 `auth_header` 和 `default_output`，上述运行时模板仍硬编码 `OPENCLI_BASE_URL` 和 `OPENCLI_AUTH_TOKEN`。实施时应先完成此扩展，再实现 Team Bundle 组合。
+
 ## 8. Agent Team 配置模型
 
 ```yaml

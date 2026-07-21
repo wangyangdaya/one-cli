@@ -186,6 +186,67 @@ runtime:
 - 未配置新字段的单 CLI 项目继续使用 `OPENCLI_BASE_URL` 和 `OPENCLI_AUTH_TOKEN`；
 - 同一 Agent 下不同 CLI 复用同一 token 变量时给出警告；跨安全域复用时应视为配置错误。
 
+### 7.1 放在哪个文件
+
+推荐把“变量名称”“Agent 与 CLI 的绑定”“生成后的运行时声明”“变量真实值”分开保存：
+
+```text
+project/
+├── configs/
+│   ├── clis/
+│   │   ├── domain-a/opencli.yaml       # CLI A 的变量名称
+│   │   ├── domain-b/opencli.yaml       # CLI B 的变量名称
+│   │   └── domain-c/opencli.yaml       # CLI C 的变量名称
+│   └── teams/
+│       └── operations/agent-team.yaml  # Agent、Skills、CLI 及变量名称的绑定
+├── generated/
+│   ├── domain-a/                       # opencli generate 输出
+│   ├── domain-b/
+│   └── domain-c/
+└── dist/
+    └── agent-team/                     # opencli compose 输出
+```
+
+每个 CLI 的 `opencli.yaml` 是变量名称的源配置：
+
+```yaml
+runtime:
+  base_url_env: DOMAIN_A_BASE_URL
+  auth_token_env: DOMAIN_A_TOKEN
+```
+
+`agent-team.yaml` 不保存值，只声明哪个 Agent 使用哪个 CLI，以及运行时需要给该 Agent 注入哪些变量：
+
+```yaml
+agents:
+  - id: domain-a-agent
+    skills:
+      - ../../../generated/domain-a/skills
+    tools:
+      - binary: domain-a-cli
+        base_url_env: DOMAIN_A_BASE_URL
+        token_env: DOMAIN_A_TOKEN
+```
+
+`opencli compose` 会把这份公开声明生成到：
+
+```text
+dist/agent-team/agents/domain-a-agent/profile.yaml
+```
+
+Profile 仍然只包含变量名称。token 真值不放在 `opencli.yaml`、`agent-team.yaml`、Profile 或 Skill 中，而是在启动 Agent Runtime 时由部署环境注入：
+
+```bash
+export DOMAIN_A_BASE_URL='https://domain-a.example.com'
+export DOMAIN_A_TOKEN='***'
+```
+
+生产环境应使用 Kubernetes Secret、容器平台 Secret 或同类凭据系统。用于本地调试的 `.env` 必须加入 `.gitignore`，而且需要由启动脚本或 Agent Runtime 显式加载；生成 CLI 本身不默认读取 `.env` 文件。
+
+### 7.2 当前实现状态
+
+上述 `base_url_env` 和 `auth_token_env` 是本方案需要新增的能力。当前仓库的 `internal/configgen/config.go` 尚无这两个字段，Go/Rust 生成模板仍直接读取 `OPENCLI_BASE_URL` 和 `OPENCLI_AUTH_TOKEN`。因此在完成“独立 CLI 配置”阶段之前，三个 CLI 只能通过进程级环境隔离来复用这两个固定变量名。
+
 ## 8. 组合输出
 
 ```text
