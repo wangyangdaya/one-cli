@@ -1,0 +1,185 @@
+package config
+
+import (
+	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/base64"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+const hasSealedRuntimeKey = {{ if and .RuntimeBundle .RuntimeBundle.HasSecret }}true{{ else }}false{{ end }}
+
+var sealedRuntimeKeyShareA = [32]byte{ {{ if and .RuntimeBundle .RuntimeBundle.HasSecret }}{{ range .RuntimeBundle.KeyShareA }}{{ . }}, {{ end }}{{ end }} }
+var sealedRuntimeKeyShareB = [32]byte{ {{ if and .RuntimeBundle .RuntimeBundle.HasSecret }}{{ range .RuntimeBundle.KeyShareB }}{{ . }}, {{ end }}{{ end }} }
+
+type runtimeFile struct {
+	Version string       `yaml:"version"`
+	BaseURL string       `yaml:"base_url,omitempty"`
+	Auth    *runtimeAuth `yaml:"auth,omitempty"`
+}
+
+type runtimeAuth struct {
+	Type           string `yaml:"type"`
+	Header         string `yaml:"header,omitempty"`
+	EncryptedValue string `yaml:"encrypted_value"`
+}
+
+func ResolveBaseURL(appName, fallback string) (string, error) {
+	if value := strings.TrimSpace(os.Getenv("OPENCLI_BASE_URL")); value != "" {
+		return value, nil
+	}
+	config, _, err := loadRuntimeFile(appName)
+	if err != nil {
+		return "", err
+	}
+	if config != nil {
+		if value := strings.TrimSpace(config.BaseURL); value != "" {
+			return value, nil
+		}
+	}
+	if value := strings.TrimSpace(fallback); value != "" {
+		return value, nil
+	}
+	return "", fmt.Errorf("missing OPENCLI_BASE_URL and runtime base_url")
+}
+
+func ResolveCredential(appName, authMode, defaultHeader string) (string, string, error) {
+	envName := "OPENCLI_AUTH_TOKEN"
+	if authMode == "api_key" {
+		envName = "OPENCLI_API_KEY"
+	}
+	envValue := strings.TrimSpace(os.Getenv(envName))
+	if envValue != "" && authMode != "api_key" {
+		return defaultHeader, envValue, nil
+	}
+	config, path, err := loadRuntimeFile(appName)
+	if err != nil {
+		return "", "", err
+	}
+	if config == nil || config.Auth == nil {
+		if envValue != "" {
+			return defaultHeader, envValue, nil
+		}
+		return defaultHeader, "", nil
+	}
+	expectedType := authMode
+	if authMode == "token" || authMode == "" {
+		expectedType = "bearer"
+	}
+	if strings.TrimSpace(config.Auth.Type) != expectedType {
+		return "", "", fmt.Errorf("runtime auth type %q is incompatible with generated auth mode %q", config.Auth.Type, authMode)
+	}
+	header := strings.TrimSpace(config.Auth.Header)
+	aadHeader := header
+	if expectedType == "bearer" {
+		header = "Authorization"
+	} else if header == "" {
+		header = defaultHeader
+		aadHeader = header
+	}
+	if envValue != "" {
+		return header, envValue, nil
+	}
+	if strings.TrimSpace(config.Auth.EncryptedValue) == "" {
+		return header, "", nil
+	}
+	secret, err := decryptRuntimeValue(config.Auth.EncryptedValue, expectedType, aadHeader)
+	if err != nil {
+		return "", "", fmt.Errorf("decrypt runtime credential from %s: %w", path, err)
+	}
+	return header, secret, nil
+}
+
+func loadRuntimeFile(appName string) (*runtimeFile, string, error) {
+	if explicit := strings.TrimSpace(os.Getenv("OPENCLI_CONFIG")); explicit != "" {
+		config, err := readRuntimeFile(explicit)
+		if err != nil {
+			return nil, explicit, err
+		}
+		return config, explicit, nil
+	}
+
+	var candidates []string
+	if executable, err := os.Executable(); err == nil {
+		if resolved, resolveErr := filepath.EvalSymlinks(executable); resolveErr == nil {
+			executable = resolved
+		}
+		candidates = append(candidates, filepath.Clean(filepath.Join(filepath.Dir(executable), "..", "config", "runtime.yaml")))
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(cwd, "config", "runtime.yaml"))
+	}
+	if root := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); root != "" {
+		candidates = append(candidates, filepath.Join(root, appName, "config.yaml"))
+	} else if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, filepath.Join(home, ".config", appName, "config.yaml"))
+	}
+	for _, path := range candidates {
+		config, err := readRuntimeFile(path)
+		if err == nil {
+			return config, path, nil
+		}
+		if !os.IsNotExist(err) {
+			return nil, path, err
+		}
+	}
+	return nil, "", nil
+}
+
+func readRuntimeFile(path string) (*runtimeFile, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var config runtimeFile
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&config); err != nil {
+		return nil, fmt.Errorf("parse runtime config %s: %w", path, err)
+	}
+	if strings.TrimSpace(config.Version) != "v1" {
+		return nil, fmt.Errorf("runtime config %s: version must be v1", path)
+	}
+	return &config, nil
+}
+
+func decryptRuntimeValue(envelope, authType, header string) (string, error) {
+	if !hasSealedRuntimeKey {
+		return "", fmt.Errorf("generated CLI has no sealing key")
+	}
+	const prefix = "ENC[v1:"
+	if !strings.HasPrefix(envelope, prefix) || !strings.HasSuffix(envelope, "]") {
+		return "", fmt.Errorf("invalid ENC[v1] envelope")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimSuffix(strings.TrimPrefix(envelope, prefix), "]"))
+	if err != nil {
+		return "", fmt.Errorf("decode sealed credential: %w", err)
+	}
+	var key [32]byte
+	for i := range key {
+		key[i] = sealedRuntimeKeyShareA[i] ^ sealedRuntimeKeyShareB[i]
+	}
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return "", fmt.Errorf("create credential cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("create credential cipher mode: %w", err)
+	}
+	if len(payload) <= gcm.NonceSize() {
+		return "", fmt.Errorf("sealed credential payload is too short")
+	}
+	aad := []byte("opencli:v1:" + authType + ":" + strings.ToLower(strings.TrimSpace(header)))
+	plaintext, err := gcm.Open(nil, payload[:gcm.NonceSize()], payload[gcm.NonceSize():], aad)
+	if err != nil {
+		return "", fmt.Errorf("authenticate sealed credential: %w", err)
+	}
+	return string(plaintext), nil
+}

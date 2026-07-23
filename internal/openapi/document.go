@@ -30,11 +30,15 @@ type Operation struct {
 }
 
 type Parameter struct {
-	Name        string
-	In          string
-	Required    bool
-	Description string
-	Type        string
+	Name           string
+	FlagName       string
+	In             string
+	Required       bool
+	Description    string
+	Type           string
+	Example        string
+	JSONSchemaName string
+	JSONFields     []BodyField
 }
 
 type RequestBody struct {
@@ -44,6 +48,7 @@ type RequestBody struct {
 	IsSimpleJSON     bool
 	JSONFields       []BodyField
 	JSONSchemaFields []BodyField
+	FormFields       []BodyField
 	FileFields       []BodyField
 }
 
@@ -54,6 +59,9 @@ type BodyField struct {
 	RequiredUnknown bool
 	Type            string
 	Format          string
+	Example         string
+	JSONSchemaName  string
+	JSONFields      []BodyField
 }
 
 type Response struct {

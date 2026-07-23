@@ -232,16 +232,134 @@ opencli generate \
 | `--module` | ✅ | Go target 下是 Go module 路径；Rust target 下用作 Cargo package 名称来源 |
 | `--app` | ✅ | CLI 二进制名称和根命令名 |
 | `--app-version` | ❌ | 生成出来的 CLI 项目版本；覆盖 `opencli.yaml` 的 `app.version` |
-| `--auth` | ❌ | 生成认证模式：`token` 保持现状，`ak_sk` 生成 AK/SK 签名支持 |
+| `--auth` | ❌ | 生成认证模式：`token`、`api_key`、`ak_sk` 或 `none` |
 | `--signer` | ❌ | AK/SK 签名 profile；当前支持 `supplier_edi` |
 | `--skill-lang` | ❌ | 生成的 Skill 文档语言：`en` 或 `zh`，默认 `en` |
 | `--config` | ❌ | 配置文件路径（可选） |
+| `--runtime-config` | ❌ | 生成后 CLI 的 Base URL 和认证元数据；凭证从环境变量读取并密封 |
 
 `--input` 和 `--mcp-config` 互斥，必须且只能提供一个。
 
 `--app-version` 设置的是生成出来的 CLI 项目版本；如果同时配置了 `opencli.yaml` 的 `app.version`，命令行参数优先。
 
 `--skill-lang zh` 会生成中文 `skills/<group>/` 文档；不传时默认生成英文文档。生成出来的文件名保持不变，例如 `SKILL.md`、`README.md`、`generation-report.md`。
+
+#### Token 和 API Key
+
+OpenCLI 不提供 `--token <secret>` 或 `--api-key <secret>` 参数，避免秘密出现在 shell history 和进程参数中。认证类型由 `--auth` 指定，秘密在生成时从环境变量读取。
+
+Token（Bearer）运行配置源文件统一命名为 `runtime.yaml`：
+
+```yaml
+version: v1
+base_url: https://api.example.com
+auth:
+  type: bearer
+```
+
+生成命令：
+
+```bash
+export OPENCLI_AUTH_TOKEN='your-token'
+
+opencli generate \
+  --input ./api.yaml \
+  --output ./my-cli \
+  --module github.com/myorg/my-cli \
+  --app mycli \
+  --auth token \
+  --runtime-config ./runtime.yaml
+```
+
+API Key 也使用统一的运行配置文件名 `runtime.yaml`。`header` 是服务端实际接收 API Key 的请求头名称：
+
+```yaml
+version: v1
+base_url: https://api.example.com
+auth:
+  type: api_key
+  header: X-API-Key
+```
+
+生成命令：
+
+```bash
+export OPENCLI_API_KEY='your-api-key'
+
+opencli generate \
+  --input ./api.yaml \
+  --output ./my-cli \
+  --module github.com/myorg/my-cli \
+  --app mycli \
+  --auth api_key \
+  --runtime-config ./runtime.yaml
+```
+
+生成器读取环境变量中的凭证，通过 AES-256-GCM 密封后写入生成项目的 `config/runtime.yaml`。该文件只保存 `ENC[v1:...]` 密文，不生成 `runtime.key`；解密材料经过拆分后编译进对应的 Go/Rust CLI。
+
+运行生成后的 CLI 时，也可以用环境变量临时覆盖文件配置：
+
+```bash
+# Bearer Token 临时覆盖
+OPENCLI_AUTH_TOKEN='temporary-token' ./bin/mycli <group> <command>
+
+# API Key 临时覆盖
+OPENCLI_API_KEY='temporary-api-key' ./bin/mycli <group> <command>
+
+# Base URL 或整个配置文件临时覆盖
+OPENCLI_BASE_URL='https://staging-api.example.com' ./bin/mycli <group> <command>
+OPENCLI_CONFIG='./config/staging.yaml' ./bin/mycli <group> <command>
+```
+
+认证值优先级：
+
+```text
+命令显式 --header
+  > OPENCLI_AUTH_TOKEN / OPENCLI_API_KEY
+  > config/runtime.yaml 中的密封凭证
+```
+
+其中 `--auth api_key` 必须同时提供 `--runtime-config`，因为生成器需要从 YAML 中读取 API Key 请求头名称。`--auth token` 如果不提供 `--runtime-config`，则不会生成凭证文件，CLI 继续在运行时读取 `OPENCLI_AUTH_TOKEN`。
+
+### `opencli package`
+
+将一个已经生成的 Go 或 Rust 项目组装成可以直接安装给 Agent 使用的分组 Skills Bundle：
+
+```bash
+opencli package \
+  --project ./my-cli \
+  --output ./dist/my-cli-skills
+```
+
+默认会构建当前平台的 CLI。已有预构建二进制时，可以跳过 Go/Cargo 构建：
+
+```bash
+opencli package \
+  --project ./my-cli \
+  --binary ./release/mycli \
+  --output ./dist/my-cli-skills
+```
+
+输出结构：
+
+```text
+my-cli-skills/
+├── SKILL.md                 # 根路由
+├── README.md
+├── bin/mycli               # 所有分组共用一个 CLI
+├── config/runtime.yaml      # 可选的密封运行配置
+├── libexec/python/
+├── libexec/node/
+├── export/SKILL.md          # 一个 API 分组
+└── vbt_vehicle_info/SKILL.md
+```
+
+再次打包到同一输出目录时：
+
+- 保留每个分组已有的 `SKILL.md`、`README.md`、`references/`、`assets/`、`scripts/` 和未知业务文件；
+- 刷新分组 `generation-report.md`、根 `SKILL.md`、根 `README.md`、共享二进制和 `config/runtime.yaml`；
+- 不生成 `manifest.yaml`、`runtime.key` 或多余的 `libexec/<cli>/` 目录；
+- 新复制的分组文档使用 `../bin/<cli>` 和 `../config/runtime.yaml`，不要求 CLI 预先安装到系统 `PATH`。
 
 AK/SK 接口可以显式生成内置签名逻辑：
 

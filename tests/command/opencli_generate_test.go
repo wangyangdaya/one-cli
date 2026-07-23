@@ -796,6 +796,187 @@ func TestGenerateCommandRejectsUnknownTarget(t *testing.T) {
 	}
 }
 
+func TestGenerateCommandWritesSealedRuntimeConfig(t *testing.T) {
+	dir := t.TempDir()
+	runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
+	if err := os.WriteFile(runtimeSource, []byte("version: v1\nbase_url: https://api.example.com\nauth:\n  type: bearer\n"), 0o600); err != nil {
+		t.Fatalf("write runtime source: %v", err)
+	}
+	t.Setenv("OPENCLI_AUTH_TOKEN", "command-test-file-token")
+
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--auth", "token",
+		"--runtime-config", runtimeSource,
+		"--input", filepath.Join("..", "..", "examples", "petstore.yaml"),
+		"--output", dir,
+		"--module", "github.com/acme/generated",
+		"--app", "petcli",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute generate: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "config", "runtime.yaml")
+	content, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read generated runtime config: %v", err)
+	}
+	if !bytes.Contains(content, []byte("encrypted_value: ENC[v1:")) {
+		t.Fatalf("generated runtime config is not sealed:\n%s", content)
+	}
+	if bytes.Contains(content, []byte("command-test-file-token")) {
+		t.Fatalf("generated runtime config contains plaintext credential:\n%s", content)
+	}
+}
+
+func TestGenerateCommandAcceptsAPIKeyRuntimeConfig(t *testing.T) {
+	dir := t.TempDir()
+	runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
+	if err := os.WriteFile(runtimeSource, []byte("version: v1\nbase_url: https://api.example.com\nauth:\n  type: api_key\n  header: X-API-Key\n"), 0o600); err != nil {
+		t.Fatalf("write runtime source: %v", err)
+	}
+	t.Setenv("OPENCLI_API_KEY", "command-test-api-key")
+
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--auth", "api_key",
+		"--runtime-config", runtimeSource,
+		"--input", filepath.Join("..", "..", "examples", "petstore.yaml"),
+		"--output", dir,
+		"--module", "github.com/acme/generated",
+		"--app", "petcli",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute generate: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "config", "runtime.yaml"))
+	if err != nil {
+		t.Fatalf("read generated runtime config: %v", err)
+	}
+	if !bytes.Contains(content, []byte("type: api_key")) || !bytes.Contains(content, []byte("header: X-API-Key")) {
+		t.Fatalf("generated API-key metadata missing:\n%s", content)
+	}
+	if bytes.Contains(content, []byte("command-test-api-key")) {
+		t.Fatalf("generated runtime config contains plaintext API key:\n%s", content)
+	}
+}
+
+func TestGenerateCommandAPIKeyRequiresRuntimeConfig(t *testing.T) {
+	err := app.RunGenerate(app.GenerateOptions{
+		Input:   filepath.Join("..", "..", "examples", "petstore.yaml"),
+		Output:  t.TempDir(),
+		Module:  "github.com/acme/generated",
+		AppName: "petcli",
+		Auth:    "api_key",
+		Target:  "go",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--auth api_key requires --runtime-config") {
+		t.Fatalf("expected API-key runtime config requirement, got %v", err)
+	}
+}
+
+func TestGenerateCommandRuntimeConfigRequiresBuildCredential(t *testing.T) {
+	runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
+	if err := os.WriteFile(runtimeSource, []byte("version: v1\nauth:\n  type: bearer\n"), 0o600); err != nil {
+		t.Fatalf("write runtime source: %v", err)
+	}
+	t.Setenv("OPENCLI_AUTH_TOKEN", "")
+
+	err := app.RunGenerate(app.GenerateOptions{
+		Input:             filepath.Join("..", "..", "examples", "petstore.yaml"),
+		Output:            t.TempDir(),
+		Module:            "github.com/acme/generated",
+		AppName:           "petcli",
+		Auth:              "token",
+		ConfigPath:        "",
+		Target:            "go",
+		RuntimeConfigPath: runtimeSource,
+	})
+	if err == nil || !strings.Contains(err.Error(), "OPENCLI_AUTH_TOKEN") {
+		t.Fatalf("expected missing build credential error, got %v", err)
+	}
+}
+
+func TestGenerateCommandRuntimeConfigLaunchersForGoAndRust(t *testing.T) {
+	for _, target := range []string{"go", "rust"} {
+		t.Run(target, func(t *testing.T) {
+			dir := t.TempDir()
+			runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
+			if err := os.WriteFile(runtimeSource, []byte("version: v1\nbase_url: https://api.example.com\nauth:\n  type: bearer\n"), 0o600); err != nil {
+				t.Fatalf("write runtime source: %v", err)
+			}
+			t.Setenv("OPENCLI_AUTH_TOKEN", "launcher-test-token")
+			if err := app.RunGenerate(app.GenerateOptions{
+				Input:             filepath.Join("..", "..", "examples", "petstore.yaml"),
+				Output:            dir,
+				Module:            "github.com/acme/generated",
+				AppName:           "petcli",
+				Auth:              "token",
+				Target:            target,
+				RuntimeConfigPath: runtimeSource,
+			}); err != nil {
+				t.Fatalf("generate %s: %v", target, err)
+			}
+			for _, rel := range []string{filepath.Join("bin", "petcli"), filepath.Join("bin", "petcli.cmd")} {
+				content, err := os.ReadFile(filepath.Join(dir, rel))
+				if err != nil {
+					t.Fatalf("read %s launcher %s: %v", target, rel, err)
+				}
+				text := string(content)
+				if !strings.Contains(text, "OPENCLI_CONFIG") || !strings.Contains(text, filepath.Join("config", "runtime.yaml")) && !strings.Contains(text, "config/runtime.yaml") && !strings.Contains(text, `config\runtime.yaml`) {
+					t.Fatalf("%s launcher %s does not select runtime config:\n%s", target, rel, text)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(dir, "config", "runtime.key")); !os.IsNotExist(err) {
+				t.Fatalf("%s generation must not emit runtime.key, got %v", target, err)
+			}
+		})
+	}
+}
+
+func TestGenerateCommandRuntimeConfigDocsForGoAndRust(t *testing.T) {
+	for _, target := range []string{"go", "rust"} {
+		t.Run(target, func(t *testing.T) {
+			dir := t.TempDir()
+			runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
+			if err := os.WriteFile(runtimeSource, []byte("version: v1\nbase_url: https://api.example.com\nauth:\n  type: bearer\n"), 0o600); err != nil {
+				t.Fatalf("write runtime source: %v", err)
+			}
+			const credential = "docs-must-not-contain-this-token"
+			t.Setenv("OPENCLI_AUTH_TOKEN", credential)
+			if err := app.RunGenerate(app.GenerateOptions{
+				Input:             filepath.Join("..", "..", "examples", "petstore.yaml"),
+				Output:            dir,
+				Module:            "github.com/acme/generated",
+				AppName:           "petcli",
+				Auth:              "token",
+				Target:            target,
+				RuntimeConfigPath: runtimeSource,
+			}); err != nil {
+				t.Fatalf("generate %s: %v", target, err)
+			}
+			for _, rel := range []string{"README.md", filepath.Join("skills", "pet", "SKILL.md")} {
+				content, err := os.ReadFile(filepath.Join(dir, rel))
+				if err != nil {
+					t.Fatalf("read %s: %v", rel, err)
+				}
+				text := string(content)
+				for _, want := range []string{"config/runtime.yaml", "OPENCLI_CONFIG", "OPENCLI_AUTH_TOKEN"} {
+					if !strings.Contains(text, want) {
+						t.Fatalf("%s %s missing %q:\n%s", target, rel, want, text)
+					}
+				}
+				if strings.Contains(text, credential) {
+					t.Fatalf("%s %s contains plaintext credential", target, rel)
+				}
+			}
+		})
+	}
+}
+
 func assertGoFilesGofmtClean(t *testing.T, root string) {
 	t.Helper()
 

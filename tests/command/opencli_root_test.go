@@ -23,6 +23,26 @@ func TestOpenCLIHelp(t *testing.T) {
 	}
 }
 
+func TestGenerateHelpDocumentsTokenAndAPIKeyRuntimeConfig(t *testing.T) {
+	cmd := newGoRunCommand(t, "./cmd/opencli", "generate", "--help")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected generate help to succeed, got error: %v, output: %s", err, string(out))
+	}
+
+	output := string(out)
+	for _, want := range []string{
+		"token, api_key, ak_sk, or none",
+		"--runtime-config",
+		"OPENCLI_AUTH_TOKEN",
+		"OPENCLI_API_KEY",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected generate help to mention %q, got: %s", want, output)
+		}
+	}
+}
+
 func TestInitCommandJSONOutput(t *testing.T) {
 	cmd := newGoRunCommand(t, "./cmd/opencli", "--json", "init")
 	out, err := cmd.CombinedOutput()

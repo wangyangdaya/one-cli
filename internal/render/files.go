@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"one-cli/internal/model"
+	"one-cli/internal/runtimeconfig"
 )
 
 type generatedFile struct {
@@ -17,11 +18,12 @@ type generatedFile struct {
 }
 
 type templateData struct {
-	Module    string
-	Target    string
-	SkillLang string
-	App       model.App
-	Group     model.Group
+	Module        string
+	Target        string
+	SkillLang     string
+	App           model.App
+	Group         model.Group
+	RuntimeBundle *runtimeconfig.Bundle
 }
 
 func readTemplate(name string) ([]byte, error) {
@@ -81,4 +83,11 @@ func writeFile(path string, content []byte, mode os.FileMode) error {
 		mode = 0o644
 	}
 	return os.WriteFile(path, content, mode)
+}
+
+func writeRuntimeConfig(outputDir string, bundle *runtimeconfig.Bundle) error {
+	if bundle == nil {
+		return nil
+	}
+	return writeFile(filepath.Join(outputDir, "config", "runtime.yaml"), bundle.YAML, 0)
 }

@@ -253,7 +253,7 @@ func convertDocument(doc *openapi3.T) Document {
 		d.Version = strings.TrimSpace(doc.Info.Version)
 	}
 	d.Tags = convertTags(doc.Tags)
-	d.Operations = convertOperations(doc.Paths)
+	d.Operations = convertOperations(doc.Paths, doc.Components)
 	return d
 }
 
@@ -274,7 +274,7 @@ func convertTags(tags openapi3.Tags) []Tag {
 
 // convertOperations iterates paths in sorted order and methods in a fixed order,
 // producing a deterministic list of Operations.
-func convertOperations(paths *openapi3.Paths) []Operation {
+func convertOperations(paths *openapi3.Paths, components *openapi3.Components) []Operation {
 	if paths == nil {
 		return nil
 	}
@@ -299,21 +299,21 @@ func convertOperations(paths *openapi3.Paths) []Operation {
 			if m.op == nil {
 				continue
 			}
-			ops = append(ops, convertOperation(path, m.name, m.op))
+			ops = append(ops, convertOperation(path, m.name, m.op, components))
 		}
 	}
 	return ops
 }
 
 // convertOperation maps a single kin-openapi Operation to our internal Operation.
-func convertOperation(path, method string, op *openapi3.Operation) Operation {
+func convertOperation(path, method string, op *openapi3.Operation, components *openapi3.Components) Operation {
 	result := Operation{
 		Method:      strings.TrimSpace(method),
 		Path:        strings.TrimSpace(path),
 		OperationID: strings.TrimSpace(op.OperationID),
 		Summary:     strings.TrimSpace(op.Summary),
-		Parameters:  convertParameters(op.Parameters),
-		RequestBody: convertRequestBody(op.RequestBody),
+		Parameters:  convertParameters(op.Parameters, components),
+		RequestBody: convertRequestBody(op.RequestBody, components),
 		Responses:   convertResponses(op.Responses),
 	}
 	if len(op.Tags) > 0 {
@@ -469,26 +469,40 @@ func schemaDescription(schema *openapi3.Schema) string {
 }
 
 // convertParameters maps kin-openapi Parameters to our internal Parameter slice.
-func convertParameters(params openapi3.Parameters) []Parameter {
+func convertParameters(params openapi3.Parameters, components *openapi3.Components) []Parameter {
 	out := make([]Parameter, 0, len(params))
 	for _, ref := range params {
 		if ref == nil || ref.Value == nil {
 			continue
 		}
-		out = append(out, convertParameter(ref.Value))
+		out = append(out, convertParameter(ref.Value, components))
 	}
 	return out
 }
 
 // convertParameter maps a single kin-openapi Parameter to our internal Parameter.
-func convertParameter(param *openapi3.Parameter) Parameter {
-	return Parameter{
+func convertParameter(param *openapi3.Parameter, components *openapi3.Components) Parameter {
+	converted := Parameter{
 		Name:        strings.TrimSpace(param.Name),
+		FlagName:    parameterFlagName(param),
 		In:          strings.TrimSpace(param.In),
 		Required:    param.Required,
 		Description: strings.TrimSpace(param.Description),
 		Type:        parameterType(param),
 	}
+	if param.Schema != nil && param.Schema.Value != nil {
+		converted.Example = schemaExampleText(param.Schema.Value.Example)
+		converted.JSONSchemaName, converted.JSONFields = associatedJSONSchema(param.Schema.Value, components)
+	}
+	return converted
+}
+
+func parameterFlagName(param *openapi3.Parameter) string {
+	if param == nil {
+		return ""
+	}
+	value, _ := param.Extensions["x-opencli-flag-name"].(string)
+	return strings.TrimSpace(value)
 }
 
 // parameterType extracts the type string from a kin-openapi Parameter's schema.
@@ -506,7 +520,7 @@ func parameterType(param *openapi3.Parameter) string {
 }
 
 // convertRequestBody maps a kin-openapi RequestBodyRef to our internal RequestBody.
-func convertRequestBody(body *openapi3.RequestBodyRef) RequestBody {
+func convertRequestBody(body *openapi3.RequestBodyRef, components *openapi3.Components) RequestBody {
 	if body == nil || body.Value == nil {
 		return RequestBody{}
 	}
@@ -549,7 +563,57 @@ func convertRequestBody(body *openapi3.RequestBodyRef) RequestBody {
 	if mediaType, ok := content["multipart/form-data"]; ok && mediaType != nil && mediaType.Schema != nil && mediaType.Schema.Value != nil {
 		rb.FileFields = appendUniqueBodyFields(rb.FileFields, binaryBodyFields(collectJSONSchemaFields(mediaType.Schema.Value))...)
 	}
+	if mediaType, ok := content["application/x-www-form-urlencoded"]; ok && mediaType != nil && mediaType.Schema != nil && mediaType.Schema.Value != nil {
+		rb.FormFields = collectJSONSchemaFields(mediaType.Schema.Value)
+		rb.FormFields = attachJSONFieldSchemas(rb.FormFields, mediaType.Schema.Value, components)
+	}
 	return rb
+}
+
+func attachJSONFieldSchemas(fields []BodyField, formSchema *openapi3.Schema, components *openapi3.Components) []BodyField {
+	if len(fields) == 0 || formSchema == nil || components == nil {
+		return fields
+	}
+	indexes := make(map[string]int, len(fields))
+	for index, field := range fields {
+		indexes[field.Name] = index
+	}
+	for name, propertyRef := range formSchema.Properties {
+		if propertyRef == nil || propertyRef.Value == nil {
+			continue
+		}
+		schemaName, jsonFields := associatedJSONSchema(propertyRef.Value, components)
+		if schemaName == "" {
+			continue
+		}
+		index, ok := indexes[strings.TrimSpace(name)]
+		if !ok {
+			continue
+		}
+		fields[index].JSONSchemaName = schemaName
+		fields[index].JSONFields = jsonFields
+	}
+	return fields
+}
+
+func associatedJSONSchema(schema *openapi3.Schema, components *openapi3.Components) (string, []BodyField) {
+	if schema == nil || components == nil {
+		return "", nil
+	}
+	rawRef, ok := schema.Extensions["x-opencli-json-schema"].(string)
+	if !ok {
+		return "", nil
+	}
+	const prefix = "#/components/schemas/"
+	schemaName := strings.TrimPrefix(strings.TrimSpace(rawRef), prefix)
+	if schemaName == "" || schemaName == strings.TrimSpace(rawRef) {
+		return "", nil
+	}
+	schemaRef := components.Schemas[schemaName]
+	if schemaRef == nil || schemaRef.Value == nil {
+		return "", nil
+	}
+	return schemaName, collectJSONSchemaFields(schemaRef.Value)
 }
 
 func binaryBodyFields(fields []BodyField) []BodyField {
@@ -696,9 +760,18 @@ func exampleValueType(value any) string {
 }
 
 func collectJSONSchemaFields(schema *openapi3.Schema) []BodyField {
+	return collectJSONSchemaFieldsVisited(schema, make(map[*openapi3.Schema]bool))
+}
+
+func collectJSONSchemaFieldsVisited(schema *openapi3.Schema, visited map[*openapi3.Schema]bool) []BodyField {
 	if !schemaIsObject(schema) || len(schema.OneOf) > 0 || len(schema.AnyOf) > 0 {
 		return nil
 	}
+	if visited[schema] {
+		return nil
+	}
+	visited[schema] = true
+	defer delete(visited, schema)
 
 	var properties openapi3.Schemas
 	var required []string
@@ -725,15 +798,42 @@ func collectJSONSchemaFields(schema *openapi3.Schema) []BodyField {
 			continue
 		}
 		prop := propRef.Value
-		fields = append(fields, BodyField{
+		field := BodyField{
 			Name:        strings.TrimSpace(key),
 			Description: strings.TrimSpace(prop.Description),
 			Required:    requiredSet[strings.TrimSpace(key)],
-			Type:        schemaType(prop),
+			Type:        responseSchemaType(propRef),
 			Format:      strings.TrimSpace(prop.Format),
-		})
+			Example:     schemaExampleText(prop.Example),
+		}
+		nestedRef := propRef
+		if prop.Items != nil {
+			nestedRef = prop.Items
+		}
+		if nestedRef != nil && nestedRef.Value != nil && (schemaRefName(nestedRef) != "" || schemaIsObject(nestedRef.Value)) {
+			field.JSONSchemaName = schemaRefName(nestedRef)
+			if field.JSONSchemaName == "" {
+				field.JSONSchemaName = strings.TrimSpace(nestedRef.Value.Title)
+			}
+			field.JSONFields = collectJSONSchemaFieldsVisited(nestedRef.Value, visited)
+		}
+		fields = append(fields, field)
 	}
 	return fields
+}
+
+func schemaExampleText(example any) string {
+	if example == nil {
+		return ""
+	}
+	if value, ok := example.(string); ok {
+		return strings.TrimSpace(value)
+	}
+	encoded, err := json.Marshal(example)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
 }
 
 // flattenAllOf merges all sub-schemas in an allOf array into a single set of

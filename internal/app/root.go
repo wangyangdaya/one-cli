@@ -16,6 +16,7 @@ func NewRootCommand() *cobra.Command {
 	cmd.AddCommand(NewInitCommand())
 	cmd.AddCommand(NewInspectCommand())
 	cmd.AddCommand(NewGenerateCommand())
+	cmd.AddCommand(NewPackageCommand())
 
 	cmd.PersistentFlags().Bool("json", false, "Print command output as JSON")
 

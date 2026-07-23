@@ -63,9 +63,13 @@ func mcpToolCommandName(operationID string) string {
 }
 
 func simplifyOperationID(operationID string) string {
-	parts := splitIdentifier(stripOperationIDNoise(operationID))
+	normalized := stripOperationIDNoise(operationID)
+	parts := splitIdentifier(normalized)
 	if len(parts) == 0 {
 		return "command"
+	}
+	if strings.Contains(normalized, "-") {
+		return strings.Join(parts, "-")
 	}
 	if len(parts) == 1 {
 		return parts[0]

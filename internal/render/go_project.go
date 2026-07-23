@@ -5,9 +5,10 @@ import (
 	"strings"
 
 	"one-cli/internal/model"
+	"one-cli/internal/runtimeconfig"
 )
 
-func writeGoProject(outputDir, module string, app model.App, skillLang string) error {
+func writeGoProject(outputDir, module string, app model.App, skillLang string, runtimeBundle *runtimeconfig.Bundle) error {
 	app = normalizeGoApp(app)
 	files := []generatedFile{
 		{Path: filepath.Join("cmd", app.Name, "main.go"), Template: "go/root_main.go.tmpl", Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}},
@@ -15,6 +16,7 @@ func writeGoProject(outputDir, module string, app model.App, skillLang string) e
 		{Path: filepath.Join("skills", "README.md"), Template: skillIndexTemplate(skillLang), Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}},
 		{Path: filepath.Join("bin", app.Name), Template: "go/bin_launcher.sh.tmpl", Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}, Mode: 0o755},
 		{Path: filepath.Join("bin", app.Name+".cmd"), Template: "go/bin_launcher.cmd.tmpl", Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}, Mode: 0o644},
+		{Path: filepath.Join("internal", "config", "runtime_config.go"), Template: "go/runtime_config.go.tmpl", Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app, RuntimeBundle: runtimeBundle}},
 	}
 	if len(app.Groups) > 1 {
 		files = append(files, generatedFile{Path: filepath.Join("skills", "SKILL.md"), Template: skillRouterTemplate(skillLang), Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}})
@@ -42,7 +44,10 @@ func writeGoProject(outputDir, module string, app model.App, skillLang string) e
 	if err := writeTemplates(outputDir, files); err != nil {
 		return err
 	}
-	return writeRuntime(outputDir)
+	if err := writeRuntime(outputDir); err != nil {
+		return err
+	}
+	return writeRuntimeConfig(outputDir, runtimeBundle)
 }
 
 func skillRouterTemplate(skillLang string) string {

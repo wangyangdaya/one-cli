@@ -524,7 +524,7 @@ func TestRenderProjectCanGenerateChineseSkillPackage(t *testing.T) {
 		"## 前置条件",
 		"## 命令",
 		"**参数：**",
-		"| `--userId` | 是 | userId（string） |",
+		"| `--userId` | 是 | userId（查询参数；string） |",
 		"| `one leave request` | request | 写入 |",
 		"generation-report.md",
 		"OPENCLI_BASE_URL",
@@ -1024,6 +1024,13 @@ func TestRenderProjectSkillDocumentsFileOrDataBodyFields(t *testing.T) {
 						BodySchemaFields: []model.BodyField{
 							{Name: "deliveryRecId", Type: "integer", Description: "目的地ID"},
 							{Name: "deliveryRecNo", Type: "string", Description: "目的地编号"},
+							{
+								Name: "workflowBaseInfo", Type: "WorkflowBaseInfo", JSONSchemaName: "WorkflowBaseInfo",
+								JSONFields: []model.BodyField{
+									{Name: "workflowId", Type: "string", Required: true, Description: "Workflow identifier"},
+									{Name: "workflowName", Type: "string", Description: "Workflow name"},
+								},
+							},
 						},
 					},
 				},
@@ -1044,8 +1051,10 @@ func TestRenderProjectSkillDocumentsFileOrDataBodyFields(t *testing.T) {
 		"**Request Body Schema:**",
 		"| `deliveryRecId` | no | 目的地ID (integer) |",
 		"| `deliveryRecNo` | no | 目的地编号 (string) |",
-		`--data '{"deliveryRecId": 123, "deliveryRecNo": "value"}'`,
+		`--data '{"deliveryRecId": 123, "deliveryRecNo": "value", "workflowBaseInfo": {"workflowId": "value", "workflowName": "John Doe"}}'`,
 		"--data @assets/demo-request.json",
+		"**`workflowBaseInfo` JSON Fields (`WorkflowBaseInfo`):**",
+		"| `workflowId` | yes | `string` | Workflow identifier |",
 	} {
 		if !strings.Contains(skillText, want) {
 			t.Fatalf("generated SKILL.md missing %q:\n%s", want, skillText)
@@ -1073,6 +1082,134 @@ func TestRenderProjectSkillDocumentsFileOrDataBodyFields(t *testing.T) {
 			t.Fatalf("generated demo request missing %q:\n%s", want, demoText)
 		}
 	}
+}
+
+func TestRenderProjectsHonorGETFormRequestBodyAndDocumentFlags(t *testing.T) {
+	app := model.App{
+		Name: "bpm-cli",
+		Groups: []model.Group{
+			{
+				Name: "bpm",
+				Operations: []model.Operation{
+					{
+						CommandName:  "task-query",
+						Method:       "GET",
+						Path:         "/tasks",
+						Summary:      "Query tasks",
+						BodyMode:     model.BodyModeFormURLEncoded,
+						BodyRequired: true,
+						BodyFields: []model.BodyField{
+							{
+								Name: "tqm", Type: "string", Required: true, Description: "query JSON", Example: `{"owner":"user-123","taskState":1}`,
+								JSONSchemaName: "TaskQueryModel",
+								JSONFields: []model.BodyField{
+									{Name: "owner", Type: "string", Required: true, Description: "User uid"},
+									{Name: "taskState", Type: "integer", Description: "1 means pending"},
+								},
+							},
+							{Name: "firstRow", Type: "integer", Required: true},
+							{Name: "rowCount", Type: "integer", Required: true},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	goDir := t.TempDir()
+	if err := render.Project(goDir, "github.com/acme/bpm-cli", app); err != nil {
+		t.Fatalf("render Go: %v", err)
+	}
+	goCommand := mustReadFile(t, filepath.Join(goDir, "internal", "bpm", "command.go"))
+	goService := mustReadFile(t, filepath.Join(goDir, "internal", "bpm", "service.go"))
+	goSkill := mustReadFile(t, filepath.Join(goDir, "skills", "bpm", "SKILL.md"))
+	for _, want := range []string{`"tqm"`, `"first-row"`, `"row-count"`, `MarkFlagRequired("tqm")`} {
+		if !strings.Contains(goCommand, want) {
+			t.Fatalf("generated Go command missing %q:\n%s", want, goCommand)
+		}
+	}
+	for _, want := range []string{`url.Values{}`, `values.Set("tqm"`, `values.Set("firstRow"`, `"application/x-www-form-urlencoded"`} {
+		if !strings.Contains(goService, want) {
+			t.Fatalf("generated Go service missing %q:\n%s", want, goService)
+		}
+	}
+	for _, want := range []string{"--tqm", "--first-row", "--row-count", "form field"} {
+		if !strings.Contains(goSkill, want) {
+			t.Fatalf("generated Skill missing %q:\n%s", want, goSkill)
+		}
+	}
+	if !strings.Contains(goSkill, `--tqm '{"owner":"user-123","taskState":1}'`) {
+		t.Fatalf("generated Skill should use the documented tqm JSON example:\n%s", goSkill)
+	}
+	for _, want := range []string{"**`--tqm` JSON Fields (`TaskQueryModel`):**", "| `owner` | yes | `string` | User uid |", "| `taskState` | no | `integer` | 1 means pending |"} {
+		if !strings.Contains(goSkill, want) {
+			t.Fatalf("generated Skill missing nested JSON documentation %q:\n%s", want, goSkill)
+		}
+	}
+	if strings.Contains(goSkill, "--data") || strings.Contains(goSkill, "JSON request body") {
+		t.Fatalf("generated form Skill should not document JSON --data:\n%s", goSkill)
+	}
+
+	rustDir := t.TempDir()
+	if err := render.Project(rustDir, "github.com/acme/bpm-cli", app, "rust"); err != nil {
+		t.Fatalf("render Rust: %v", err)
+	}
+	rustCommand := mustReadFile(t, filepath.Join(rustDir, "src", "commands", "bpm.rs"))
+	for _, want := range []string{`long = "tqm"`, `long = "first-row"`, `long = "row-count"`, `serde_urlencoded::to_string`, `request_form_text`} {
+		if !strings.Contains(rustCommand, want) {
+			t.Fatalf("generated Rust command missing %q:\n%s", want, rustCommand)
+		}
+	}
+	if strings.Contains(rustCommand, `request_json_text("GET", &path, query, headers, body)`) {
+		t.Fatalf("generated Rust form command should not send the body through the JSON client:\n%s", rustCommand)
+	}
+}
+
+func TestRenderProjectsKeepPOSTFormFieldsInRequestBody(t *testing.T) {
+	app := model.App{
+		Name: "form-cli",
+		Groups: []model.Group{{
+			Name: "forms",
+			Operations: []model.Operation{{
+				CommandName: "submit",
+				Method:      "POST",
+				Path:        "/forms",
+				BodyMode:    model.BodyModeFormURLEncoded,
+				BodyFields:  []model.BodyField{{Name: "name", Type: "string", Required: true}},
+			}},
+		}},
+	}
+
+	goDir := t.TempDir()
+	if err := render.Project(goDir, "github.com/acme/form-cli", app); err != nil {
+		t.Fatalf("render Go: %v", err)
+	}
+	goService := mustReadFile(t, filepath.Join(goDir, "internal", "forms", "service.go"))
+	for _, want := range []string{`values.Set("name"`, `"application/x-www-form-urlencoded"`} {
+		if !strings.Contains(goService, want) {
+			t.Fatalf("generated Go POST form service missing %q:\n%s", want, goService)
+		}
+	}
+
+	rustDir := t.TempDir()
+	if err := render.Project(rustDir, "github.com/acme/form-cli", app, "rust"); err != nil {
+		t.Fatalf("render Rust: %v", err)
+	}
+	rustCommand := mustReadFile(t, filepath.Join(rustDir, "src", "commands", "forms.rs"))
+	for _, want := range []string{`serde_urlencoded::to_string`, `request_form_text("POST"`} {
+		if !strings.Contains(rustCommand, want) {
+			t.Fatalf("generated Rust POST form command missing %q:\n%s", want, rustCommand)
+		}
+	}
+}
+
+func mustReadFile(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(content)
 }
 
 func TestRenderRustProjectSkillUsesActualCliFlagNames(t *testing.T) {
@@ -1110,7 +1247,7 @@ func TestRenderRustProjectSkillUsesActualCliFlagNames(t *testing.T) {
 	for _, want := range []string{
 		`--current "1"`,
 		`--pagesize "25"`,
-		"| `--pagesize` | yes | 页码 (integer) |",
+		"| `--pagesize` | yes | 页码 (query parameter; integer) |",
 	} {
 		if !strings.Contains(skillText, want) {
 			t.Fatalf("generated Rust SKILL.md missing %q:\n%s", want, skillText)
@@ -1259,5 +1396,50 @@ func TestRenderProjectCompilesWhenGroupNameContainsHyphen(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("generated project should compile for hyphenated groups, got %v, output: %s", err, string(out))
+	}
+}
+
+func TestRenderMCPHTTPUsesRuntimeConfigurationForGoAndRust(t *testing.T) {
+	app := model.App{
+		Name: "mcpcli",
+		Auth: model.Auth{Type: model.AuthTypeToken},
+		Groups: []model.Group{{
+			Name:     "search",
+			Backend:  model.BackendMCPHTTP,
+			Endpoint: "https://example.com/mcp",
+			Operations: []model.Operation{{
+				CommandName: "query",
+				RemoteName:  "search_query",
+				Method:      "MCP",
+			}},
+		}},
+	}
+
+	goDir := t.TempDir()
+	if err := render.Project(goDir, "github.com/acme/mcpcli", app, "go"); err != nil {
+		t.Fatalf("render Go MCP project: %v", err)
+	}
+	goService, err := os.ReadFile(filepath.Join(goDir, "internal", "search", "service.go"))
+	if err != nil {
+		t.Fatalf("read Go MCP service: %v", err)
+	}
+	for _, want := range []string{"config.ResolveBaseURL", "config.ResolveCredential"} {
+		if !strings.Contains(string(goService), want) {
+			t.Fatalf("generated Go MCP service missing %q:\n%s", want, goService)
+		}
+	}
+
+	rustDir := t.TempDir()
+	if err := render.Project(rustDir, "mcpcli", app, "rust"); err != nil {
+		t.Fatalf("render Rust MCP project: %v", err)
+	}
+	rustClient, err := os.ReadFile(filepath.Join(rustDir, "src", "client.rs"))
+	if err != nil {
+		t.Fatalf("read Rust MCP client: %v", err)
+	}
+	for _, want := range []string{"runtime_config::resolve_base_url", "runtime_config::resolve_credential"} {
+		if !strings.Contains(string(rustClient), want) {
+			t.Fatalf("generated Rust MCP client missing %q:\n%s", want, rustClient)
+		}
 	}
 }

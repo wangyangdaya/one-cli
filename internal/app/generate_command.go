@@ -12,22 +12,24 @@ import (
 	outjson "one-cli/internal/output"
 	"one-cli/internal/planner"
 	"one-cli/internal/render"
+	"one-cli/internal/runtimeconfig"
 
 	"github.com/spf13/cobra"
 )
 
 type GenerateOptions struct {
-	Input      string
-	MCPConfig  string
-	Output     string
-	Module     string
-	AppName    string
-	AppVersion string
-	ConfigPath string
-	SkillLang  string
-	Auth       string
-	Signer     string
-	Target     string
+	Input             string
+	MCPConfig         string
+	Output            string
+	Module            string
+	AppName           string
+	AppVersion        string
+	ConfigPath        string
+	SkillLang         string
+	Auth              string
+	Signer            string
+	Target            string
+	RuntimeConfigPath string
 }
 
 func NewGenerateCommand() *cobra.Command {
@@ -42,23 +44,25 @@ func NewGenerateCommand() *cobra.Command {
 	var skillLang string
 	var auth string
 	var signer string
+	var runtimeConfigPath string
 
 	cmd := &cobra.Command{
 		Use:   "generate",
-		Short: "Generate a Go CLI project from Swagger/OpenAPI or MCP",
+		Short: "Generate a Go or Rust CLI project from Swagger/OpenAPI or MCP",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := RunGenerate(GenerateOptions{
-				Input:      input,
-				MCPConfig:  mcpConfig,
-				Output:     output,
-				Module:     module,
-				AppName:    appName,
-				AppVersion: appVersion,
-				ConfigPath: configPath,
-				SkillLang:  skillLang,
-				Auth:       auth,
-				Signer:     signer,
-				Target:     target,
+				Input:             input,
+				MCPConfig:         mcpConfig,
+				Output:            output,
+				Module:            module,
+				AppName:           appName,
+				AppVersion:        appVersion,
+				ConfigPath:        configPath,
+				SkillLang:         skillLang,
+				Auth:              auth,
+				Signer:            signer,
+				Target:            target,
+				RuntimeConfigPath: runtimeConfigPath,
 			}); err != nil {
 				return err
 			}
@@ -92,8 +96,9 @@ func NewGenerateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to opencli YAML config")
 	cmd.Flags().StringVar(&target, "target", "go", "Generation target: go or rust")
 	cmd.Flags().StringVar(&skillLang, "skill-lang", "en", "Generated skill language: en or zh")
-	cmd.Flags().StringVar(&auth, "auth", "", "Generated auth mode: token, ak_sk, or none")
+	cmd.Flags().StringVar(&auth, "auth", "", "Generated auth mode: token, api_key, ak_sk, or none")
 	cmd.Flags().StringVar(&signer, "signer", "", "AK/SK signer profile, for example supplier_edi")
+	cmd.Flags().StringVar(&runtimeConfigPath, "runtime-config", "", "Runtime YAML metadata; seals OPENCLI_AUTH_TOKEN or OPENCLI_API_KEY")
 	_ = cmd.MarkFlagRequired("output")
 	_ = cmd.MarkFlagRequired("module")
 	_ = cmd.MarkFlagRequired("app")
@@ -122,6 +127,9 @@ func RunGenerate(opts GenerateOptions) error {
 		cfg.App.Version = trimmed
 	}
 	auth := resolveAuth(opts.Auth, cfg)
+	if auth == model.AuthTypeAPIKey && strings.TrimSpace(opts.RuntimeConfigPath) == "" {
+		return fmt.Errorf("--auth api_key requires --runtime-config to declare the API-key header")
+	}
 	signer := resolveSigner(opts.Signer, cfg)
 	signerConfig, err := resolveSignerConfig(auth, signer, cfg)
 	if err != nil {
@@ -151,7 +159,19 @@ func RunGenerate(opts GenerateOptions) error {
 	plan.Auth.Type = auth
 	plan.Auth.SignerProfile = signerConfig.Profile
 	plan.Auth.Signer = signerConfig
-	return render.Project(strings.TrimSpace(opts.Output), strings.TrimSpace(opts.Module), plan, strings.TrimSpace(opts.Target), strings.TrimSpace(opts.SkillLang))
+	var runtimeBundle *runtimeconfig.Bundle
+	if path := strings.TrimSpace(opts.RuntimeConfigPath); path != "" {
+		bundle, err := runtimeconfig.LoadAndSeal(path, runtimeconfig.SealOptions{AuthMode: auth})
+		if err != nil {
+			return err
+		}
+		runtimeBundle = &bundle
+	}
+	return render.ProjectWithOptions(strings.TrimSpace(opts.Output), strings.TrimSpace(opts.Module), plan, render.ProjectOptions{
+		Target:        strings.TrimSpace(opts.Target),
+		SkillLang:     strings.TrimSpace(opts.SkillLang),
+		RuntimeBundle: runtimeBundle,
+	})
 }
 
 func resolveAuth(flag string, cfg configgen.Config) string {
@@ -170,9 +190,9 @@ func resolveSigner(flag string, cfg configgen.Config) string {
 
 func validateAuthAndSigner(auth, signer string) error {
 	switch auth {
-	case "", model.AuthTypeToken, model.AuthTypeAKSK, model.AuthTypeNone:
+	case "", model.AuthTypeToken, model.AuthTypeAPIKey, model.AuthTypeAKSK, model.AuthTypeNone:
 	default:
-		return fmt.Errorf("unsupported auth %q: expected token, ak_sk, or none", auth)
+		return fmt.Errorf("unsupported auth %q: expected token, api_key, ak_sk, or none", auth)
 	}
 	if strings.TrimSpace(signer) != "" && auth != model.AuthTypeAKSK {
 		return fmt.Errorf("--signer requires --auth ak_sk")

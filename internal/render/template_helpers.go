@@ -122,6 +122,15 @@ func groupHasBodyFields(group model.Group) bool {
 	return false
 }
 
+func groupHasDataBody(group model.Group) bool {
+	for _, operation := range group.Operations {
+		if strings.TrimSpace(operation.BodyMode) != "" && operation.BodyMode != model.BodyModeFormURLEncoded {
+			return true
+		}
+	}
+	return false
+}
+
 func groupUsesMCPHTTP(group model.Group) bool {
 	return strings.TrimSpace(group.Backend) == model.BackendMCPHTTP
 }
@@ -208,6 +217,10 @@ func appUsesAKSK(app model.App) bool {
 func appUsesToken(app model.App) bool {
 	authType := strings.TrimSpace(app.Auth.Type)
 	return authType == "" || authType == model.AuthTypeToken
+}
+
+func appUsesAPIKey(app model.App) bool {
+	return strings.TrimSpace(app.Auth.Type) == model.AuthTypeAPIKey
 }
 
 func appSignerProfile(app model.App) string {
@@ -422,6 +435,25 @@ func exampleValue(fieldType, fieldName string) string {
 	return "value"
 }
 
+func bodyFieldExample(field model.BodyField) string {
+	value := strings.TrimSpace(field.Example)
+	if value == "" {
+		value = exampleValue(field.Type, field.Name)
+	}
+	if strings.HasPrefix(value, "{") || strings.HasPrefix(value, "[") {
+		return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+	}
+	return fmt.Sprintf("%q", value)
+}
+
+func parameterExample(parameter model.Parameter) string {
+	return bodyFieldExample(model.BodyField{
+		Name:    parameter.Name,
+		Type:    parameter.Type,
+		Example: parameter.Example,
+	})
+}
+
 func exampleJSONFields(fields []model.BodyField) string {
 	if len(fields) == 0 {
 		return `{"field": "value"}`
@@ -430,6 +462,10 @@ func exampleJSONFields(fields []model.BodyField) string {
 	for _, field := range fields {
 		name := strings.TrimSpace(field.Name)
 		if name == "" {
+			continue
+		}
+		if len(field.JSONFields) > 0 {
+			parts = append(parts, fmt.Sprintf("%q: %s", name, exampleJSONFields(field.JSONFields)))
 			continue
 		}
 		value := exampleValue(field.Type, field.Name)
@@ -444,6 +480,25 @@ func exampleJSONFields(fields []model.BodyField) string {
 		return `{"field": "value"}`
 	}
 	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+func flattenBodyFields(fields []model.BodyField) []model.BodyField {
+	var flattened []model.BodyField
+	var walk func(string, []model.BodyField)
+	walk = func(prefix string, nested []model.BodyField) {
+		for _, field := range nested {
+			copy := field
+			if prefix != "" {
+				copy.Name = prefix + "." + field.Name
+			}
+			flattened = append(flattened, copy)
+			if len(field.JSONFields) > 0 {
+				walk(copy.Name, field.JSONFields)
+			}
+		}
+	}
+	walk("", fields)
+	return flattened
 }
 
 func demoRequestJSON(group model.Group) string {

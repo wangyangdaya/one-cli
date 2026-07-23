@@ -20,8 +20,9 @@ func NewCommand() *cobra.Command {
 }
 
 {{- range .Group.Operations }}
+{{- $operation := . }}
 func new{{ .CommandName | pascal }}Command() *cobra.Command {
-{{- if .BodyMode }}
+{{- if and .BodyMode (ne .BodyMode "form-urlencoded") }}
 	var bodyData string
 {{- end }}
 {{- if .FileFields }}
@@ -47,6 +48,8 @@ func new{{ .CommandName | pascal }}Command() *cobra.Command {
 		Long:  "{{ .Method }} {{ .Path }}\n\nBody input: {{ if bodyFlagHelp .BodyFields }}{{ bodyFlagHelp .BodyFields }}, or {{ end }}--data (inline JSON, @file, or - for stdin){{ if .FileFields }}; file upload: --file [field=]path{{ end }}",
 {{- else if eq .BodyMode "file-or-data" }}
 		Long:  "{{ .Method }} {{ .Path }}\n\nBody input: --data (inline JSON, @file, or - for stdin){{ if .FileFields }}; file upload: --file [field=]path{{ end }}",
+{{- else if eq .BodyMode "form-urlencoded" }}
+		Long:  "{{ .Method }} {{ .Path }}\n\nBody input: application/x-www-form-urlencoded fields exposed as flags",
 {{- end }}
 		RunE: func(cmd *cobra.Command, args []string) error {
 {{- if and .BodyMode .FileFields }}
@@ -54,7 +57,7 @@ func new{{ .CommandName | pascal }}Command() *cobra.Command {
 				return fmt.Errorf("--data and --file cannot both read from stdin")
 			}
 {{- end }}
-{{- if .BodyMode }}
+{{- if and .BodyMode (ne .BodyMode "form-urlencoded") }}
 			resolvedBodyData, err := cli.ResolveInput(bodyData, cmd.InOrStdin())
 			if err != nil {
 				return fmt.Errorf("--data: %w", err)
@@ -66,7 +69,7 @@ func new{{ .CommandName | pascal }}Command() *cobra.Command {
 				{{ goParamFieldName . }}: param{{ goParamFieldName . }},
 {{- end }}
 {{- end }}
-{{- if .BodyMode }}
+{{- if and .BodyMode (ne .BodyMode "form-urlencoded") }}
 				BodyData: resolvedBodyData,
 {{- end }}
 {{- if .FileFields }}
@@ -97,7 +100,7 @@ func new{{ .CommandName | pascal }}Command() *cobra.Command {
 			return err
 		},
 	}
-{{- if .BodyMode }}
+{{- if and .BodyMode (ne .BodyMode "form-urlencoded") }}
 	cmd.Flags().StringVar(&bodyData, "data", "", "JSON request body; use @file or - for stdin")
 {{- end }}
 {{- if .FileFields }}
@@ -139,13 +142,16 @@ func new{{ .CommandName | pascal }}Command() *cobra.Command {
 {{- range .BodyFields }}
 {{- if goBodyFieldHasFlag . }}
 {{- if eq (goType .Type) "string" }}
-	cmd.Flags().StringVar(&body{{ goBodyFieldName . }}, "{{ goBodyFlagName . }}", "", "JSON body field: {{ .Name }}")
+	cmd.Flags().StringVar(&body{{ goBodyFieldName . }}, "{{ goBodyFlagName . }}", "", "{{ if eq $operation.BodyMode "form-urlencoded" }}Form{{ else }}JSON body{{ end }} field: {{ .Name }}")
 {{- else if eq (goType .Type) "int" }}
-	cmd.Flags().IntVar(&body{{ goBodyFieldName . }}, "{{ goBodyFlagName . }}", 0, "JSON body field: {{ .Name }}")
+	cmd.Flags().IntVar(&body{{ goBodyFieldName . }}, "{{ goBodyFlagName . }}", 0, "{{ if eq $operation.BodyMode "form-urlencoded" }}Form{{ else }}JSON body{{ end }} field: {{ .Name }}")
 {{- else if eq (goType .Type) "float64" }}
-	cmd.Flags().Float64Var(&body{{ goBodyFieldName . }}, "{{ goBodyFlagName . }}", 0, "JSON body field: {{ .Name }}")
+	cmd.Flags().Float64Var(&body{{ goBodyFieldName . }}, "{{ goBodyFlagName . }}", 0, "{{ if eq $operation.BodyMode "form-urlencoded" }}Form{{ else }}JSON body{{ end }} field: {{ .Name }}")
 {{- else if eq (goType .Type) "bool" }}
-	cmd.Flags().BoolVar(&body{{ goBodyFieldName . }}, "{{ goBodyFlagName . }}", false, "JSON body field: {{ .Name }}")
+	cmd.Flags().BoolVar(&body{{ goBodyFieldName . }}, "{{ goBodyFlagName . }}", false, "{{ if eq $operation.BodyMode "form-urlencoded" }}Form{{ else }}JSON body{{ end }} field: {{ .Name }}")
+{{- end }}
+{{- if and (eq $operation.BodyMode "form-urlencoded") .Required }}
+	_ = cmd.MarkFlagRequired("{{ goBodyFlagName . }}")
 {{- end }}
 {{- end }}
 {{- end }}

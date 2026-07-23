@@ -17,11 +17,11 @@
 - Modify `internal/app/generate_command.go`: add `--runtime-config`, load/seal before rendering, add `api_key` auth mode.
 - Modify `internal/model/app.go`: add `AuthTypeAPIKey`.
 - Modify `internal/render/project.go`: introduce typed render options while preserving the existing `Project` test API.
-- Modify `internal/render/files.go`, `go_project.go`, and `rust_project.go`: carry sealing metadata, write `config/runtime.yaml` as `0600`, emit target runtime modules and launchers.
+- Modify `internal/render/files.go`, `go_project.go`, and `rust_project.go`: carry sealing metadata, write ciphertext-only `config/runtime.yaml` without a companion key file, and emit target runtime modules and launchers.
 - Create `internal/render/templates/go/runtime_config.go.tmpl`: Go file lookup, strict parsing, lazy decrypt, and per-field resolution.
 - Create `internal/render/templates/rust/runtime_config.rs.tmpl`: Rust equivalent of the Go contract.
 - Modify generated HTTP/MCP templates, launchers, module manifests, README, and Skill templates to use and document the shared contract.
-- Modify `tests/command/opencli_generate_test.go`: generator flag, sealed output, permissions, auth validation, and generated-file assertions.
+- Modify `tests/command/opencli_generate_test.go`: generator flag, sealed output, absence of `runtime.key`, auth validation, and generated-file assertions.
 - Create `tests/integration/runtime_config_cli_test.go`: execute generated Go and Rust CLIs against a local server and verify file/env/header precedence.
 
 ### Task 1: Generator-side runtime configuration sealing
@@ -98,7 +98,7 @@ Add tests that invoke `RunGenerate` with `RuntimeConfigPath`, set the relevant c
 runtimePath := filepath.Join(dir, "config", "runtime.yaml")
 content, err := os.ReadFile(runtimePath)
 // content contains encrypted_value and not the plaintext credential
-// mode.Perm() == 0o600 on POSIX
+// config/runtime.key does not exist
 ```
 
 Also test `--auth api_key`, missing credential, incompatible auth type, and that omission of `--runtime-config` preserves generation.

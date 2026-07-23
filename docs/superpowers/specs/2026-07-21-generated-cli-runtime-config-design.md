@@ -227,7 +227,7 @@ This keeps one credential-loading implementation per CLI and prevents Go/Rust Sk
 - A bundled fixed token/API key is an application credential, not a user secret.
 - Credentials are encrypted with AES-256-GCM using a fresh random 256-bit key and nonce. Go and Rust use the same `ENC[v1:...]` envelope format.
 - The envelope is `ENC[v1:<base64url(nonce || ciphertext || authentication-tag)>]`. Auth type and API-key header name are authenticated as additional data so they cannot be altered independently of the ciphertext.
-- The generated `config/runtime.yaml` is written with owner-only permissions (`0600`) on platforms that support POSIX modes.
+- The generated `config/runtime.yaml` contains ciphertext rather than plaintext credentials and uses normal generated-config file permissions; the design does not depend on POSIX `0600` support.
 - The source runtime file contains the Base URL and authentication metadata but no credential value. The generator reads the credential from its process environment, which should be populated by a CI/CD secret facility rather than an inline shell assignment.
 - The per-CLI key is represented as generated fragments and reconstructed only when decrypting. This prevents the key from appearing as one plain configuration value, but a person who can inspect or debug the generated source/binary can recover it.
 - This feature is explicitly lightweight sealing against direct configuration inspection and accidental secret scanning, not a substitute for an OS keychain, TPM, user/device authentication, token broker, or external secret manager.
@@ -242,7 +242,7 @@ This keeps one credential-loading implementation per CLI and prevents Go/Rust Sk
 - For bearer auth, obtain the generation-time secret from `OPENCLI_AUTH_TOKEN`; for API-key auth, obtain it from `OPENCLI_API_KEY`.
 - Generate a random AES-256-GCM key and nonce, encrypt the secret, and discard the plaintext after producing the output buffers.
 - Carry only non-secret metadata and obfuscated key fragments needed by templates; never embed credential plaintext into generated source.
-- Write `config/runtime.yaml` only after validation, with `0600` permissions.
+- Write `config/runtime.yaml` only after validation and never emit a companion `runtime.key` file.
 - Extend supported auth validation with `api_key`.
 - Keep `--config` for generator behavior (`opencli.yaml`) distinct from `--runtime-config` for generated CLI runtime values.
 
@@ -273,7 +273,7 @@ The implementation is complete only when equivalent Go and Rust tests cover:
 | File contains unknown/mutually exclusive fields | Generation or runtime load fails clearly |
 | Auth mode is `none` | No auth variable or file credential is used |
 | Trace/error output is enabled | Credential values are absent |
-| Runtime file is generated | Destination mode is `0600` on POSIX |
+| Runtime file is generated | Ciphertext is present and no companion `runtime.key` exists |
 | Generated files are inspected | Neither file set nor generated source contains credential plaintext |
 | Ciphertext or authentication tag is modified | Command fails without revealing plaintext |
 | Generated Go/Rust key fragments are reconstructed | Both targets decrypt the same envelope contract without a companion key file |

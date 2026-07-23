@@ -28,10 +28,22 @@ func bodyMode(op openapi.Operation, groupName, commandName string, cfg configgen
 		}
 		return ""
 	}
+	if hasRequestBodyContentType(op.RequestBody.ContentTypes, "application/x-www-form-urlencoded") {
+		return model.BodyModeFormURLEncoded
+	}
 	if op.RequestBody.HasJSONSchema && op.RequestBody.IsSimpleJSON {
 		return model.BodyModeSimpleJSON
 	}
 	return model.BodyModeFileOrData
+}
+
+func hasRequestBodyContentType(contentTypes []string, want string) bool {
+	for _, contentType := range contentTypes {
+		if strings.EqualFold(strings.TrimSpace(contentType), want) {
+			return true
+		}
+	}
+	return false
 }
 
 func methodAcceptsBody(method string) bool {

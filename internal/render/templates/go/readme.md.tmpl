@@ -43,6 +43,10 @@ export OPENCLI_BASE_URL='http://127.0.0.1:8000'
 ```
 {{- end }}
 
+## Runtime Configuration
+
+The launcher reads `config/runtime.yaml` by default. Set `OPENCLI_CONFIG` to select another YAML file. `OPENCLI_BASE_URL` and the applicable credential environment variable are plaintext per-run overrides and take priority over the sealed value in the file.
+
 {{- if appUsesToken .App }}
 ## Auth
 
@@ -55,6 +59,12 @@ export OPENCLI_AUTH_TOKEN='your-token'
 ```
 
 The CLI injects `Authorization: Bearer <token>` when no explicit `Authorization` header is provided.
+{{- else if appUsesAPIKey .App }}
+## Auth
+
+Mode: `api_key`
+
+`config/runtime.yaml` declares the API-key header. Set `OPENCLI_API_KEY` only when a plaintext per-run override is needed. An explicit matching `--header` value has highest priority.
 {{- else if appUsesAKSK .App }}
 ## Auth
 

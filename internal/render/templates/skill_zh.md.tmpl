@@ -30,7 +30,7 @@ metadata:
 | --- | --- |
 | [README.md](README.md) | 说明如何编辑、验证和交接这个生成的 Skill 包。 |
 | [SKILL.md](SKILL.md) | Agent 入口：触发规则、前置条件、命令索引、示例和安全约束。 |
-| [assets/demo-request.json](assets/demo-request.json) | 用于演示、`--data @文件` 示例和手工编辑的有效占位 JSON 请求文件。 |
+| [assets/demo-request.json](assets/demo-request.json) | {{ if groupHasDataBody .Group }}用于演示、`--data @文件` 示例和手工编辑的有效占位 JSON 请求文件。{{ else }}用于手工工作流示例的占位请求数据。{{ end }} |
 | [references/command-routing.md](references/command-routing.md) | 命令选择表和人工意图映射。 |
 | [references/workflows.md](references/workflows.md) | 基于生成命令集的人工业务流程槽位。 |
 | [references/production-checklist.md](references/production-checklist.md) | 生产可用前的产品、工程、QA 和维护检查清单。 |
@@ -59,6 +59,9 @@ metadata:
 {{- else }}
 
 - 环境变量 `OPENCLI_BASE_URL`：API 基础地址
+- 默认密封运行时配置：`config/runtime.yaml`
+- 环境变量 `OPENCLI_CONFIG`：选择其他运行时 YAML 文件
+- 环境变量是单次运行的明文覆盖值，优先于文件配置
 {{- if appUsesAKSK .App }}
 - 环境变量 `OPENCLI_AK`：AK/SK Access Key
 - 环境变量 `OPENCLI_SK`：AK/SK Secret Key
@@ -66,6 +69,8 @@ metadata:
 - AK/SK 请求头由 CLI 自动生成：`appKey`、`sign`、`timestamp`、`nonce`
 {{- else if appUsesToken .App }}
 - 环境变量 `OPENCLI_AUTH_TOKEN`：认证令牌
+{{- else if appUsesAPIKey .App }}
+- 环境变量 `OPENCLI_API_KEY`：API Key 覆盖值；请求头名称来自运行时配置
 {{- else }}
 - 未配置认证；如需内部路由请求头，可仅使用 `-H` / `--header`
 {{- end }}
@@ -118,6 +123,7 @@ metadata:
 
 ---
 {{- range .Group.Operations }}
+{{- $operation := . }}
 
 ### {{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}
 
@@ -139,19 +145,19 @@ metadata:
 {{- if and (or (groupUsesMCPHTTP $.Group) (groupUsesMCPStdio $.Group)) (eq .BodyMode "simple-json") }}
 # {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（必填字段）
 {{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .BodyFields }}{{ if and .Required (rustBodyFieldHasFlag .) }} \
-  --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}
+  --{{ cliBodyFlagName $.Target . }} {{ bodyFieldExample . }}{{ end }}{{ end }}
 {{- if hasOptionalFields . }}
 
 # {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（含可选字段）
 {{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .BodyFields }}{{ if rustBodyFieldHasFlag . }} \
-  --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}
+  --{{ cliBodyFlagName $.Target . }} {{ bodyFieldExample . }}{{ end }}{{ end }}
 {{- end }}
 {{- else }}
 # {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（必填字段）
 {{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .Parameters }}{{ if eq .In "path" }} \
-  --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if and (eq .In "query") .Required }} \
-  --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }}{{ if and .Required (rustBodyFieldHasFlag .) }} \
-  --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ end }}{{ if eq .BodyMode "file-or-data" }} \
+  --{{ cliParamFlagName $.Target . }} {{ parameterExample . }}{{ end }}{{ end }}{{ range .Parameters }}{{ if and (eq .In "query") .Required }} \
+  --{{ cliParamFlagName $.Target . }} {{ parameterExample . }}{{ end }}{{ end }}{{ if or (eq .BodyMode "simple-json") (eq .BodyMode "form-urlencoded") }}{{ range .BodyFields }}{{ if and .Required (rustBodyFieldHasFlag .) }} \
+  --{{ cliBodyFlagName $.Target . }} {{ bodyFieldExample . }}{{ end }}{{ end }}{{ end }}{{ if eq .BodyMode "file-or-data" }} \
   --data @assets/demo-request.json{{ end }}{{ if .FileFields }} \
   --file path/to/file{{ end }}{{ range .Parameters }}{{ if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }} \
   --header "{{ .Name }}: <value>"{{ end }}{{ end }}
@@ -159,16 +165,16 @@ metadata:
 
 # {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}（含可选字段）
 {{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .Parameters }}{{ if eq .In "path" }} \
-  --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ range .Parameters }}{{ if eq .In "query" }} \
-  --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ if eq .BodyMode "simple-json" }}{{ range .BodyFields }}{{ if rustBodyFieldHasFlag . }} \
-  --{{ cliBodyFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }}{{ end }}{{ range .Parameters }}{{ if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }} \
+  --{{ cliParamFlagName $.Target . }} {{ parameterExample . }}{{ end }}{{ end }}{{ range .Parameters }}{{ if eq .In "query" }} \
+  --{{ cliParamFlagName $.Target . }} {{ parameterExample . }}{{ end }}{{ end }}{{ if or (eq .BodyMode "simple-json") (eq .BodyMode "form-urlencoded") }}{{ range .BodyFields }}{{ if rustBodyFieldHasFlag . }} \
+  --{{ cliBodyFlagName $.Target . }} {{ bodyFieldExample . }}{{ end }}{{ end }}{{ end }}{{ range .Parameters }}{{ if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }} \
   --header "{{ .Name }}: <value>"{{ end }}{{ end }}
 {{- end }}
 {{- if eq .BodyMode "file-or-data" }}
 
 # 从 JSON 字符串传入
 {{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}{{ range .Parameters }}{{ if eq .In "path" }} \
-  --{{ cliParamFlagName $.Target . }} "{{ exampleValue .Type .Name }}"{{ end }}{{ end }} \
+  --{{ cliParamFlagName $.Target . }} {{ parameterExample . }}{{ end }}{{ end }} \
   --data '{{ exampleJSONFields .BodySchemaFields }}'
 {{- end }}
 {{- end }}
@@ -184,13 +190,37 @@ metadata:
 {{- if and (eq .In "header") (not (isHiddenAuthHeader $.App .)) }}
 | `--header "{{ .Name }}: <value>"` | {{ if .Required }}是{{ else }}否{{ end }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }} 请求头{{ end }}（{{ .In }}） |
 {{- else if ne .In "header" }}
-| `--{{ cliParamFlagName $.Target . }}` | {{ if .Required }}是{{ else }}否{{ end }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }}（{{ if .Type }}{{ .Type }}{{ else }}string{{ end }}） |
+| `--{{ cliParamFlagName $.Target . }}` | {{ if .Required }}是{{ else }}否{{ end }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }}（{{ if eq .In "query" }}查询参数；{{ else if eq .In "path" }}路径参数；{{ end }}{{ if .Type }}{{ .Type }}{{ else }}string{{ end }}） |
 {{- end }}
 {{- end }}
-{{- if and (eq .BodyMode "simple-json") .BodyFields }}
+{{- range .Parameters }}
+{{- if .JSONFields }}
+
+**`--{{ cliParamFlagName $.Target . }}` JSON 字段{{ if .JSONSchemaName }}（`{{ .JSONSchemaName }}`）{{ end }}：**
+
+| 字段 | 必填 | 类型 | 说明 |
+|------|------|------|------|
+{{- range flattenBodyFields .JSONFields }}
+| `{{ .Name }}` | {{ bodyRequiredLabel . $.SkillLang }} | `{{ if .Type }}{{ .Type }}{{ else }}unknown{{ end }}` | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }} |
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if and (or (eq .BodyMode "simple-json") (eq .BodyMode "form-urlencoded")) .BodyFields }}
 {{- range .BodyFields }}
 {{- if rustBodyFieldHasFlag . }}
-| `--{{ cliBodyFlagName $.Target . }}` | {{ bodyRequiredLabel . $.SkillLang }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }}（{{ if .Type }}{{ .Type }}{{ else }}string{{ end }}） |
+| `--{{ cliBodyFlagName $.Target . }}` | {{ bodyRequiredLabel . $.SkillLang }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }}（{{ if eq $operation.BodyMode "form-urlencoded" }}表单字段；{{ end }}{{ if .Type }}{{ .Type }}{{ else }}string{{ end }}） |
+{{- end }}
+{{- end }}
+{{- end }}
+{{- range .BodyFields }}
+{{- if .JSONFields }}
+
+**`--{{ cliBodyFlagName $.Target . }}` JSON 字段{{ if .JSONSchemaName }}（`{{ .JSONSchemaName }}`）{{ end }}：**
+
+| 字段 | 必填 | 类型 | 说明 |
+|------|------|------|------|
+{{- range flattenBodyFields .JSONFields }}
+| `{{ .Name }}` | {{ bodyRequiredLabel . $.SkillLang }} | `{{ if .Type }}{{ .Type }}{{ else }}unknown{{ end }}` | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }} |
 {{- end }}
 {{- end }}
 {{- end }}
@@ -209,6 +239,18 @@ metadata:
 |-------|----------|-------------|
 {{- range .BodySchemaFields }}
 | `{{ .Name }}` | {{ bodyRequiredLabel . $.SkillLang }} | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }}（{{ if .Type }}{{ .Type }}{{ else }}unknown{{ end }}） |
+{{- end }}
+{{- range .BodySchemaFields }}
+{{- if .JSONFields }}
+
+**`{{ .Name }}` JSON 字段{{ if .JSONSchemaName }}（`{{ .JSONSchemaName }}`）{{ end }}：**
+
+| 字段 | 必填 | 类型 | 说明 |
+|------|------|------|------|
+{{- range flattenBodyFields .JSONFields }}
+| `{{ .Name }}` | {{ bodyRequiredLabel . $.SkillLang }} | `{{ if .Type }}{{ .Type }}{{ else }}unknown{{ end }}` | {{ if .Description }}{{ .Description }}{{ else }}{{ .Name }}{{ end }} |
+{{- end }}
+{{- end }}
 {{- end }}
 {{- end }}
 

@@ -57,18 +57,43 @@ pub async fn request_json_text(
     headers: Vec<(String, String)>,
     body: Option<String>,
 ) -> AppResult<Value> {
-    let base_url = std::env::var("OPENCLI_BASE_URL")
-        .map_err(|_| "missing OPENCLI_BASE_URL".to_string())?;
-    let {{ if or (appUsesAKSK .App) (appUsesToken .App) }}mut {{ end }}headers = merged_headers(headers);
+    request_text(method, path, query, headers, body, "application/json").await
+}
+
+pub async fn request_form_text(
+    method: &str,
+    path: &str,
+    query: Vec<(String, String)>,
+    headers: Vec<(String, String)>,
+    body: Option<String>,
+) -> AppResult<Value> {
+    request_text(method, path, query, headers, body, "application/x-www-form-urlencoded").await
+}
+
+async fn request_text(
+    method: &str,
+    path: &str,
+    query: Vec<(String, String)>,
+    headers: Vec<(String, String)>,
+    body: Option<String>,
+    content_type: &str,
+) -> AppResult<Value> {
+    let base_url = crate::runtime_config::resolve_base_url("{{ .App.Name }}", "")?;
+    let {{ if or (appUsesAKSK .App) (appUsesToken .App) (appUsesAPIKey .App) }}mut {{ end }}headers = merged_headers(headers);
 {{- if appUsesAKSK .App }}
     crate::auth::apply_aksk(&mut headers, method, path, body.as_deref())?;
 {{- else if appUsesToken .App }}
     if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("Authorization")) {
-        if let Ok(token) = std::env::var("OPENCLI_AUTH_TOKEN") {
-            let token = token.trim();
-            if !token.is_empty() {
-                headers.push(("Authorization".to_string(), format!("Bearer {token}")));
-            }
+        let (_, token) = crate::runtime_config::resolve_credential("{{ .App.Name }}", "token", "Authorization")?;
+        if let Some(token) = token {
+            headers.push(("Authorization".to_string(), format!("Bearer {token}")));
+        }
+    }
+{{- else if appUsesAPIKey .App }}
+    let (header, value) = crate::runtime_config::resolve_credential("{{ .App.Name }}", "api_key", "")?;
+    if let Some(value) = value {
+        if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case(&header)) {
+            headers.push((header, value));
         }
     }
 {{- end }}
@@ -95,7 +120,7 @@ pub async fn request_json_text(
         req = req.header(name, value);
     }
     if let Some(ref body) = body {
-        req = req.header("Content-Type", "application/json").body(body.clone());
+        req = req.header("Content-Type", content_type).body(body.clone());
     }
 
     let response = match req.send().await {
@@ -160,18 +185,22 @@ pub async fn request_multipart(
         }
     }
 
-    let base_url = std::env::var("OPENCLI_BASE_URL")
-        .map_err(|_| "missing OPENCLI_BASE_URL".to_string())?;
-    let {{ if or (appUsesAKSK .App) (appUsesToken .App) }}mut {{ end }}headers = merged_headers(headers);
+    let base_url = crate::runtime_config::resolve_base_url("{{ .App.Name }}", "")?;
+    let {{ if or (appUsesAKSK .App) (appUsesToken .App) (appUsesAPIKey .App) }}mut {{ end }}headers = merged_headers(headers);
 {{- if appUsesAKSK .App }}
     crate::auth::apply_aksk(&mut headers, method, path, data.as_deref())?;
 {{- else if appUsesToken .App }}
     if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("Authorization")) {
-        if let Ok(token) = std::env::var("OPENCLI_AUTH_TOKEN") {
-            let token = token.trim();
-            if !token.is_empty() {
-                headers.push(("Authorization".to_string(), format!("Bearer {token}")));
-            }
+        let (_, token) = crate::runtime_config::resolve_credential("{{ .App.Name }}", "token", "Authorization")?;
+        if let Some(token) = token {
+            headers.push(("Authorization".to_string(), format!("Bearer {token}")));
+        }
+    }
+{{- else if appUsesAPIKey .App }}
+    let (header, value) = crate::runtime_config::resolve_credential("{{ .App.Name }}", "api_key", "")?;
+    if let Some(value) = value {
+        if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case(&header)) {
+            headers.push((header, value));
         }
     }
 {{- end }}
@@ -287,10 +316,23 @@ pub async fn call_mcp_tool(
     tool_name: &str,
     arguments: Value,
 ) -> AppResult<Value> {
-    let request_url = std::env::var("OPENCLI_BASE_URL").unwrap_or_else(|_| endpoint.to_string());
-    if request_url.trim().is_empty() {
-        return Err("missing OPENCLI_BASE_URL".to_string());
+    let request_url = crate::runtime_config::resolve_base_url("{{ .App.Name }}", endpoint)?;
+    let {{ if or (appUsesToken .App) (appUsesAPIKey .App) }}mut {{ end }}headers = headers;
+{{- if appUsesToken .App }}
+    if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("Authorization")) {
+        let (_, token) = crate::runtime_config::resolve_credential("{{ .App.Name }}", "token", "Authorization")?;
+        if let Some(token) = token {
+            headers.push(("Authorization".to_string(), format!("Bearer {token}")));
+        }
     }
+{{- else if appUsesAPIKey .App }}
+    let (header, value) = crate::runtime_config::resolve_credential("{{ .App.Name }}", "api_key", "")?;
+    if let Some(value) = value {
+        if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case(&header)) {
+            headers.push((header, value));
+        }
+    }
+{{- end }}
 
     trace_log!("[opencli][mcp-http] initialize\n  url: {request_url}");
 

@@ -34,7 +34,7 @@ func normalizeRustOperationArgs(operation *model.Operation) {
 	// binary field. A JSON property or request parameter named "file" must not
 	// silently acquire upload semantics.
 	flagNames := map[string]int{"file": 1}
-	if operation.BodyMode != "" {
+	if operation.BodyMode != "" && operation.BodyMode != model.BodyModeFormURLEncoded {
 		fieldNames["body_data"] = 1
 		flagNames["data"] = 1
 	}
@@ -55,7 +55,10 @@ func normalizeRustOperationArgs(operation *model.Operation) {
 		baseField := rustFieldName(parameter.Name)
 		parameter.FieldName = uniqueRustIdentifier(baseField, fieldNames)
 
-		baseFlag := rustFlagName(parameter.Name)
+		baseFlag := strings.TrimSpace(parameter.PreferredFlagName)
+		if baseFlag == "" {
+			baseFlag = rustFlagName(parameter.Name)
+		}
 		if flagNames[baseFlag] > 0 {
 			baseFlag = parameter.In + "-" + baseFlag
 		}
@@ -71,6 +74,9 @@ func normalizeRustOperationArgs(operation *model.Operation) {
 		field.FieldName = uniqueRustIdentifier(baseField, fieldNames)
 
 		baseFlag := rustFlagName(field.Name)
+		if operation.BodyMode == model.BodyModeFormURLEncoded {
+			baseFlag = formFlagName(field.Name)
+		}
 		if flagNames[baseFlag] > 0 {
 			if baseFlag == "data" || baseFlag == "file" {
 				field.FlagName = ""

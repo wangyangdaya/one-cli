@@ -101,12 +101,9 @@ func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input
 var defaultMCPHeaders = {{ stringMapLiteral .Group.Headers }}
 
 func invokeMCPHTTP(toolName string, input any) (Result, error) {
-	requestURL := strings.TrimSpace(config.Lookup("OPENCLI_BASE_URL"))
-	if requestURL == "" {
-		requestURL = "{{ .Group.Endpoint }}"
-	}
-	if requestURL == "" {
-		return Result{}, fmt.Errorf("missing OPENCLI_BASE_URL")
+	requestURL, err := config.ResolveBaseURL("{{ .App.Name }}", "{{ .Group.Endpoint }}")
+	if err != nil {
+		return Result{}, err
 	}
 
 	sessionID, err := initializeMCPHTTP(requestURL)
@@ -142,6 +139,9 @@ func invokeMCPHTTP(toolName string, input any) (Result, error) {
 			continue
 		}
 		req.Header.Set(name, value)
+	}
+	if err := applyRuntimeMCPAuth(req); err != nil {
+		return Result{}, err
 	}
 	if strings.TrimSpace(sessionID) != "" {
 		req.Header.Set("Mcp-Session-Id", sessionID)
@@ -194,6 +194,9 @@ func initializeMCPHTTP(requestURL string) (string, error) {
 		}
 		req.Header.Set(name, value)
 	}
+	if err := applyRuntimeMCPAuth(req); err != nil {
+		return "", err
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -213,6 +216,30 @@ func initializeMCPHTTP(requestURL string) (string, error) {
 	}
 
 	return resp.Header.Get("Mcp-Session-Id"), nil
+}
+
+func applyRuntimeMCPAuth(req *http.Request) error {
+{{- if appUsesToken .App }}
+	if req.Header.Get("Authorization") != "" {
+		return nil
+	}
+	_, value, err := config.ResolveCredential("{{ .App.Name }}", "token", "Authorization")
+	if err != nil {
+		return err
+	}
+	if value != "" {
+		req.Header.Set("Authorization", "Bearer "+value)
+	}
+{{- else if appUsesAPIKey .App }}
+	header, value, err := config.ResolveCredential("{{ .App.Name }}", "api_key", "")
+	if err != nil {
+		return err
+	}
+	if header != "" && value != "" && req.Header.Get(header) == "" {
+		req.Header.Set(header, value)
+	}
+{{- end }}
+	return nil
 }
 
 func buildMCPArguments(input any) (map[string]any, error) {

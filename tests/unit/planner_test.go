@@ -60,6 +60,31 @@ func TestBuildUsesSemanticSubjectsForCollidingGenericCommands(t *testing.T) {
 	}
 }
 
+func TestBuildPreservesExplicitKebabCaseOperationIDs(t *testing.T) {
+	doc := openapi.Document{
+		Operations: []openapi.Operation{
+			{Method: "GET", Path: "/tool/bpm/portal/api/form.dw.mainpage", Tag: "bpm", OperationID: "process-detail"},
+			{Method: "GET", Path: "/tool/bpm/portal/api/process.query.page", Tag: "bpm", OperationID: "process-query"},
+			{Method: "POST", Path: "/tool/bpm/portal/api/task.complete", Tag: "bpm", OperationID: "task-complete"},
+			{Method: "GET", Path: "/tool/bpm/portal/api/task.history.query.page", Tag: "bpm", OperationID: "task-history-query"},
+			{Method: "GET", Path: "/tool/bpm/portal/api/task.query.page", Tag: "bpm", OperationID: "task-query"},
+			{Method: "GET", Path: "/tool/bpm/portal/api/userStartProcessApi/process/list", Tag: "bpm", OperationID: "user-list"},
+		},
+	}
+
+	plan := planner.Build(doc, configgen.Config{})
+
+	want := []string{"process-detail", "process-query", "task-complete", "task-history-query", "task-query", "user-list"}
+	if len(plan.Groups) != 1 || len(plan.Groups[0].Operations) != len(want) {
+		t.Fatalf("unexpected BPM plan: %+v", plan.Groups)
+	}
+	for index, operation := range plan.Groups[0].Operations {
+		if operation.CommandName != want[index] {
+			t.Fatalf("command %d = %q want %q", index, operation.CommandName, want[index])
+		}
+	}
+}
+
 func TestBuildPreservesResponseSchemas(t *testing.T) {
 	doc := openapi.Document{
 		Operations: []openapi.Operation{
@@ -419,6 +444,35 @@ func TestBuildPropagatesSimpleJSONBodyFields(t *testing.T) {
 	}
 	if order.BodySchemaFields[0].Name != "lineItems" || order.BodySchemaFields[0].Description != "order lines" {
 		t.Fatalf("unexpected body schema fields: %+v", order.BodySchemaFields)
+	}
+}
+
+func TestBuildPropagatesFormURLEncodedBodyFields(t *testing.T) {
+	doc := openapi.Document{Operations: []openapi.Operation{
+		{
+			Method:      "GET",
+			Path:        "/tasks",
+			Tag:         "bpm",
+			OperationID: "queryTasks",
+			RequestBody: openapi.RequestBody{
+				Required:     true,
+				ContentTypes: []string{"application/x-www-form-urlencoded"},
+				FormFields: []openapi.BodyField{
+					{Name: "tqm", Required: true, Type: "string", Description: "query JSON"},
+					{Name: "firstRow", Required: true, Type: "integer"},
+					{Name: "rowCount", Required: true, Type: "integer"},
+				},
+			},
+		},
+	}}
+
+	plan := planner.Build(doc, configgen.Config{})
+	op := plan.Groups[0].Operations[0]
+	if op.BodyMode != model.BodyModeFormURLEncoded {
+		t.Fatalf("body mode = %q, want %q", op.BodyMode, model.BodyModeFormURLEncoded)
+	}
+	if len(op.BodyFields) != 3 || op.BodyFields[0].Name != "tqm" || !op.BodyFields[0].Required {
+		t.Fatalf("unexpected planned form fields: %+v", op.BodyFields)
 	}
 }
 

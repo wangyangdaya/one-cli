@@ -39,7 +39,7 @@ type {{ .CommandName | pascal }}Input struct {
 {{- if operationHasHeaderParams . }}
 	Headers []string
 {{- end }}
-{{- if .BodyMode }}
+{{- if and .BodyMode (ne .BodyMode "form-urlencoded") }}
 	BodyData string
 {{- end }}
 {{- if .FileFields }}
@@ -51,7 +51,11 @@ type {{ .CommandName | pascal }}Input struct {
 }
 
 func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (Result, error) {
-	requestURL, err := build{{ .CommandName | pascal }}URL(input)
+	baseURL, err := config.ResolveBaseURL("{{ $.App.Name }}", "{{ $.Group.Endpoint }}")
+	if err != nil {
+		return Result{}, err
+	}
+	requestURL, err := build{{ .CommandName | pascal }}URL(input, baseURL)
 	if err != nil {
 		return Result{}, err
 	}
@@ -86,7 +90,13 @@ func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (
 		return Result{}, err
 	}
 {{- else if appUsesToken $.App }}
-	applyAuthToken(req)
+	if err := applyAuthToken(req); err != nil {
+		return Result{}, err
+	}
+{{- else if appUsesAPIKey $.App }}
+	if err := applyAPIKey(req); err != nil {
+		return Result{}, err
+	}
 {{- end }}
 
 	resp, err := httpx.NewClient().Do(req)
@@ -136,15 +146,10 @@ func build{{ .CommandName | pascal }}RequestBody(input {{ .CommandName | pascal 
 	if len(body) == 0 {
 		return nil, "", nil
 	}
-	return body, "application/json", nil
+	return body, "{{ if eq .BodyMode "form-urlencoded" }}application/x-www-form-urlencoded{{ else }}application/json{{ end }}", nil
 }
 
-func build{{ .CommandName | pascal }}URL(input {{ .CommandName | pascal }}Input) (string, error) {
-	baseURL := strings.TrimSpace(config.Lookup("OPENCLI_BASE_URL"))
-	if baseURL == "" {
-		return "", fmt.Errorf("missing OPENCLI_BASE_URL")
-	}
-
+func build{{ .CommandName | pascal }}URL(input {{ .CommandName | pascal }}Input, baseURL string) (string, error) {
 	requestURL, err := url.Parse(strings.TrimRight(baseURL, "/") + "{{ .Path }}")
 	if err != nil {
 		return "", fmt.Errorf("parse request URL: %w", err)
@@ -157,7 +162,9 @@ func build{{ .CommandName | pascal }}URL(input {{ .CommandName | pascal }}Input)
 	query := requestURL.Query()
 {{- range .Parameters }}
 {{- if eq .In "query" }}
-{{- if eq (goType .Type) "string" }}
+{{- if .Required }}
+	query.Set("{{ .Name }}", fmt.Sprint(input.{{ goInputFieldName . }}))
+{{- else if eq (goType .Type) "string" }}
 	if strings.TrimSpace(input.{{ goInputFieldName . }}) != "" {
 		query.Set("{{ .Name }}", input.{{ goInputFieldName . }})
 	}
@@ -186,6 +193,31 @@ func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input
 	_ = allowEmpty
 {{- end }}
 	return nil, nil
+{{- else }}
+{{- if eq .BodyMode "form-urlencoded" }}
+	values := url.Values{}
+{{- range .BodyFields }}
+{{- if .Required }}
+	values.Set("{{ .Name }}", fmt.Sprint(input.{{ goInputFieldName . }}))
+{{- else if eq (goType .Type) "string" }}
+	if input.{{ goInputFieldName . }} != "" {
+		values.Set("{{ .Name }}", input.{{ goInputFieldName . }})
+	}
+{{- else if eq (goType .Type) "int" }}
+	if input.{{ goInputFieldName . }} != 0 {
+		values.Set("{{ .Name }}", fmt.Sprint(input.{{ goInputFieldName . }}))
+	}
+{{- else if eq (goType .Type) "float64" }}
+	if input.{{ goInputFieldName . }} != 0 {
+		values.Set("{{ .Name }}", fmt.Sprint(input.{{ goInputFieldName . }}))
+	}
+{{- else if eq (goType .Type) "bool" }}
+	if input.{{ goInputFieldName . }} {
+		values.Set("{{ .Name }}", fmt.Sprint(input.{{ goInputFieldName . }}))
+	}
+{{- end }}
+{{- end }}
+	return []byte(values.Encode()), nil
 {{- else }}
 	hasData := strings.TrimSpace(input.BodyData) != ""
 	hasFlagBody := false
@@ -283,6 +315,7 @@ func build{{ .CommandName | pascal }}Body(input {{ .CommandName | pascal }}Input
 {{- end }}
 	}
 {{- end }}
+{{- end }}
 }
 {{ end -}}
 
@@ -351,15 +384,33 @@ func buildMultipartBody(fileSpec, defaultField, data string) ([]byte, string, er
 {{- end }}
 
 {{- if appUsesToken .App }}
-func applyAuthToken(req *http.Request) {
+func applyAuthToken(req *http.Request) error {
 	if req.Header.Get("Authorization") != "" {
-		return
+		return nil
 	}
-	token := strings.TrimSpace(config.Lookup("OPENCLI_AUTH_TOKEN"))
+	_, token, err := config.ResolveCredential("{{ $.App.Name }}", "token", "Authorization")
+	if err != nil {
+		return err
+	}
 	if token == "" {
-		return
+		return nil
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+	return nil
+}
+{{- end }}
+
+{{- if appUsesAPIKey .App }}
+func applyAPIKey(req *http.Request) error {
+	header, value, err := config.ResolveCredential("{{ $.App.Name }}", "api_key", "")
+	if err != nil {
+		return err
+	}
+	if header == "" || value == "" || req.Header.Get(header) != "" {
+		return nil
+	}
+	req.Header.Set(header, value)
+	return nil
 }
 {{- end }}
 

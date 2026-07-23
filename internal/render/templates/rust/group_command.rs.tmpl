@@ -1,7 +1,7 @@
 use clap::{Args, Subcommand};
 {{- if or (groupUsesMCPHTTP .Group) (groupUsesMCPStdio .Group) }}
 use serde_json::{Map, Value};
-{{- else if groupHasBodyInput .Group }}
+{{- else if groupHasDataBody .Group }}
 use serde_json::Value;
 {{- end }}
 
@@ -28,6 +28,7 @@ impl Command {
 }
 
 {{- range .Group.Operations }}
+{{- $operation := . }}
 #[derive(Args)]
 pub struct {{ rustTypeName .CommandName }}Args {
 {{- range .Parameters }}
@@ -44,7 +45,7 @@ pub struct {{ rustTypeName .CommandName }}Args {
     #[arg(short = 'H', long = "header")]
     pub header: Vec<String>,
 {{- end }}
-{{- if .BodyMode }}
+{{- if and .BodyMode (ne .BodyMode "form-urlencoded") }}
     #[arg(long = "data")]
     pub body_data: Option<String>,
 {{- end }}
@@ -55,7 +56,7 @@ pub struct {{ rustTypeName .CommandName }}Args {
 {{- range .BodyFields }}
 {{- if rustBodyFieldHasFlag . }}
     #[arg(long = "{{ rustBodyFlagName . }}")]
-    pub {{ rustBodyFieldName . }}: Option<{{ rustType .Type }}>,
+    pub {{ rustBodyFieldName . }}: {{ if and (eq $operation.BodyMode "form-urlencoded") .Required }}{{ rustType .Type }}{{ else }}Option<{{ rustType .Type }}>{{ end }},
 {{- end }}
 {{- end }}
 }
@@ -123,14 +124,15 @@ async fn run_{{ rustFieldName .CommandName }}(args: {{ rustTypeName .CommandName
 {{- end }}
 {{- end }}
 {{- end }}
-
 {{- if operationHasHeaderParams . }}
     let headers = client::parse_headers(&args.header)?;
 {{- else }}
     let headers = Vec::new();
 {{- end }}
     let body = build_{{ rustFieldName .CommandName }}_http_body(&args{{ if .FileFields }}, args.upload_file.is_some(){{ end }})?;
-{{- if .FileFields }}
+{{- if eq .BodyMode "form-urlencoded" }}
+    let response = client::request_form_text("{{ .Method }}", &path, query, headers, body).await?;
+{{- else if .FileFields }}
     let response = if let Some(file) = &args.upload_file {
         client::request_multipart("{{ .Method }}", &path, query, headers, file, "{{ defaultFileField . }}", body).await?
     } else {
@@ -151,6 +153,20 @@ fn build_{{ rustFieldName .CommandName }}_http_body(args: &{{ rustTypeName .Comm
 {{- if not .BodyMode }}
     let _ = args;
     Ok(None)
+{{- else }}
+{{- if eq .BodyMode "form-urlencoded" }}
+    let mut fields: Vec<(&str, String)> = Vec::new();
+{{- range .BodyFields }}
+{{- if .Required }}
+    fields.push(("{{ .Name }}", args.{{ rustBodyFieldName . }}.to_string()));
+{{- else }}
+    if let Some(value) = &args.{{ rustBodyFieldName . }} {
+        fields.push(("{{ .Name }}", value.to_string()));
+    }
+{{- end }}
+{{- end }}
+    let body = serde_urlencoded::to_string(fields).map_err(|err| err.to_string())?;
+    Ok(Some(body))
 {{- else }}
     if let Some(data) = &args.body_data {
         let content = client::resolve_input(data)?;
@@ -199,6 +215,7 @@ fn build_{{ rustFieldName .CommandName }}_http_body(args: &{{ rustTypeName .Comm
     Err("request body is required".to_string())
 {{- else }}
     Ok(None)
+{{- end }}
 {{- end }}
 {{- end }}
 }

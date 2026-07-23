@@ -6,5 +6,4 @@ if [ -z "${OPENCLI_CONFIG:-}" ] && [ -f "$DIR/config/runtime.yaml" ]; then
   OPENCLI_CONFIG="$DIR/config/runtime.yaml"
   export OPENCLI_CONFIG
 fi
-cd "$DIR"
-exec go run "./cmd/{{ .App.Name }}" "$@"
+exec cargo run --manifest-path "$DIR/Cargo.toml" -- "$@"

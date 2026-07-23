@@ -9,9 +9,10 @@ const (
 
 // Auth type constants identify generated runtime authentication behavior.
 const (
-	AuthTypeNone  = "none"
-	AuthTypeToken = "token"
-	AuthTypeAKSK  = "ak_sk"
+	AuthTypeNone   = "none"
+	AuthTypeToken  = "token"
+	AuthTypeAPIKey = "api_key"
+	AuthTypeAKSK   = "ak_sk"
 )
 
 // Signer profile constants identify concrete AK/SK signing contracts.
@@ -26,9 +27,10 @@ const (
 
 // BodyMode constants identify how request bodies are rendered.
 const (
-	BodyModeSimpleJSON = "simple-json"
-	BodyModeFileOrData = "file-or-data"
-	BodyModeFlags      = "flags"
+	BodyModeSimpleJSON     = "simple-json"
+	BodyModeFormURLEncoded = "form-urlencoded"
+	BodyModeFileOrData     = "file-or-data"
+	BodyModeFlags          = "flags"
 )
 
 // CloneStringMap returns a shallow copy of a string map, or nil for empty maps.
@@ -98,13 +100,17 @@ type Operation struct {
 }
 
 type Parameter struct {
-	Name        string
-	FieldName   string
-	FlagName    string
-	In          string
-	Required    bool
-	Description string
-	Type        string
+	Name              string
+	FieldName         string
+	FlagName          string
+	PreferredFlagName string
+	In                string
+	Required          bool
+	Description       string
+	Type              string
+	Example           string
+	JSONSchemaName    string
+	JSONFields        []BodyField
 }
 
 type BodyField struct {
@@ -116,6 +122,9 @@ type BodyField struct {
 	RequiredUnknown bool
 	Type            string
 	Format          string
+	Example         string
+	JSONSchemaName  string
+	JSONFields      []BodyField
 }
 
 type Response struct {

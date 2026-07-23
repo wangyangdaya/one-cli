@@ -196,6 +196,167 @@ paths:
 	}
 }
 
+func TestParseDocumentCapturesFormURLEncodedFields(t *testing.T) {
+	doc, err := openapi.Parse([]byte(`
+openapi: 3.0.0
+info:
+  title: BPM API
+  version: "1.0"
+components:
+  schemas:
+    TaskQueryModel:
+      type: object
+      required: [owner]
+      properties:
+        owner:
+          type: string
+          description: User uid
+        taskState:
+          type: integer
+          description: 1 means pending
+paths:
+  /tasks:
+    get:
+      operationId: queryTasks
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [tqm, firstRow, rowCount]
+              properties:
+                tqm:
+                  type: string
+                  description: JSON encoded task query
+                  example: '{"owner":"user-123","taskState":1}'
+                  x-opencli-json-schema: '#/components/schemas/TaskQueryModel'
+                firstRow:
+                  type: integer
+                rowCount:
+                  type: integer
+      responses:
+        "200":
+          description: ok
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	body := doc.Operations[0].RequestBody
+	if len(body.FormFields) != 3 {
+		t.Fatalf("form fields = %+v, want three fields", body.FormFields)
+	}
+	if got := body.FormFields[0]; got.Name != "firstRow" || got.Type != "integer" || !got.Required {
+		t.Fatalf("unexpected first form field: %+v", got)
+	}
+	if got := body.FormFields[2]; got.Name != "tqm" || got.Description != "JSON encoded task query" || got.Example != `{"owner":"user-123","taskState":1}` || !got.Required {
+		t.Fatalf("unexpected tqm form field: %+v", got)
+	}
+	if got := body.FormFields[2]; got.JSONSchemaName != "TaskQueryModel" || len(got.JSONFields) != 2 || got.JSONFields[0].Name != "owner" || !got.JSONFields[0].Required {
+		t.Fatalf("unexpected tqm JSON schema: %+v", got)
+	}
+}
+
+func TestParseDocumentExpandsReferencedRequestBodyFields(t *testing.T) {
+	doc, err := openapi.Parse([]byte(`
+openapi: 3.0.0
+info:
+  title: Workflow API
+  version: "1.0"
+components:
+  schemas:
+    WorkflowBaseInfo:
+      type: object
+      required: [workflowId]
+      properties:
+        workflowId:
+          type: string
+          description: Workflow identifier
+        workflowName:
+          type: string
+          description: Workflow name
+paths:
+  /workflow:
+    post:
+      operationId: createWorkflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                workflowBaseInfo:
+                  $ref: '#/components/schemas/WorkflowBaseInfo'
+      responses:
+        "200":
+          description: ok
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	fields := doc.Operations[0].RequestBody.JSONSchemaFields
+	if len(fields) != 1 || fields[0].Name != "workflowBaseInfo" || fields[0].JSONSchemaName != "WorkflowBaseInfo" {
+		t.Fatalf("unexpected referenced request field: %+v", fields)
+	}
+	if len(fields[0].JSONFields) != 2 || fields[0].JSONFields[0].Name != "workflowId" || !fields[0].JSONFields[0].Required {
+		t.Fatalf("unexpected WorkflowBaseInfo fields: %+v", fields[0].JSONFields)
+	}
+}
+
+func TestParseDocumentAssociatesQueryJSONParameterSchema(t *testing.T) {
+	raw := []byte(`openapi: 3.0.3
+info:
+  title: Query JSON
+  version: 1.0.0
+paths:
+  /tasks:
+    get:
+      operationId: queryTasks
+      parameters:
+        - name: tqm
+          in: query
+          required: true
+          description: Task query JSON
+          schema:
+            type: string
+            example: '{"owner":"user-123"}'
+            x-opencli-json-schema: '#/components/schemas/TaskQueryModel'
+      responses:
+        '200':
+          description: ok
+components:
+  schemas:
+    TaskQueryModel:
+      type: object
+      required: [owner]
+      properties:
+        owner:
+          type: string
+          description: User uid
+        taskState:
+          type: integer
+          description: 1 means pending
+`)
+
+	doc, err := openapi.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	parameter := doc.Operations[0].Parameters[0]
+	if parameter.Example != `{"owner":"user-123"}` {
+		t.Fatalf("example = %q", parameter.Example)
+	}
+	if parameter.JSONSchemaName != "TaskQueryModel" || len(parameter.JSONFields) != 2 {
+		t.Fatalf("unexpected JSON schema association: %+v", parameter)
+	}
+	if parameter.JSONFields[0].Name != "owner" || !parameter.JSONFields[0].Required {
+		t.Fatalf("unexpected nested fields: %+v", parameter.JSONFields)
+	}
+}
+
 func TestParseDocumentCapturesRawBinaryRequestBody(t *testing.T) {
 	doc, err := openapi.Parse([]byte(`
 openapi: 3.0.0
