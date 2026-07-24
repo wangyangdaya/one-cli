@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"text/template"
+
+	"one-cli/internal/runtimeconfig"
 )
 
 // templateCache caches parsed templates keyed by template name to avoid
@@ -115,6 +117,9 @@ func renderTemplate(name string, data any) ([]byte, error) {
 			"groupedGroupDocumentationIssues": groupedGroupDocumentationIssues,
 			"groupedAppDocumentationIssues":   groupedAppDocumentationIssues,
 			"hasOptionalFields":               hasOptionalFields,
+			"runtimeEnvelopePrefix":           func() string { return runtimeconfig.EnvelopePrefix },
+			"runtimeEnvelopeSuffix":           func() string { return runtimeconfig.EnvelopeSuffix },
+			"runtimeAADPrefix":                func() string { return runtimeconfig.AADPrefix },
 			"upper":                           strings.ToUpper,
 		}).Parse(string(raw))
 		if err != nil {

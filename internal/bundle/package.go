@@ -33,6 +33,9 @@ func Package(options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if err := validateDocumentedCommands(project); err != nil {
+		return Result{}, err
+	}
 	binaryPath, cleanupBinary, err := resolveBinary(projectDir, project.AppName, options.BinaryPath)
 	if err != nil {
 		return Result{}, err
@@ -60,6 +63,10 @@ func Package(options Options) (Result, error) {
 			return Result{}, err
 		}
 	}
+	packagedProject := projectInfo{AppName: project.AppName, SkillsDir: outputDir, Groups: project.Groups}
+	if err := validateDocumentedCommands(packagedProject); err != nil {
+		return Result{}, err
+	}
 	if err := copyFileAtomic(binaryPath, filepath.Join(outputDir, "bin", executableName(project.AppName)), 0o755); err != nil {
 		return Result{}, err
 	}
@@ -85,20 +92,20 @@ func Package(options Options) (Result, error) {
 
 func singleGroupRouter(appName, group string) string {
 	return fmt.Sprintf(`---
-name: %s-skills
-description: Route requests for %s to its generated command-group Skill.
+name: %[1]s-skills
+description: Route requests for %[1]s to its generated command-group Skill.
 ---
 
-# %s Skills Router
+# %[1]s Skills Router
 
-Read [%s/SKILL.md](%s/SKILL.md) before invoking the shared CLI.
+Read [%[2]s/SKILL.md](%[2]s/SKILL.md) before invoking the shared CLI.
 
 List installed groups with:
 
 `+"```bash"+`
-./bin/%s skills list
+./bin/%[1]s skills list
 `+"```"+`
-`, appName, appName, appName, group, group, appName)
+`, appName, group)
 }
 
 func existingDirectory(value, label string) (string, error) {

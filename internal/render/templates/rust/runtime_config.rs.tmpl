@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use crate::types::AppResult;
 
 const HAS_SEALED_RUNTIME_KEY: bool = {{ if and .RuntimeBundle .RuntimeBundle.HasSecret }}true{{ else }}false{{ end }};
+const RUNTIME_CREDENTIAL_REQUIRED: bool = {{ if and .RuntimeBundle .RuntimeBundle.HasSecret }}true{{ else }}false{{ end }};
 const KEY_SHARE_A: [u8; 32] = [{{ if and .RuntimeBundle .RuntimeBundle.HasSecret }}{{ range .RuntimeBundle.KeyShareA }}{{ . }}, {{ end }}{{ else }}0; 32{{ end }}];
 const KEY_SHARE_B: [u8; 32] = [{{ if and .RuntimeBundle .RuntimeBundle.HasSecret }}{{ range .RuntimeBundle.KeyShareB }}{{ . }}, {{ end }}{{ else }}0; 32{{ end }}];
 
@@ -58,10 +59,16 @@ pub fn resolve_credential(app_name: &str, auth_mode: &str, default_header: &str)
     }
 
     let Some((config, path)) = load_runtime_file(app_name)? else {
-        return Ok((default_header.to_string(), env_secret));
+        return match env_secret {
+            Some(secret) => Ok((default_header.to_string(), Some(secret))),
+            None => unresolved_credential(auth_mode, default_header),
+        };
     };
     let Some(auth) = config.auth else {
-        return Ok((default_header.to_string(), env_secret));
+        return match env_secret {
+            Some(secret) => Ok((default_header.to_string(), Some(secret))),
+            None => unresolved_credential(auth_mode, default_header),
+        };
     };
     let expected_type = if auth_mode.is_empty() || auth_mode == "token" { "bearer" } else { auth_mode };
     if auth.auth_type.trim() != expected_type {
@@ -82,11 +89,27 @@ pub fn resolve_credential(app_name: &str, auth_mode: &str, default_header: &str)
         return Ok((header, env_secret));
     }
     if auth.encrypted_value.trim().is_empty() {
-        return Ok((header, None));
+        return unresolved_credential(auth_mode, &header);
     }
     let secret = decrypt_runtime_value(&auth.encrypted_value, expected_type, &aad_header)
         .map_err(|err| format!("decrypt runtime credential from {}: {err}", path.display()))?;
     Ok((header, Some(secret)))
+}
+
+fn unresolved_credential(auth_mode: &str, header: &str) -> AppResult<(String, Option<String>)> {
+    if RUNTIME_CREDENTIAL_REQUIRED {
+        Err(missing_credential_error(auth_mode))
+    } else {
+        Ok((header.to_string(), None))
+    }
+}
+
+fn missing_credential_error(auth_mode: &str) -> String {
+    if auth_mode == "api_key" {
+        "missing API key: set OPENCLI_API_KEY or configure runtime auth".to_string()
+    } else {
+        "missing bearer token: set OPENCLI_AUTH_TOKEN or configure runtime auth".to_string()
+    }
 }
 
 fn env_value(name: &str) -> Option<String> {
@@ -107,9 +130,6 @@ fn load_runtime_file(app_name: &str) -> AppResult<Option<(RuntimeFile, PathBuf)>
 			}
 		}
 	}
-	if let Ok(cwd) = env::current_dir() {
-        candidates.push(cwd.join("config").join("runtime.yaml"));
-    }
     if let Some(root) = env_value("XDG_CONFIG_HOME") {
         candidates.push(PathBuf::from(root).join(app_name).join("config.yaml"));
     } else if let Some(home) = env_value("HOME").or_else(|| env_value("USERPROFILE")) {
@@ -142,7 +162,7 @@ fn decrypt_runtime_value(envelope: &str, auth_type: &str, header: &str) -> AppRe
     if !HAS_SEALED_RUNTIME_KEY {
         return Err("generated CLI has no sealing key".to_string());
     }
-    let encoded = envelope.strip_prefix("ENC[v1:").and_then(|value| value.strip_suffix(']'))
+    let encoded = envelope.strip_prefix({{ printf "%q" (runtimeEnvelopePrefix) }}).and_then(|value| value.strip_suffix({{ printf "%q" (runtimeEnvelopeSuffix) }}))
         .ok_or_else(|| "invalid ENC[v1] envelope".to_string())?;
     let payload = URL_SAFE_NO_PAD.decode(encoded).map_err(|err| format!("decode sealed credential: {err}"))?;
     if payload.len() <= 12 {
@@ -153,7 +173,7 @@ fn decrypt_runtime_value(envelope: &str, auth_type: &str, header: &str) -> AppRe
         key[index] = KEY_SHARE_A[index] ^ KEY_SHARE_B[index];
     }
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|err| format!("create credential cipher: {err}"))?;
-    let aad = format!("opencli:v1:{auth_type}:{}", header.trim().to_lowercase());
+    let aad = format!("{}{auth_type}:{}", {{ printf "%q" (runtimeAADPrefix) }}, header.trim().to_lowercase());
     let plaintext = cipher.decrypt(Nonce::from_slice(&payload[..12]), Payload { msg: &payload[12..], aad: aad.as_bytes() })
         .map_err(|_| "authenticate sealed credential".to_string())?;
     String::from_utf8(plaintext).map_err(|err| format!("credential is not UTF-8: {err}"))

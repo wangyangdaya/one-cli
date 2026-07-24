@@ -76,6 +76,7 @@ func TestRenderProject(t *testing.T) {
 		"skills/leave/README.md",
 		"skills/leave/assets/demo-request.json",
 		"skills/leave/references/command-routing.md",
+		"skills/leave/references/commands.md",
 		"skills/leave/references/workflows.md",
 		"skills/leave/references/production-checklist.md",
 		"skills/leave/generation-report.md",
@@ -100,6 +101,18 @@ func TestRenderProject(t *testing.T) {
 	}
 	if !strings.Contains(skillText, "assets/demo-request.json") {
 		t.Fatalf("generated skill markdown missing demo request reference:\n%s", skillText)
+	}
+	if !strings.Contains(skillText, "references/commands.md") {
+		t.Fatalf("generated skill markdown missing complete command reference:\n%s", skillText)
+	}
+	commandsContent, err := os.ReadFile(filepath.Join(dir, "skills", "leave", "references", "commands.md"))
+	if err != nil {
+		t.Fatalf("read generated commands.md: %v", err)
+	}
+	for _, want := range []string{"# leave Command Reference", "one leave list", "one leave list --help", "GET", "/leaves"} {
+		if !strings.Contains(string(commandsContent), want) {
+			t.Fatalf("generated commands.md missing %q:\n%s", want, commandsContent)
+		}
 	}
 	for _, unwanted := range []string{
 		"## Global Request Headers",

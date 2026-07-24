@@ -17,6 +17,7 @@ func TestPackagePreservesBusinessFilesAndRefreshesGeneratedArtifacts(t *testing.
 	writeFixture(t, project, "skills/README.md", "# index v1\n", 0o644)
 	writeFixture(t, project, "skills/export/SKILL.md", "# export generated v1\nvehicle-cli export list --json\n", 0o644)
 	writeFixture(t, project, "skills/export/README.md", "generated readme v1\n", 0o644)
+	writeFixture(t, project, "skills/export/references/commands.md", "# Commands\n`vehicle-cli export list --help`\n", 0o644)
 	writeFixture(t, project, "skills/export/references/workflows.md", "generated workflow v1\n", 0o644)
 	writeFixture(t, project, "skills/export/assets/demo-request.json", "{\"generated\":1}\n", 0o644)
 	writeFixture(t, project, "skills/export/generation-report.md", "report v1\n", 0o644)
@@ -38,6 +39,7 @@ func TestPackagePreservesBusinessFilesAndRefreshesGeneratedArtifacts(t *testing.
 	writeFixture(t, project, "skills/README.md", "# index v2\n", 0o644)
 	writeFixture(t, project, "skills/export/SKILL.md", "# export generated v2\n", 0o644)
 	writeFixture(t, project, "skills/export/README.md", "generated readme v2\n", 0o644)
+	writeFixture(t, project, "skills/export/references/commands.md", "# Commands\n`vehicle-cli export list --help`\n", 0o644)
 	writeFixture(t, project, "skills/export/references/workflows.md", "generated workflow v2\n", 0o644)
 	writeFixture(t, project, "skills/export/assets/demo-request.json", "{\"generated\":2}\n", 0o644)
 	writeFixture(t, project, "skills/export/generation-report.md", "report v2\n", 0o644)
@@ -69,8 +71,10 @@ func TestPackageAdaptsNewGroupDocumentsToSharedBinary(t *testing.T) {
 	writeFixture(t, project, "skills/SKILL.md", "vehicle-cli skills list\n[vehicle info](vbt_vehicle_info/SKILL.md)\n", 0o644)
 	writeFixture(t, project, "skills/README.md", "vehicle-cli skills read vbt_vehicle_info\n", 0o644)
 	writeFixture(t, project, "skills/vbt_vehicle_info/SKILL.md", "---\nmetadata:\n  requires:\n    bins: [\"vehicle-cli\"]\n  cliHelp: \"vehicle-cli vbt_vehicle_info --help\"\n---\nvehicle-cli vbt_vehicle_info get --json\nvehicle-cli skills list\nvehicle-cli skills read vbt_vehicle_info\nDefault sealed runtime file: `config/runtime.yaml`\n", 0o644)
+	writeFixture(t, project, "skills/vbt_vehicle_info/references/commands.md", "# Commands\n`vehicle-cli vbt_vehicle_info get --help`\n`vehicle-cli vbt_vehicle_info list --help`\n", 0o644)
 	writeFixture(t, project, "skills/vbt_vehicle_info/references/workflows.md", "`vehicle-cli vbt_vehicle_info list --json`\n", 0o644)
 	writeFixture(t, project, "skills/export-history/SKILL.md", "../bin/vehicle-cli export-history list --json\n", 0o644)
+	writeFixture(t, project, "skills/export-history/references/commands.md", "# Commands\n`vehicle-cli export-history list --help`\n", 0o644)
 	writeFixture(t, filepath.Dir(binary), filepath.Base(binary), "binary\n", 0o755)
 
 	result, err := Package(Options{ProjectDir: project, OutputDir: output, BinaryPath: binary})
@@ -118,7 +122,8 @@ func TestPackageCreatesRootRouterForSingleGroupProject(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "vehicle-cli")
 	writeFixture(t, project, "bin/vehicle-cli", "launcher\n", 0o755)
 	writeFixture(t, project, "skills/README.md", "# Vehicle skills\n", 0o644)
-	writeFixture(t, project, "skills/export/SKILL.md", "# Export\n", 0o644)
+	writeFixture(t, project, "skills/export/SKILL.md", "# Export\nvehicle-cli export list --json\n", 0o644)
+	writeFixture(t, project, "skills/export/references/commands.md", "# Commands\n`vehicle-cli export list --help`\n", 0o644)
 	writeFixture(t, filepath.Dir(binary), filepath.Base(binary), "binary\n", 0o755)
 
 	if _, err := Package(Options{ProjectDir: project, OutputDir: output, BinaryPath: binary}); err != nil {
@@ -199,7 +204,8 @@ func TestPackageRejectsSymlinkedSkillFiles(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "vehicle-cli")
 	writeFixture(t, project, "bin/vehicle-cli", "launcher\n", 0o755)
 	writeFixture(t, project, "skills/README.md", "index\n", 0o644)
-	writeFixture(t, project, "skills/export/SKILL.md", "export\n", 0o644)
+	writeFixture(t, project, "skills/export/SKILL.md", "vehicle-cli export list --json\n", 0o644)
+	writeFixture(t, project, "skills/export/references/commands.md", "# Commands\n`vehicle-cli export list --help`\n", 0o644)
 	secret := filepath.Join(t.TempDir(), "secret.txt")
 	writeFixture(t, filepath.Dir(secret), filepath.Base(secret), "must not be packaged\n", 0o644)
 	link := filepath.Join(project, "skills", "export", "business-secret.txt")
@@ -211,6 +217,43 @@ func TestPackageRejectsSymlinkedSkillFiles(t *testing.T) {
 	_, err := Package(Options{ProjectDir: project, OutputDir: output, BinaryPath: binary})
 	if err == nil || !strings.Contains(err.Error(), "symbolic link") {
 		t.Fatalf("error = %v, want symbolic-link rejection", err)
+	}
+}
+
+func TestPackageRejectsDocumentedCommandMissingFromCommandReference(t *testing.T) {
+	project := t.TempDir()
+	binary := filepath.Join(t.TempDir(), "vehicle-cli")
+	writeFixture(t, project, "bin/vehicle-cli", "launcher\n", 0o755)
+	writeFixture(t, project, "skills/README.md", "index\n", 0o644)
+	writeFixture(t, project, "skills/export/SKILL.md", "vehicle-cli export delete --json\n", 0o644)
+	writeFixture(t, project, "skills/export/references/commands.md", "# Commands\n`vehicle-cli export list --help`\n", 0o644)
+	writeFixture(t, filepath.Dir(binary), filepath.Base(binary), "binary\n", 0o755)
+
+	_, err := Package(Options{ProjectDir: project, OutputDir: t.TempDir(), BinaryPath: binary})
+	if err == nil || !strings.Contains(err.Error(), `documented command "vehicle-cli export delete" is not present in references/commands.md`) {
+		t.Fatalf("error = %v, want documented-command validation error", err)
+	}
+}
+
+func TestPackageRejectsInvalidCommandInPreservedBusinessDocument(t *testing.T) {
+	project := t.TempDir()
+	output := filepath.Join(t.TempDir(), "vehicle-api")
+	binary := filepath.Join(t.TempDir(), "vehicle-cli")
+	writeFixture(t, project, "bin/vehicle-cli", "launcher\n", 0o755)
+	writeFixture(t, project, "skills/README.md", "index\n", 0o644)
+	writeFixture(t, project, "skills/export/SKILL.md", "vehicle-cli export list --json\n", 0o644)
+	writeFixture(t, project, "skills/export/references/commands.md", "# Commands\n`vehicle-cli export list --help`\n", 0o644)
+	writeFixture(t, project, "skills/export/references/workflows.md", "vehicle-cli export list --json\n", 0o644)
+	writeFixture(t, filepath.Dir(binary), filepath.Base(binary), "binary\n", 0o755)
+
+	if _, err := Package(Options{ProjectDir: project, OutputDir: output, BinaryPath: binary}); err != nil {
+		t.Fatalf("first package: %v", err)
+	}
+	writeFixture(t, output, "export/references/workflows.md", "../bin/vehicle-cli export destroy --json\n", 0o644)
+
+	_, err := Package(Options{ProjectDir: project, OutputDir: output, BinaryPath: binary})
+	if err == nil || !strings.Contains(err.Error(), `documented command "vehicle-cli export destroy" is not present in references/commands.md`) {
+		t.Fatalf("error = %v, want preserved-document validation error", err)
 	}
 }
 

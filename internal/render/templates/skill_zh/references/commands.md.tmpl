@@ -1,0 +1,44 @@
+# {{ .Group.Name }} 命令参考
+
+本文件根据 CLI 模型自动生成。`opencli package` 使用它作为权威命令表，校验本 Skill 目录中的命令示例。
+
+## 命令
+
+| 命令 | 方法 | 路径 / 工具 | 说明 |
+| --- | --- | --- | --- |
+{{- range .Group.Operations }}
+| `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}` | `{{ .Method }}` | `{{ .Path }}` | {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }} |
+{{- end }}
+
+{{- range .Group.Operations }}
+
+## `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}`
+
+{{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }} 命令。{{ end }}
+
+- 方法：`{{ .Method }}`
+- 路径 / 工具：`{{ .Path }}`
+- 完整 CLI 帮助：`{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }} --help`
+{{- if .Parameters }}
+
+### 参数
+
+| Flag | 源名称 | 位置 | 必填 | 类型 |
+| --- | --- | --- | --- | --- |
+{{- range .Parameters }}
+| `--{{ cliParamFlagName $.Target . }}` | `{{ .Name }}` | `{{ .In }}` | {{ if .Required }}是{{ else }}否{{ end }} | `{{ .Type }}` |
+{{- end }}
+{{- end }}
+{{- if .BodyFields }}
+
+### 请求体字段
+
+| Flag | 字段 | 必填 | 类型 |
+| --- | --- | --- | --- |
+{{- range .BodyFields }}
+{{- if rustBodyFieldHasFlag . }}
+| `--{{ cliBodyFlagName $.Target . }}` | `{{ .Name }}` | {{ if .Required }}是{{ else }}否{{ end }} | `{{ .Type }}` |
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

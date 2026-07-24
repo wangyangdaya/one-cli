@@ -10,29 +10,33 @@ import (
 
 func writeGoProject(outputDir, module string, app model.App, skillLang string, runtimeBundle *runtimeconfig.Bundle) error {
 	app = normalizeGoApp(app)
+	data := templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}
+	runtimeData := data
+	runtimeData.RuntimeBundle = runtimeBundle
 	files := []generatedFile{
-		{Path: filepath.Join("cmd", app.Name, "main.go"), Template: "go/root_main.go.tmpl", Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}},
-		{Path: "README.md", Template: "go/readme.md.tmpl", Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}},
-		{Path: filepath.Join("skills", "README.md"), Template: skillIndexTemplate(skillLang), Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}},
-		{Path: filepath.Join("bin", app.Name), Template: "go/bin_launcher.sh.tmpl", Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}, Mode: 0o755},
-		{Path: filepath.Join("bin", app.Name+".cmd"), Template: "go/bin_launcher.cmd.tmpl", Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}, Mode: 0o644},
-		{Path: filepath.Join("internal", "config", "runtime_config.go"), Template: "go/runtime_config.go.tmpl", Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app, RuntimeBundle: runtimeBundle}},
+		{Path: filepath.Join("cmd", app.Name, "main.go"), Template: "go/root_main.go.tmpl", Data: data},
+		{Path: "README.md", Template: "go/readme.md.tmpl", Data: data},
+		{Path: filepath.Join("skills", "README.md"), Template: skillIndexTemplate(skillLang), Data: data},
+		{Path: filepath.Join("bin", app.Name), Template: "go/bin_launcher.sh.tmpl", Data: data, Mode: 0o755},
+		{Path: filepath.Join("bin", app.Name+".cmd"), Template: "go/bin_launcher.cmd.tmpl", Data: data, Mode: 0o644},
+		{Path: filepath.Join("internal", "config", "runtime_config.go"), Template: "go/runtime_config.go.tmpl", Data: runtimeData},
 	}
 	if len(app.Groups) > 1 {
-		files = append(files, generatedFile{Path: filepath.Join("skills", "SKILL.md"), Template: skillRouterTemplate(skillLang), Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}})
+		files = append(files, generatedFile{Path: filepath.Join("skills", "SKILL.md"), Template: skillRouterTemplate(skillLang), Data: data})
 	}
 	if appUsesAKSK(app) {
-		files = append(files, generatedFile{Path: filepath.Join("internal", "auth", "aksk.go"), Template: "go/auth_aksk.go.tmpl", Data: templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}})
+		files = append(files, generatedFile{Path: filepath.Join("internal", "auth", "aksk.go"), Template: "go/auth_aksk.go.tmpl", Data: data})
 	}
 	for _, group := range app.Groups {
-		data := templateData{Module: module, Target: "go", SkillLang: skillLang, App: app, Group: group}
+		groupData := data
+		groupData.Group = group
 		groupDir := groupPackageName(group)
 		files = append(files,
-			generatedFile{Path: filepath.Join("internal", groupDir, "command.go"), Template: "go/group_command.go.tmpl", Data: data},
-			generatedFile{Path: filepath.Join("internal", groupDir, "service.go"), Template: serviceTemplate(group), Data: data},
-			generatedFile{Path: filepath.Join("internal", groupDir, "types.go"), Template: "go/group_types.go.tmpl", Data: data},
+			generatedFile{Path: filepath.Join("internal", groupDir, "command.go"), Template: "go/group_command.go.tmpl", Data: groupData},
+			generatedFile{Path: filepath.Join("internal", groupDir, "service.go"), Template: serviceTemplate(group), Data: groupData},
+			generatedFile{Path: filepath.Join("internal", groupDir, "types.go"), Template: "go/group_types.go.tmpl", Data: groupData},
 		)
-		files = append(files, skillPackageFiles(skillName(group), data)...)
+		files = append(files, skillPackageFiles(skillName(group), groupData)...)
 	}
 
 	if err := writeGoMod(outputDir, module); err != nil {

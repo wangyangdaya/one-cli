@@ -14,6 +14,7 @@ skills/{{ skillName .Group }}/
 │   └── demo-request.json
 ├── references/
 │   ├── command-routing.md
+│   ├── commands.md
 │   ├── workflows.md
 │   └── production-checklist.md
 └── generation-report.md
@@ -27,6 +28,7 @@ skills/{{ skillName .Group }}/
 | `README.md` | Everyone | Explains the package structure and handoff process. |
 | `assets/demo-request.json` | Engineering + QA | Valid placeholder JSON file for `--data @file` examples, demos, and manual request-body editing. |
 | `references/command-routing.md` | Product + skill maintainer | Maps user intent to the correct generated CLI command. Fill this before relying on natural-language routing. |
+| `references/commands.md` | Generator | Complete generated command, method, path, and flag reference. |
 | `references/workflows.md` | Product + engineering + QA | Defines real multi-command business flows, including confirmation and read-back checks. |
 | `references/production-checklist.md` | QA + maintainer | Acceptance checklist before the skill is treated as production-ready. |
 | `generation-report.md` | Skill maintainer | Lists missing descriptions detected in the source API/MCP input. |

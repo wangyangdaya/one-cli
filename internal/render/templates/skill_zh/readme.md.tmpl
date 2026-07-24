@@ -14,6 +14,7 @@ skills/{{ skillName .Group }}/
 │   └── demo-request.json
 ├── references/
 │   ├── command-routing.md
+│   ├── commands.md
 │   ├── workflows.md
 │   └── production-checklist.md
 └── generation-report.md
@@ -27,6 +28,7 @@ skills/{{ skillName .Group }}/
 | `README.md` | 所有人 | 说明包结构和交接流程。 |
 | `assets/demo-request.json` | 工程 + QA | 支持 `--data @文件` 示例、演示和手工编辑请求体的有效占位 JSON 文件。 |
 | `references/command-routing.md` | 产品 + Skill 维护者 | 把用户意图映射到正确的生成 CLI 命令。生产使用前必须补全。 |
+| `references/commands.md` | 生成器 | 完整的生成命令、方法、路径和参数参考。 |
 | `references/workflows.md` | 产品 + 工程 + QA | 定义真实的多命令业务流程，包括确认和回读校验。 |
 | `references/production-checklist.md` | QA + 维护者 | Skill 被视为生产可用前的验收清单。 |
 | `generation-report.md` | Skill 维护者 | 列出源 API/MCP 输入中检测到的描述缺口。 |

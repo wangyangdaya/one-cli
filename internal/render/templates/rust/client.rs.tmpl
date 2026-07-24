@@ -107,7 +107,7 @@ async fn request_text(
     }
 
     let query_preview = preview_pairs(&query);
-    let headers_preview = preview_pairs(&headers);
+    let headers_preview = preview_headers(&headers);
     trace_log!("[opencli][http] request\n  method: {method}\n  url: {url}\n  query: {query_preview}\n  headers: {headers_preview}\n  body: {}",
         body.as_ref().map(|b| preview(b).to_string()).unwrap_or_else(|| "<empty>".into()));
 
@@ -284,14 +284,38 @@ fn preview_pairs(pairs: &[(String, String)]) -> String {
 
     let mut payload = serde_json::Map::new();
     for (name, value) in pairs {
-        let preview = if name.eq_ignore_ascii_case("Authorization") {
-            "<redacted>"
+        payload.insert(name.clone(), Value::String(value.clone()));
+    }
+    preview_value(&Value::Object(payload))
+}
+
+fn preview_headers(headers: &[(String, String)]) -> String {
+    if headers.is_empty() {
+        return "<empty>".into();
+    }
+
+    let mut payload = serde_json::Map::new();
+    for (name, value) in headers {
+        let preview = if is_safe_trace_header(name) {
+            value.as_str()
         } else {
-            value
+            "<redacted>"
         };
         payload.insert(name.clone(), Value::String(preview.to_string()));
     }
     preview_value(&Value::Object(payload))
+}
+
+fn is_safe_trace_header(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "accept"
+            | "accept-encoding"
+            | "content-length"
+            | "content-type"
+            | "mcp-protocol-version"
+            | "user-agent"
+    )
 }
 
 fn new_http_client() -> AppResult<reqwest::Client> {

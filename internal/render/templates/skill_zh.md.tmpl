@@ -20,9 +20,10 @@ metadata:
 
 1. 选择命令前，先运行 `{{ .App.Name }} {{ .Group.Name }} --help`。
 2. 使用 `{{ .App.Name }} skills list` 发现生成的 Skill 名称，使用 `{{ .App.Name }} skills read {{ skillName .Group }}` 读取当前可编辑的 Skill 文件；如果不在生成项目根目录运行，传 `--skills-dir <skills目录>`。
-3. 多个命令含义接近时，查看 [references/command-routing.md](references/command-routing.md)。
-4. 多步骤任务查看 [references/workflows.md](references/workflows.md)，生产使用前必须补全其中的 MANUAL 部分。
-5. 写入、删除、批量或不可逆操作必须遵守下面的安全规则和 [references/production-checklist.md](references/production-checklist.md)。
+3. 查看 [references/commands.md](references/commands.md)，确认完整的生成命令和参数表面。
+4. 多个命令含义接近时，查看 [references/command-routing.md](references/command-routing.md)。
+5. 多步骤任务查看 [references/workflows.md](references/workflows.md)，生产使用前必须补全其中的 MANUAL 部分。
+6. 写入、删除、批量或不可逆操作必须遵守下面的安全规则和 [references/production-checklist.md](references/production-checklist.md)。
 
 ## 包文件
 
@@ -32,6 +33,7 @@ metadata:
 | [SKILL.md](SKILL.md) | Agent 入口：触发规则、前置条件、命令索引、示例和安全约束。 |
 | [assets/demo-request.json](assets/demo-request.json) | {{ if groupHasDataBody .Group }}用于演示、`--data @文件` 示例和手工编辑的有效占位 JSON 请求文件。{{ else }}用于手工工作流示例的占位请求数据。{{ end }} |
 | [references/command-routing.md](references/command-routing.md) | 命令选择表和人工意图映射。 |
+| [references/commands.md](references/commands.md) | 完整的生成命令、方法、路径和参数参考。 |
 | [references/workflows.md](references/workflows.md) | 基于生成命令集的人工业务流程槽位。 |
 | [references/production-checklist.md](references/production-checklist.md) | 生产可用前的产品、工程、QA 和维护检查清单。 |
 | [generation-report.md](generation-report.md) | 从 API/MCP 输入检测到的文档缺口和后续补充建议。 |

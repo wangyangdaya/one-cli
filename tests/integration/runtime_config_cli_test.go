@@ -100,6 +100,52 @@ func TestGeneratedGoAPIKeyRuntimeConfig(t *testing.T) {
 	}
 }
 
+func TestGeneratedGoRequiredCredentialDoesNotLoadRuntimeConfigFromCWD(t *testing.T) {
+	tests := []struct {
+		name         string
+		authMode     string
+		fileAuthType string
+		header       string
+		credential   string
+		wantError    string
+	}{
+		{
+			name:         "bearer",
+			authMode:     "token",
+			fileAuthType: "bearer",
+			credential:   "sealed-token",
+			wantError:    "missing bearer token: set OPENCLI_AUTH_TOKEN or configure runtime auth",
+		},
+		{
+			name:         "api key",
+			authMode:     "api_key",
+			fileAuthType: "api_key",
+			header:       "X-API-Key",
+			credential:   "sealed-api-key",
+			wantError:    "missing API key: set OPENCLI_API_KEY or configure runtime auth",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := generateRuntimeConfigCLI(t, "go", tt.authMode, tt.fileAuthType, tt.header, "http://127.0.0.1:1", tt.credential)
+			cmd := exec.Command("go", "run", "./cmd/petcli", "pet", "list", "--limit", "10")
+			cmd.Dir = dir
+			cmd.Env = append(runtimeTestEnv(dir),
+				"OPENCLI_BASE_URL=http://127.0.0.1:1",
+				"XDG_CONFIG_HOME="+t.TempDir(),
+			)
+			out, err := cmd.CombinedOutput()
+			if err == nil || !strings.Contains(string(out), tt.wantError) {
+				t.Fatalf("error = %v output = %s, want %q", err, out, tt.wantError)
+			}
+			if strings.Contains(string(out), tt.credential) {
+				t.Fatalf("error output leaked credential %q: %s", tt.credential, out)
+			}
+		})
+	}
+}
+
 func TestGeneratedRustRuntimeConfig(t *testing.T) {
 	testGeneratedRustRuntimeConfig(t, "token", "bearer", "", "Authorization", "file-token", []struct {
 		name       string

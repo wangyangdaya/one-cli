@@ -29,6 +29,7 @@ func TestGenerateSmoke(t *testing.T) {
 		"skills/pet/README.md",
 		"skills/pet/assets/demo-request.json",
 		"skills/pet/references/command-routing.md",
+		"skills/pet/references/commands.md",
 		"skills/pet/references/workflows.md",
 		"skills/pet/references/production-checklist.md",
 		"README.md",

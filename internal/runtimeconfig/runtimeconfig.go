@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	envelopePrefix = "ENC[v1:"
-	envelopeSuffix = "]"
+	EnvelopePrefix = "ENC[v1:"
+	EnvelopeSuffix = "]"
+	AADPrefix      = "opencli:v1:"
 )
 
 type SealOptions struct {
@@ -132,7 +133,7 @@ func LoadAndSeal(path string, opts SealOptions) (Bundle, error) {
 	output.Auth = &sealedAuth{
 		Type:           authType,
 		Header:         header,
-		EncryptedValue: envelopePrefix + base64.RawURLEncoding.EncodeToString(payload) + envelopeSuffix,
+		EncryptedValue: EnvelopePrefix + base64.RawURLEncoding.EncodeToString(payload) + EnvelopeSuffix,
 	}
 	bundle.YAML, err = yaml.Marshal(output)
 	if err != nil {
@@ -180,5 +181,5 @@ func validateSource(source sourceConfig, authMode string) error {
 }
 
 func additionalData(authType, header string) []byte {
-	return []byte("opencli:v1:" + strings.TrimSpace(authType) + ":" + strings.ToLower(strings.TrimSpace(header)))
+	return []byte(AADPrefix + strings.TrimSpace(authType) + ":" + strings.ToLower(strings.TrimSpace(header)))
 }

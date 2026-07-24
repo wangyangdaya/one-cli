@@ -34,6 +34,7 @@ func TestGenerateRustOpenAPISmoke(t *testing.T) {
 		"skills/pet/README.md",
 		"skills/pet/assets/demo-request.json",
 		"skills/pet/references/command-routing.md",
+		"skills/pet/references/commands.md",
 		"skills/pet/references/workflows.md",
 		"skills/pet/references/production-checklist.md",
 		"src/main.rs",
@@ -146,7 +147,7 @@ func TestGenerateRustHTTPTraceIncludesQueryAndHeaders(t *testing.T) {
 
 	for _, want := range []string{
 		"let query_preview = preview_pairs(&query);",
-		"let headers_preview = preview_pairs(&headers);",
+		"let headers_preview = preview_headers(&headers);",
 		"[opencli][http] request\\n  method: {method}\\n  url: {url}\\n  query: {query_preview}\\n  headers: {headers_preview}\\n  body: {}",
 	} {
 		if !strings.Contains(clientText, want) {

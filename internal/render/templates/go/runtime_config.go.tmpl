@@ -14,6 +14,7 @@ import (
 )
 
 const hasSealedRuntimeKey = {{ if and .RuntimeBundle .RuntimeBundle.HasSecret }}true{{ else }}false{{ end }}
+const runtimeCredentialRequired = {{ if and .RuntimeBundle .RuntimeBundle.HasSecret }}true{{ else }}false{{ end }}
 
 var sealedRuntimeKeyShareA = [32]byte{ {{ if and .RuntimeBundle .RuntimeBundle.HasSecret }}{{ range .RuntimeBundle.KeyShareA }}{{ . }}, {{ end }}{{ end }} }
 var sealedRuntimeKeyShareB = [32]byte{ {{ if and .RuntimeBundle .RuntimeBundle.HasSecret }}{{ range .RuntimeBundle.KeyShareB }}{{ . }}, {{ end }}{{ end }} }
@@ -66,7 +67,7 @@ func ResolveCredential(appName, authMode, defaultHeader string) (string, string,
 		if envValue != "" {
 			return defaultHeader, envValue, nil
 		}
-		return defaultHeader, "", nil
+		return unresolvedCredential(authMode, defaultHeader)
 	}
 	expectedType := authMode
 	if authMode == "token" || authMode == "" {
@@ -87,13 +88,27 @@ func ResolveCredential(appName, authMode, defaultHeader string) (string, string,
 		return header, envValue, nil
 	}
 	if strings.TrimSpace(config.Auth.EncryptedValue) == "" {
-		return header, "", nil
+		return unresolvedCredential(authMode, header)
 	}
 	secret, err := decryptRuntimeValue(config.Auth.EncryptedValue, expectedType, aadHeader)
 	if err != nil {
 		return "", "", fmt.Errorf("decrypt runtime credential from %s: %w", path, err)
 	}
 	return header, secret, nil
+}
+
+func unresolvedCredential(authMode, header string) (string, string, error) {
+	if !runtimeCredentialRequired {
+		return header, "", nil
+	}
+	return "", "", missingCredentialError(authMode)
+}
+
+func missingCredentialError(authMode string) error {
+	if authMode == "api_key" {
+		return fmt.Errorf("missing API key: set OPENCLI_API_KEY or configure runtime auth")
+	}
+	return fmt.Errorf("missing bearer token: set OPENCLI_AUTH_TOKEN or configure runtime auth")
 }
 
 func loadRuntimeFile(appName string) (*runtimeFile, string, error) {
@@ -111,9 +126,6 @@ func loadRuntimeFile(appName string) (*runtimeFile, string, error) {
 			executable = resolved
 		}
 		candidates = append(candidates, filepath.Clean(filepath.Join(filepath.Dir(executable), "..", "config", "runtime.yaml")))
-	}
-	if cwd, err := os.Getwd(); err == nil {
-		candidates = append(candidates, filepath.Join(cwd, "config", "runtime.yaml"))
 	}
 	if root := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); root != "" {
 		candidates = append(candidates, filepath.Join(root, appName, "config.yaml"))
@@ -153,11 +165,12 @@ func decryptRuntimeValue(envelope, authType, header string) (string, error) {
 	if !hasSealedRuntimeKey {
 		return "", fmt.Errorf("generated CLI has no sealing key")
 	}
-	const prefix = "ENC[v1:"
-	if !strings.HasPrefix(envelope, prefix) || !strings.HasSuffix(envelope, "]") {
+	const prefix = {{ printf "%q" (runtimeEnvelopePrefix) }}
+	const suffix = {{ printf "%q" (runtimeEnvelopeSuffix) }}
+	if !strings.HasPrefix(envelope, prefix) || !strings.HasSuffix(envelope, suffix) {
 		return "", fmt.Errorf("invalid ENC[v1] envelope")
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimSuffix(strings.TrimPrefix(envelope, prefix), "]"))
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimSuffix(strings.TrimPrefix(envelope, prefix), suffix))
 	if err != nil {
 		return "", fmt.Errorf("decode sealed credential: %w", err)
 	}
@@ -176,7 +189,7 @@ func decryptRuntimeValue(envelope, authType, header string) (string, error) {
 	if len(payload) <= gcm.NonceSize() {
 		return "", fmt.Errorf("sealed credential payload is too short")
 	}
-	aad := []byte("opencli:v1:" + authType + ":" + strings.ToLower(strings.TrimSpace(header)))
+	aad := []byte({{ printf "%q" (runtimeAADPrefix) }} + authType + ":" + strings.ToLower(strings.TrimSpace(header)))
 	plaintext, err := gcm.Open(nil, payload[:gcm.NonceSize()], payload[gcm.NonceSize():], aad)
 	if err != nil {
 		return "", fmt.Errorf("authenticate sealed credential: %w", err)

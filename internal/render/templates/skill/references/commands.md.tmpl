@@ -1,0 +1,44 @@
+# {{ .Group.Name }} Command Reference
+
+This file is generated from the CLI model. `opencli package` uses it as the canonical command surface when validating examples in this Skill directory.
+
+## Commands
+
+| Command | Method | Path / Tool | Description |
+| --- | --- | --- | --- |
+{{- range .Group.Operations }}
+| `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}` | `{{ .Method }}` | `{{ .Path }}` | {{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }} |
+{{- end }}
+
+{{- range .Group.Operations }}
+
+## `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}`
+
+{{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }} command.{{ end }}
+
+- Method: `{{ .Method }}`
+- Path / tool: `{{ .Path }}`
+- Full CLI help: `{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }} --help`
+{{- if .Parameters }}
+
+### Parameters
+
+| Flag | Source name | Location | Required | Type |
+| --- | --- | --- | --- | --- |
+{{- range .Parameters }}
+| `--{{ cliParamFlagName $.Target . }}` | `{{ .Name }}` | `{{ .In }}` | {{ if .Required }}yes{{ else }}no{{ end }} | `{{ .Type }}` |
+{{- end }}
+{{- end }}
+{{- if .BodyFields }}
+
+### Request body fields
+
+| Flag | Field | Required | Type |
+| --- | --- | --- | --- |
+{{- range .BodyFields }}
+{{- if rustBodyFieldHasFlag . }}
+| `--{{ cliBodyFlagName $.Target . }}` | `{{ .Name }}` | {{ if .Required }}yes{{ else }}no{{ end }} | `{{ .Type }}` |
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

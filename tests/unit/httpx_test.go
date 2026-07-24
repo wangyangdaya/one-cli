@@ -133,6 +133,7 @@ func TestRuntimeHTTPTraceEnabledLogsAndRedactsAuthorization(t *testing.T) {
 		t.Fatalf("new request: %v", err)
 	}
 	req.Header.Set("Authorization", "Bearer secret-token")
+	req.Header.Set("X-API-Key", "secret-api-key")
 	req.Header.Set("Content-Type", "application/json")
 	req.GetBody = func() (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader(`{"email":"a"}`)), nil
@@ -145,12 +146,14 @@ func TestRuntimeHTTPTraceEnabledLogsAndRedactsAuthorization(t *testing.T) {
 	_ = resp.Body.Close()
 
 	output := logs.String()
-	for _, want := range []string{"[opencli][http] request", "method: POST", "[opencli][http] response", `"verbose":"true"`, `"Content-Type":"application/json"`, `"Authorization":"<redacted>"`} {
+	for _, want := range []string{"[opencli][http] request", "method: POST", "[opencli][http] response", `"verbose":"true"`, `"Content-Type":"application/json"`, `"Authorization":"<redacted>"`, `"X-Api-Key":"<redacted>"`} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("missing trace fragment %q in %s", want, output)
 		}
 	}
-	if strings.Contains(output, "secret-token") {
-		t.Fatalf("expected authorization to be redacted, got %s", output)
+	for _, secret := range []string{"secret-token", "secret-api-key"} {
+		if strings.Contains(output, secret) {
+			t.Fatalf("expected credential %q to be redacted, got %s", secret, output)
+		}
 	}
 }

@@ -31,7 +31,7 @@ func normalizeGoOperationArgs(operation *model.Operation) {
 	// binary field. A JSON property or request parameter named "file" must not
 	// silently acquire upload semantics.
 	flagNames := map[string]int{"file": 1}
-	if operation.BodyMode != "" && operation.BodyMode != model.BodyModeFormURLEncoded {
+	if operationUsesBodyData(operation) {
 		fieldNames["BodyData"] = 1
 		flagNames["data"] = 1
 	}
@@ -53,10 +53,7 @@ func normalizeGoOperationArgs(operation *model.Operation) {
 			baseField = goIdentifier(parameter.In) + baseField
 		}
 		parameter.FieldName = uniqueGoIdentifier(baseField, fieldNames)
-		baseFlag := strings.TrimSpace(parameter.PreferredFlagName)
-		if baseFlag == "" {
-			baseFlag = normalizedFlagName(parameter.Name)
-		}
+		baseFlag := preferredParameterFlag(*parameter, normalizedFlagName)
 		if flagNames[baseFlag] > 0 {
 			baseFlag = parameter.In + "-" + baseFlag
 		}
@@ -70,10 +67,7 @@ func normalizeGoOperationArgs(operation *model.Operation) {
 			baseField = "Body" + baseField
 		}
 		field.FieldName = uniqueGoIdentifier(baseField, fieldNames)
-		baseFlag := normalizedFlagName(field.Name)
-		if operation.BodyMode == model.BodyModeFormURLEncoded {
-			baseFlag = formFlagName(field.Name)
-		}
+		baseFlag := bodyFieldFlag(operation, field.Name, normalizedFlagName)
 		if flagNames[baseFlag] > 0 {
 			field.FlagName = ""
 			continue

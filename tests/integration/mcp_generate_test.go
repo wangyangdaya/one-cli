@@ -104,6 +104,7 @@ func TestGenerateFromMCPConfig(t *testing.T) {
 		"skills/search/README.md",
 		"skills/search/assets/demo-request.json",
 		"skills/search/references/command-routing.md",
+		"skills/search/references/commands.md",
 		"skills/search/references/workflows.md",
 		"skills/search/references/production-checklist.md",
 		"README.md",

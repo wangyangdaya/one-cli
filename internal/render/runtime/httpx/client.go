@@ -188,7 +188,7 @@ func previewHeaders(headers http.Header) string {
 
 	payload := map[string]any{}
 	for key, items := range headers {
-		if strings.EqualFold(key, "Authorization") {
+		if !isSafeTraceHeader(key) {
 			payload[key] = redactHeader(items)
 			continue
 		}
@@ -207,6 +207,15 @@ func previewHeaders(headers http.Header) string {
 		return "<unavailable>"
 	}
 	return preview(data)
+}
+
+func isSafeTraceHeader(name string) bool {
+	switch http.CanonicalHeaderKey(strings.TrimSpace(name)) {
+	case "Accept", "Accept-Encoding", "Content-Length", "Content-Type", "Mcp-Protocol-Version", "User-Agent":
+		return true
+	default:
+		return false
+	}
 }
 
 func redactHeader(values []string) any {

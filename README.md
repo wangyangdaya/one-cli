@@ -569,6 +569,7 @@ my-cli/
 │       │   └── demo-request.json
 │       ├── references/
 │       │   ├── command-routing.md
+│       │   ├── commands.md
 │       │   ├── workflows.md
 │       │   └── production-checklist.md
 │       └── generation-report.md
@@ -601,6 +602,7 @@ my-cli-rs/
 │       │   └── demo-request.json
 │       ├── references/
 │       │   ├── command-routing.md
+│       │   ├── commands.md
 │       │   ├── workflows.md
 │       │   └── production-checklist.md
 │       └── generation-report.md
@@ -615,7 +617,7 @@ my-cli-rs/
 ```bash
 mycli skills list
 mycli skills read users
-mycli skills read users references/command-routing.md
+mycli skills read users references/commands.md
 mycli skills --skills-dir /path/to/skills read users
 ```
 

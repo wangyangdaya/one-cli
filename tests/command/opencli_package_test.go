@@ -24,9 +24,11 @@ func TestPackageCommandCreatesInstallableGroupedSkillsBundle(t *testing.T) {
 	writePackageFixture(t, project, "skills/export/SKILL.md", "# Export\n\nvehicle-cli export list --json\n", 0o644)
 	writePackageFixture(t, project, "skills/export/README.md", "export business notes\n", 0o644)
 	writePackageFixture(t, project, "skills/export/assets/demo-request.json", "{}\n", 0o644)
+	writePackageFixture(t, project, "skills/export/references/commands.md", "# Commands\n`vehicle-cli export list --help`\n", 0o644)
 	writePackageFixture(t, project, "skills/export/references/workflows.md", "export workflow\n", 0o644)
 	writePackageFixture(t, project, "skills/export/generation-report.md", "generated export report\n", 0o644)
 	writePackageFixture(t, project, "skills/vbt_vehicle_info/SKILL.md", "# Vehicle info\n\nvehicle-cli vbt_vehicle_info get --json\n", 0o644)
+	writePackageFixture(t, project, "skills/vbt_vehicle_info/references/commands.md", "# Commands\n`vehicle-cli vbt_vehicle_info get --help`\n", 0o644)
 
 	binary := filepath.Join(t.TempDir(), "vehicle-cli")
 	writePackageFixture(t, filepath.Dir(binary), filepath.Base(binary), "prebuilt vehicle cli\n", 0o755)
@@ -47,9 +49,11 @@ func TestPackageCommandCreatesInstallableGroupedSkillsBundle(t *testing.T) {
 		"export/SKILL.md",
 		"export/README.md",
 		"export/assets/demo-request.json",
+		"export/references/commands.md",
 		"export/references/workflows.md",
 		"export/generation-report.md",
 		"vbt_vehicle_info/SKILL.md",
+		"vbt_vehicle_info/references/commands.md",
 	} {
 		if _, err := os.Stat(filepath.Join(output, rel)); err != nil {
 			t.Errorf("missing packaged path %s: %v", rel, err)
