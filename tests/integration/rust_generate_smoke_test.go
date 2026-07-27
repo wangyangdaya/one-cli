@@ -68,6 +68,14 @@ func TestGenerateRustOpenAPISmoke(t *testing.T) {
 		}
 	}
 
+	clientContent, err := os.ReadFile(filepath.Join(dir, "src", "client.rs"))
+	if err != nil {
+		t.Fatalf("read generated client.rs: %v", err)
+	}
+	if got := strings.Count(string(clientContent), "_oauth2_required: bool"); got != 2 {
+		t.Fatalf("generated non-OAuth2 Rust client has %d ignored OAuth2 parameters, want 2:\n%s", got, clientContent)
+	}
+
 	skillsIndexContent, err := os.ReadFile(filepath.Join(dir, "skills", "README.md"))
 	if err != nil {
 		t.Fatalf("read generated skills index: %v", err)

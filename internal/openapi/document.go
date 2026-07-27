@@ -1,10 +1,18 @@
 package openapi
 
 type Document struct {
-	Title      string
-	Version    string
-	Tags       []Tag
-	Operations []Operation
+	Title           string
+	Version         string
+	Tags            []Tag
+	SecuritySchemes []SecurityScheme
+	Operations      []Operation
+}
+
+type SecurityScheme struct {
+	Name                      string
+	Type                      string
+	ClientCredentialsTokenURL string
+	ClientCredentialsScopes   []string
 }
 
 type Tag struct {
@@ -18,6 +26,7 @@ type Operation struct {
 	Tag         string
 	OperationID string
 	Summary     string
+	Security    []string
 	Backend     string
 	Endpoint    string
 	Headers     map[string]string

@@ -32,10 +32,12 @@ func TestGenerateHelpDocumentsTokenAndAPIKeyRuntimeConfig(t *testing.T) {
 
 	output := string(out)
 	for _, want := range []string{
-		"token, api_key, ak_sk, or none",
+		"token, api_key, ak_sk, oauth2, or none",
+		"default token",
 		"--runtime-config",
 		"OPENCLI_AUTH_TOKEN",
 		"OPENCLI_API_KEY",
+		"OPENCLI_OAUTH_CLIENT_SECRET",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected generate help to mention %q, got: %s", want, output)

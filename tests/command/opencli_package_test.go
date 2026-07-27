@@ -81,7 +81,7 @@ func TestPackageCommandBuildsGoCLIAndLoadsPackagedRuntimeConfig(t *testing.T) {
 	project := t.TempDir()
 	output := filepath.Join(t.TempDir(), "pet-skills")
 	runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
-	writePackageFixture(t, filepath.Dir(runtimeSource), filepath.Base(runtimeSource), fmt.Sprintf("version: v1\nbase_url: %s\nauth:\n  type: bearer\n", server.URL), 0o644)
+	writePackageFixture(t, filepath.Dir(runtimeSource), filepath.Base(runtimeSource), fmt.Sprintf("base_url: %s\nauth:\n  type: bearer\n", server.URL), 0o644)
 	t.Setenv("OPENCLI_AUTH_TOKEN", "packaged-token")
 	if err := app.RunGenerate(app.GenerateOptions{
 		Input:             filepath.Join("..", "..", "examples", "petstore.yaml"),

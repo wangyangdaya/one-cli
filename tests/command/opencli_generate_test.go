@@ -575,7 +575,7 @@ func TestGenerateCommandSupplierRustAKSKPreservesBodyOrder(t *testing.T) {
 	for _, want := range []string{
 		`#[arg(short = 'H', long = "header")]`,
 		`let body = build_kanban_delivery_http_body(&args)?;`,
-		`client::request_json_text("POST", &path, query, headers, body).await?;`,
+		`client::request_json_text("POST", &path, query, headers, body, false).await?;`,
 		`parts.push(format!("\"date\":{value}"));`,
 		`parts.push(format!("\"pageSize\":{value}"));`,
 		`parts.push(format!("\"pageNum\":{value}"));`,
@@ -799,7 +799,7 @@ func TestGenerateCommandRejectsUnknownTarget(t *testing.T) {
 func TestGenerateCommandWritesSealedRuntimeConfig(t *testing.T) {
 	dir := t.TempDir()
 	runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
-	if err := os.WriteFile(runtimeSource, []byte("version: v1\nbase_url: https://api.example.com\nauth:\n  type: bearer\n"), 0o600); err != nil {
+	if err := os.WriteFile(runtimeSource, []byte("base_url: https://api.example.com\nauth:\n  type: bearer\n"), 0o600); err != nil {
 		t.Fatalf("write runtime source: %v", err)
 	}
 	t.Setenv("OPENCLI_AUTH_TOKEN", "command-test-file-token")
@@ -834,7 +834,7 @@ func TestGenerateCommandWritesSealedRuntimeConfig(t *testing.T) {
 func TestGenerateCommandAcceptsAPIKeyRuntimeConfig(t *testing.T) {
 	dir := t.TempDir()
 	runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
-	if err := os.WriteFile(runtimeSource, []byte("version: v1\nbase_url: https://api.example.com\nauth:\n  type: api_key\n  header: X-API-Key\n"), 0o600); err != nil {
+	if err := os.WriteFile(runtimeSource, []byte("base_url: https://api.example.com\nauth:\n  type: api_key\n  header: X-API-Key\n"), 0o600); err != nil {
 		t.Fatalf("write runtime source: %v", err)
 	}
 	t.Setenv("OPENCLI_API_KEY", "command-test-api-key")
@@ -864,6 +864,59 @@ func TestGenerateCommandAcceptsAPIKeyRuntimeConfig(t *testing.T) {
 	}
 }
 
+func TestGenerateCommandAcceptsOAuth2ClientCredentials(t *testing.T) {
+	dir := t.TempDir()
+	runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
+	if err := os.WriteFile(runtimeSource, []byte("base_url: https://hfins-uat-gtw.mychery.com\nauth:\n  type: oauth2\n  client_id: fssc-opencli\n"), 0o600); err != nil {
+		t.Fatalf("write runtime source: %v", err)
+	}
+	t.Setenv("OPENCLI_OAUTH_CLIENT_SECRET", "command-test-oauth-secret")
+
+	cmd := app.NewRootCommand()
+	cmd.SetArgs([]string{
+		"generate",
+		"--auth", "oauth2",
+		"--runtime-config", runtimeSource,
+		"--input", filepath.Join("..", "..", "examples", "fssc_workflow.openapi.yaml"),
+		"--output", dir,
+		"--module", "github.com/acme/generated",
+		"--app", "fssc",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute generate: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "config", "runtime.yaml"))
+	if err != nil {
+		t.Fatalf("read generated runtime config: %v", err)
+	}
+	for _, want := range []string{
+		"type: oauth2",
+		"grant_type: client_credentials",
+		"scheme: fsscOAuth",
+		"client_id: fssc-opencli",
+		"placement: query",
+		"encrypted_value: ENC[v1:",
+	} {
+		if !bytes.Contains(content, []byte(want)) {
+			t.Fatalf("generated OAuth config missing %q:\n%s", want, content)
+		}
+	}
+	if bytes.Contains(content, []byte("command-test-oauth-secret")) {
+		t.Fatalf("generated OAuth config contains plaintext client secret:\n%s", content)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "internal", "oauth")); !os.IsNotExist(err) {
+		t.Fatalf("generated project should not expose the OAuth token operation as a command: %v", err)
+	}
+	service, err := os.ReadFile(filepath.Join(dir, "internal", "service", "pending", "service.go"))
+	if err != nil {
+		// Group package names depend on the source tag; locate the generated resolver contract instead.
+		service, err = os.ReadFile(filepath.Join(dir, "internal", "config", "runtime_config.go"))
+	}
+	if err != nil || !bytes.Contains(service, []byte("ResolveOAuthToken")) {
+		t.Fatalf("generated Go runtime is missing OAuth token resolution: %v", err)
+	}
+}
+
 func TestGenerateCommandAPIKeyRequiresRuntimeConfig(t *testing.T) {
 	err := app.RunGenerate(app.GenerateOptions{
 		Input:   filepath.Join("..", "..", "examples", "petstore.yaml"),
@@ -880,7 +933,7 @@ func TestGenerateCommandAPIKeyRequiresRuntimeConfig(t *testing.T) {
 
 func TestGenerateCommandRuntimeConfigRequiresBuildCredential(t *testing.T) {
 	runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
-	if err := os.WriteFile(runtimeSource, []byte("version: v1\nauth:\n  type: bearer\n"), 0o600); err != nil {
+	if err := os.WriteFile(runtimeSource, []byte("auth:\n  type: bearer\n"), 0o600); err != nil {
 		t.Fatalf("write runtime source: %v", err)
 	}
 	t.Setenv("OPENCLI_AUTH_TOKEN", "")
@@ -905,7 +958,7 @@ func TestGenerateCommandRuntimeConfigLaunchersForGoAndRust(t *testing.T) {
 		t.Run(target, func(t *testing.T) {
 			dir := t.TempDir()
 			runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
-			if err := os.WriteFile(runtimeSource, []byte("version: v1\nbase_url: https://api.example.com\nauth:\n  type: bearer\n"), 0o600); err != nil {
+			if err := os.WriteFile(runtimeSource, []byte("base_url: https://api.example.com\nauth:\n  type: bearer\n"), 0o600); err != nil {
 				t.Fatalf("write runtime source: %v", err)
 			}
 			t.Setenv("OPENCLI_AUTH_TOKEN", "launcher-test-token")
@@ -942,7 +995,7 @@ func TestGenerateCommandRuntimeConfigDocsForGoAndRust(t *testing.T) {
 		t.Run(target, func(t *testing.T) {
 			dir := t.TempDir()
 			runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
-			if err := os.WriteFile(runtimeSource, []byte("version: v1\nbase_url: https://api.example.com\nauth:\n  type: bearer\n"), 0o600); err != nil {
+			if err := os.WriteFile(runtimeSource, []byte("base_url: https://api.example.com\nauth:\n  type: bearer\n"), 0o600); err != nil {
 				t.Fatalf("write runtime source: %v", err)
 			}
 			const credential = "docs-must-not-contain-this-token"

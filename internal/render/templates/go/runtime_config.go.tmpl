@@ -5,10 +5,16 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -20,15 +26,31 @@ var sealedRuntimeKeyShareA = [32]byte{ {{ if and .RuntimeBundle .RuntimeBundle.H
 var sealedRuntimeKeyShareB = [32]byte{ {{ if and .RuntimeBundle .RuntimeBundle.HasSecret }}{{ range .RuntimeBundle.KeyShareB }}{{ . }}, {{ end }}{{ end }} }
 
 type runtimeFile struct {
-	Version string       `yaml:"version"`
 	BaseURL string       `yaml:"base_url,omitempty"`
 	Auth    *runtimeAuth `yaml:"auth,omitempty"`
 }
 
 type runtimeAuth struct {
-	Type           string `yaml:"type"`
-	Header         string `yaml:"header,omitempty"`
-	EncryptedValue string `yaml:"encrypted_value"`
+	Type           string            `yaml:"type"`
+	Header         string            `yaml:"header,omitempty"`
+	GrantType      string            `yaml:"grant_type,omitempty"`
+	Scheme         string            `yaml:"scheme,omitempty"`
+	TokenURL       string            `yaml:"token_url,omitempty"`
+	ClientID       string            `yaml:"client_id,omitempty"`
+	ClientAuth     runtimeClientAuth `yaml:"client_auth,omitempty"`
+	Scopes         []string          `yaml:"scopes,omitempty"`
+	EncryptedValue string            `yaml:"encrypted_value"`
+}
+
+type runtimeClientAuth struct {
+	Method    string `yaml:"method,omitempty"`
+	Placement string `yaml:"placement,omitempty"`
+}
+
+var oauthTokenCache struct {
+	sync.Mutex
+	value     string
+	expiresAt time.Time
 }
 
 func ResolveBaseURL(appName, fallback string) (string, error) {
@@ -97,6 +119,124 @@ func ResolveCredential(appName, authMode, defaultHeader string) (string, string,
 	return header, secret, nil
 }
 
+func ResolveOAuthToken(appName string) (string, error) {
+	oauthTokenCache.Lock()
+	defer oauthTokenCache.Unlock()
+	if oauthTokenCache.value != "" && time.Until(oauthTokenCache.expiresAt) > time.Minute {
+		return oauthTokenCache.value, nil
+	}
+
+	config, path, err := loadRuntimeFile(appName)
+	if err != nil {
+		return "", err
+	}
+	if config == nil || config.Auth == nil {
+		return "", fmt.Errorf("missing OAuth runtime config")
+	}
+	auth := config.Auth
+	if strings.TrimSpace(auth.Type) != "oauth2" || strings.TrimSpace(auth.GrantType) != "client_credentials" {
+		return "", fmt.Errorf("runtime auth must be oauth2 client_credentials")
+	}
+	if strings.TrimSpace(auth.ClientID) == "" || strings.TrimSpace(auth.TokenURL) == "" {
+		return "", fmt.Errorf("OAuth runtime config requires client_id and token_url")
+	}
+
+	secret := strings.TrimSpace(os.Getenv("OPENCLI_OAUTH_CLIENT_SECRET"))
+	if secret == "" {
+		if strings.TrimSpace(auth.EncryptedValue) == "" {
+			return "", fmt.Errorf("missing OAuth client secret: set OPENCLI_OAUTH_CLIENT_SECRET or configure runtime auth")
+		}
+		secret, err = decryptRuntimeValue(auth.EncryptedValue, "oauth2", oauth2AADContext(*auth))
+		if err != nil {
+			return "", fmt.Errorf("decrypt OAuth client secret from %s: %w", path, err)
+		}
+	}
+	token, expiresIn, err := requestClientCredentialsToken(*auth, secret)
+	if err != nil {
+		return "", err
+	}
+	oauthTokenCache.value = token
+	if expiresIn > 0 {
+		oauthTokenCache.expiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second)
+	} else {
+		oauthTokenCache.expiresAt = time.Now().Add(5 * time.Minute)
+	}
+	return token, nil
+}
+
+func requestClientCredentialsToken(auth runtimeAuth, secret string) (string, int64, error) {
+	endpoint, err := url.Parse(strings.TrimSpace(auth.TokenURL))
+	if err != nil || endpoint.Scheme == "" || endpoint.Host == "" {
+		return "", 0, fmt.Errorf("invalid OAuth token_url")
+	}
+	values := url.Values{"grant_type": {strings.TrimSpace(auth.GrantType)}}
+	if len(auth.Scopes) > 0 {
+		values.Set("scope", strings.Join(auth.Scopes, " "))
+	}
+
+	var body io.Reader
+	placement := strings.TrimSpace(auth.ClientAuth.Placement)
+	switch placement {
+	case "query":
+		values.Set("client_id", strings.TrimSpace(auth.ClientID))
+		values.Set("client_secret", secret)
+		endpoint.RawQuery = values.Encode()
+	case "body":
+		values.Set("client_id", strings.TrimSpace(auth.ClientID))
+		values.Set("client_secret", secret)
+		body = strings.NewReader(values.Encode())
+	case "basic":
+		body = strings.NewReader(values.Encode())
+	default:
+		return "", 0, fmt.Errorf("unsupported OAuth client secret placement %q", placement)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, endpoint.String(), body)
+	if err != nil {
+		return "", 0, fmt.Errorf("build OAuth token request")
+	}
+	if placement != "query" {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+	if placement == "basic" {
+		req.SetBasicAuth(strings.TrimSpace(auth.ClientID), secret)
+	}
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return "", 0, fmt.Errorf("request OAuth token endpoint %s://%s%s: request failed", endpoint.Scheme, endpoint.Host, endpoint.Path)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", 0, fmt.Errorf("OAuth token endpoint returned %s", resp.Status)
+	}
+	var result struct {
+		AccessToken string `json:"access_token"`
+		TokenType   string `json:"token_type"`
+		ExpiresIn   int64  `json:"expires_in"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
+		return "", 0, fmt.Errorf("decode OAuth token response: %w", err)
+	}
+	if strings.TrimSpace(result.AccessToken) == "" {
+		return "", 0, fmt.Errorf("OAuth token response is missing access_token")
+	}
+	if result.TokenType != "" && !strings.EqualFold(strings.TrimSpace(result.TokenType), "bearer") {
+		return "", 0, fmt.Errorf("unsupported OAuth token_type %q", result.TokenType)
+	}
+	return strings.TrimSpace(result.AccessToken), result.ExpiresIn, nil
+}
+
+func oauth2AADContext(auth runtimeAuth) string {
+	return strings.Join([]string{
+		strings.TrimSpace(auth.GrantType),
+		strings.TrimSpace(auth.Scheme),
+		strings.TrimSpace(auth.TokenURL),
+		strings.TrimSpace(auth.ClientID),
+		strings.TrimSpace(auth.ClientAuth.Method),
+		strings.TrimSpace(auth.ClientAuth.Placement),
+	}, "|")
+}
+
 func unresolvedCredential(authMode, header string) (string, string, error) {
 	if !runtimeCredentialRequired {
 		return header, "", nil
@@ -154,9 +294,6 @@ func readRuntimeFile(path string) (*runtimeFile, error) {
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&config); err != nil {
 		return nil, fmt.Errorf("parse runtime config %s: %w", path, err)
-	}
-	if strings.TrimSpace(config.Version) != "v1" {
-		return nil, fmt.Errorf("runtime config %s: version must be v1", path)
 	}
 	return &config, nil
 }

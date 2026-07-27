@@ -13,6 +13,7 @@ const (
 	AuthTypeToken  = "token"
 	AuthTypeAPIKey = "api_key"
 	AuthTypeAKSK   = "ak_sk"
+	AuthTypeOAuth2 = "oauth2"
 )
 
 // Signer profile constants identify concrete AK/SK signing contracts.
@@ -90,6 +91,7 @@ type Operation struct {
 	CommandName      string
 	RemoteName       string
 	Summary          string
+	AuthRequired     bool
 	BodyMode         string
 	BodyRequired     bool
 	BodyFields       []BodyField

@@ -48,6 +48,7 @@ func Build(doc openapi.Document, cfg configgen.Config) Plan {
 			CommandName:      commandName,
 			RemoteName:       strings.TrimSpace(op.OperationID),
 			Summary:          strings.TrimSpace(op.Summary),
+			AuthRequired:     len(op.Security) > 0,
 			BodyMode:         bodyMode(op, groupName, commandName, cfg),
 			BodyRequired:     op.RequestBody.Required,
 			BodyFields:       make([]model.BodyField, 0, len(op.RequestBody.JSONFields)),

@@ -73,6 +73,12 @@ export OPENCLI_SK='your-secret-key'
 Requests include `appKey`, `sign`, `timestamp`, and `nonce` headers. Signer profile: `{{ appSignerProfile .App }}`.
 
 The `supplier_edi` profile uses the supplier `sha512Hex` canonical string: `method`, `/v2...` path, `appKey`, `appSecret`, `timestamp`, `nonce`, and compact `jsonBody`.
+{{- else if appUsesOAuth2 .App }}
+## Auth
+
+Mode: `oauth2` (`client_credentials`)
+
+The CLI obtains an access token from the configured OAuth token endpoint and injects `Authorization: Bearer <access_token>` for protected operations. The public `client_id` and sealed client secret are stored in `config/runtime.yaml`. Set `OPENCLI_OAUTH_CLIENT_SECRET` only for a plaintext per-run override.
 {{- else }}
 ## Auth
 

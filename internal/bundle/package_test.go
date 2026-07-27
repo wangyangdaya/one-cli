@@ -68,7 +68,7 @@ func TestPackageAdaptsNewGroupDocumentsToSharedBinary(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "vehicle-api")
 	binary := filepath.Join(t.TempDir(), "vehicle-cli")
 	writeFixture(t, project, "bin/vehicle-cli", "launcher\n", 0o755)
-	writeFixture(t, project, "skills/SKILL.md", "vehicle-cli skills list\n[vehicle info](vbt_vehicle_info/SKILL.md)\n", 0o644)
+	writeFixture(t, project, "skills/SKILL.md", "---\nname: vehicle-cli-skills\ndescription: Route vehicle requests.\n---\n\nvehicle-cli skills list\n[vehicle info](vbt_vehicle_info/SKILL.md)\n", 0o644)
 	writeFixture(t, project, "skills/README.md", "vehicle-cli skills read vbt_vehicle_info\n", 0o644)
 	writeFixture(t, project, "skills/vbt_vehicle_info/SKILL.md", "---\nmetadata:\n  requires:\n    bins: [\"vehicle-cli\"]\n  cliHelp: \"vehicle-cli vbt_vehicle_info --help\"\n---\nvehicle-cli vbt_vehicle_info get --json\nvehicle-cli skills list\nvehicle-cli skills read vbt_vehicle_info\nDefault sealed runtime file: `config/runtime.yaml`\n", 0o644)
 	writeFixture(t, project, "skills/vbt_vehicle_info/references/commands.md", "# Commands\n`vehicle-cli vbt_vehicle_info get --help`\n`vehicle-cli vbt_vehicle_info list --help`\n", 0o644)
@@ -99,7 +99,7 @@ func TestPackageAdaptsNewGroupDocumentsToSharedBinary(t *testing.T) {
 	}
 	assertFileContent(t, output, "vbt_vehicle_info/references/workflows.md", "`../bin/vehicle-cli vbt_vehicle_info list --json`\n")
 	assertFileContent(t, output, "export-history/SKILL.md", "../bin/vehicle-cli export-history list --json\n")
-	assertFileContent(t, output, "SKILL.md", "./bin/vehicle-cli skills list\n[vehicle info](vbt_vehicle_info/SKILL.md)\n")
+	assertFileContent(t, output, "SKILL.md", "---\nname: vehicle-api\ndescription: Route vehicle requests.\n---\n\n./bin/vehicle-cli skills list\n[vehicle info](vbt_vehicle_info/SKILL.md)\n")
 }
 
 func TestDiscoverProjectRejectsAmbiguousLaunchers(t *testing.T) {
@@ -133,10 +133,9 @@ func TestPackageCreatesRootRouterForSingleGroupProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read generated router: %v", err)
 	}
-	for _, want := range []string{"name: vehicle-cli-skills", "export/SKILL.md", "./bin/vehicle-cli skills list"} {
-		if !strings.Contains(string(router), want) {
-			t.Fatalf("router missing %q:\n%s", want, router)
-		}
+	want := "---\nname: vehicle-api\ndescription: Route requests for vehicle-cli to its generated command-group Skill.\n---\n\n# vehicle-cli Skills Router\n\nRead [export/SKILL.md](export/SKILL.md) before invoking the shared CLI.\n\nList installed groups with:\n\n```bash\n./bin/vehicle-cli skills list\n```\n"
+	if string(router) != want {
+		t.Fatalf("router = %q, want %q", router, want)
 	}
 }
 

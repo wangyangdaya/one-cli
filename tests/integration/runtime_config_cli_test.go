@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"one-cli/internal/app"
@@ -100,6 +101,114 @@ func TestGeneratedGoAPIKeyRuntimeConfig(t *testing.T) {
 	}
 }
 
+func TestGeneratedGoOAuth2ClientCredentials(t *testing.T) {
+	const (
+		clientID     = "fssc-opencli"
+		clientSecret = "sealed-client-secret"
+		accessToken  = "issued-access-token"
+	)
+	var tokenRequests atomic.Int32
+	var businessRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/token":
+			tokenRequests.Add(1)
+			if got := r.Header.Get("Authorization"); got != "" {
+				t.Errorf("token request Authorization = %q, want empty", got)
+			}
+			if got := r.URL.Query().Get("client_id"); got != clientID {
+				t.Errorf("client_id = %q, want %q", got, clientID)
+			}
+			if got := r.URL.Query().Get("client_secret"); got != clientSecret {
+				t.Errorf("client_secret = %q, want sealed credential", got)
+			}
+			if got := r.URL.Query().Get("grant_type"); got != "client_credentials" {
+				t.Errorf("grant_type = %q, want client_credentials", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"` + accessToken + `","token_type":"bearer","expires_in":3600}`))
+		case "/items":
+			businessRequests.Add(1)
+			if got := r.Header.Get("Authorization"); got != "Bearer "+accessToken {
+				t.Errorf("business Authorization = %q, want Bearer token", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"message":"ok"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	specPath := filepath.Join(t.TempDir(), "oauth.yaml")
+	spec := fmt.Sprintf(`
+openapi: 3.0.3
+info: {title: OAuth API, version: 1.0.0}
+paths:
+  /oauth/token:
+    post:
+      tags: [auth]
+      operationId: getToken
+      security: []
+      parameters:
+        - {name: client_id, in: query, required: true, schema: {type: string}}
+        - {name: client_secret, in: query, required: true, schema: {type: string}}
+        - {name: grant_type, in: query, required: true, schema: {type: string}}
+      responses:
+        "200": {description: ok}
+  /items:
+    get:
+      tags: [items]
+      operationId: listItems
+      security:
+        - vendorOAuth: []
+      responses:
+        "200": {description: ok}
+components:
+  securitySchemes:
+    vendorOAuth:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: %s/oauth/token
+          scopes: {}
+`, server.URL)
+	if err := os.WriteFile(specPath, []byte(spec), 0o600); err != nil {
+		t.Fatalf("write OAuth spec: %v", err)
+	}
+	runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
+	if err := os.WriteFile(runtimeSource, []byte(fmt.Sprintf("base_url: %s\nauth:\n  type: oauth2\n  client_id: %s\n", server.URL, clientID)), 0o600); err != nil {
+		t.Fatalf("write OAuth runtime source: %v", err)
+	}
+	t.Setenv("OPENCLI_OAUTH_CLIENT_SECRET", clientSecret)
+	dir := t.TempDir()
+	if err := app.RunGenerate(app.GenerateOptions{
+		Input:             specPath,
+		Output:            dir,
+		Module:            "github.com/acme/generated",
+		AppName:           "oauthcli",
+		Auth:              "oauth2",
+		Target:            "go",
+		RuntimeConfigPath: runtimeSource,
+	}); err != nil {
+		t.Fatalf("generate OAuth CLI: %v", err)
+	}
+
+	cmd := exec.Command("go", "run", "./cmd/oauthcli", "items", "list")
+	cmd.Dir = dir
+	cmd.Env = append(runtimeTestEnv(dir), "OPENCLI_CONFIG="+filepath.Join(dir, "config", "runtime.yaml"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run generated OAuth CLI: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "ok") {
+		t.Fatalf("generated OAuth CLI output = %s", out)
+	}
+	if tokenRequests.Load() != 1 || businessRequests.Load() != 1 {
+		t.Fatalf("requests: token=%d business=%d, want 1 each", tokenRequests.Load(), businessRequests.Load())
+	}
+}
+
 func TestGeneratedGoRequiredCredentialDoesNotLoadRuntimeConfigFromCWD(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -157,6 +266,53 @@ func TestGeneratedRustRuntimeConfig(t *testing.T) {
 		{name: "plaintext environment override", env: []string{"OPENCLI_AUTH_TOKEN=env-token"}, wantHeader: "Bearer env-token"},
 		{name: "explicit header override", env: []string{"OPENCLI_AUTH_TOKEN=env-token"}, extraArgs: []string{"--header", "Authorization: Bearer explicit-token"}, wantHeader: "Bearer explicit-token"},
 	})
+}
+
+func TestGeneratedRustBaseURLConfigUsesRuntimeToken(t *testing.T) {
+	if _, err := exec.LookPath("cargo"); err != nil {
+		t.Skip("cargo not installed")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer runtime-token" {
+			t.Errorf("Authorization = %q, want runtime token", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":"ok"}`))
+	}))
+	defer server.Close()
+
+	sourcePath := filepath.Join(t.TempDir(), "runtime.yaml")
+	if err := os.WriteFile(sourcePath, []byte("base_url: "+server.URL+"\n"), 0o600); err != nil {
+		t.Fatalf("write runtime source: %v", err)
+	}
+	t.Setenv("OPENCLI_AUTH_TOKEN", "")
+	dir := t.TempDir()
+	if err := app.RunGenerate(app.GenerateOptions{
+		Input:             filepath.Join("..", "..", "examples", "petstore.yaml"),
+		Output:            dir,
+		Module:            "github.com/acme/generated",
+		AppName:           "petcli",
+		Auth:              "token",
+		Target:            "rust",
+		RuntimeConfigPath: sourcePath,
+	}); err != nil {
+		t.Fatalf("generate Rust CLI: %v", err)
+	}
+
+	cmd := exec.Command("cargo", "run", "--", "pet", "list", "--limit", "10")
+	cmd.Dir = dir
+	cmd.Env = append(runtimeTestEnv(dir),
+		"OPENCLI_CONFIG="+filepath.Join(dir, "config", "runtime.yaml"),
+		"OPENCLI_AUTH_TOKEN=runtime-token",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		output := string(out)
+		if strings.Contains(output, "Could not resolve host") || strings.Contains(output, "failed to download from") {
+			t.Skipf("cargo run skipped due to dependency network restriction:\n%s", output)
+		}
+		t.Fatalf("run generated Rust CLI: %v\n%s", err, output)
+	}
 }
 
 func TestGeneratedRustAPIKeyRuntimeConfig(t *testing.T) {
@@ -260,7 +416,7 @@ func generateRuntimeConfigCLI(t *testing.T, target, authMode, fileAuthType, head
 	if header != "" {
 		authMetadata += "  header: " + header + "\n"
 	}
-	source := fmt.Sprintf("version: v1\nbase_url: %s\n%s", baseURL, authMetadata)
+	source := fmt.Sprintf("base_url: %s\n%s", baseURL, authMetadata)
 	if err := os.WriteFile(sourcePath, []byte(source), 0o600); err != nil {
 		t.Fatalf("write runtime source: %v", err)
 	}
@@ -288,7 +444,7 @@ func runtimeTestEnv(dir string) []string {
 	for _, value := range os.Environ() {
 		name, _, _ := strings.Cut(value, "=")
 		switch name {
-		case "OPENCLI_BASE_URL", "OPENCLI_AUTH_TOKEN", "OPENCLI_API_KEY", "OPENCLI_CONFIG":
+		case "OPENCLI_BASE_URL", "OPENCLI_AUTH_TOKEN", "OPENCLI_API_KEY", "OPENCLI_OAUTH_CLIENT_SECRET", "OPENCLI_CONFIG":
 			continue
 		}
 		env = append(env, value)

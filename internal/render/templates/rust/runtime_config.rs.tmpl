@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -17,7 +19,6 @@ const KEY_SHARE_B: [u8; 32] = [{{ if and .RuntimeBundle .RuntimeBundle.HasSecret
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RuntimeFile {
-    version: String,
     #[serde(default)]
     base_url: String,
     auth: Option<RuntimeAuth>,
@@ -31,7 +32,35 @@ struct RuntimeAuth {
     #[serde(default)]
     header: String,
     #[serde(default)]
+    grant_type: String,
+    #[serde(default)]
+    scheme: String,
+    #[serde(default)]
+    token_url: String,
+    #[serde(default)]
+    client_id: String,
+    #[serde(default)]
+    client_auth: RuntimeClientAuth,
+    #[serde(default)]
+    scopes: Vec<String>,
+    #[serde(default)]
     encrypted_value: String,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RuntimeClientAuth {
+    #[serde(default)]
+    method: String,
+    #[serde(default)]
+    placement: String,
+}
+
+#[derive(Deserialize)]
+struct OAuthTokenResponse {
+    access_token: String,
+    #[serde(default)]
+    token_type: String,
 }
 
 pub fn resolve_base_url(app_name: &str, fallback: &str) -> AppResult<String> {
@@ -96,6 +125,87 @@ pub fn resolve_credential(app_name: &str, auth_mode: &str, default_header: &str)
     Ok((header, Some(secret)))
 }
 
+pub async fn resolve_oauth_token(app_name: &str) -> AppResult<String> {
+    let Some((config, path)) = load_runtime_file(app_name)? else {
+        return Err("missing OAuth runtime config".to_string());
+    };
+    let Some(auth) = config.auth else {
+        return Err("missing OAuth runtime config".to_string());
+    };
+    if auth.auth_type.trim() != "oauth2" || auth.grant_type.trim() != "client_credentials" {
+        return Err("runtime auth must be oauth2 client_credentials".to_string());
+    }
+    if auth.client_id.trim().is_empty() || auth.token_url.trim().is_empty() {
+        return Err("OAuth runtime config requires client_id and token_url".to_string());
+    }
+    let secret = match env_value("OPENCLI_OAUTH_CLIENT_SECRET") {
+        Some(secret) => secret,
+        None if auth.encrypted_value.trim().is_empty() => {
+            return Err("missing OAuth client secret: set OPENCLI_OAUTH_CLIENT_SECRET or configure runtime auth".to_string());
+        }
+        None => decrypt_runtime_value(&auth.encrypted_value, "oauth2", &oauth2_aad_context(&auth))
+            .map_err(|err| format!("decrypt OAuth client secret from {}: {err}", path.display()))?,
+    };
+
+    let mut endpoint = reqwest::Url::parse(auth.token_url.trim()).map_err(|_| "invalid OAuth token_url".to_string())?;
+    let mut parameters = vec![("grant_type".to_string(), auth.grant_type.trim().to_string())];
+    if !auth.scopes.is_empty() {
+        parameters.push(("scope".to_string(), auth.scopes.join(" ")));
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|err| err.to_string())?;
+    let placement = auth.client_auth.placement.trim();
+    let mut request = match placement {
+        "query" => {
+            parameters.push(("client_id".to_string(), auth.client_id.trim().to_string()));
+            parameters.push(("client_secret".to_string(), secret.clone()));
+            {
+                let mut pairs = endpoint.query_pairs_mut();
+                for (name, value) in &parameters {
+                    pairs.append_pair(name, value);
+                }
+            }
+            client.post(endpoint.clone())
+        }
+        "body" => {
+            parameters.push(("client_id".to_string(), auth.client_id.trim().to_string()));
+            parameters.push(("client_secret".to_string(), secret.clone()));
+            client.post(endpoint.clone()).form(&parameters)
+        }
+        "basic" => client.post(endpoint.clone()).form(&parameters).basic_auth(auth.client_id.trim(), Some(secret)),
+        other => return Err(format!("unsupported OAuth client secret placement {other:?}")),
+    };
+    request = request.header("Accept", "application/json");
+    let response = request.send().await.map_err(|_| {
+        format!("request OAuth token endpoint {}://{}{}: request failed",
+            endpoint.scheme(), endpoint.host_str().unwrap_or(""), endpoint.path())
+    })?;
+    if !response.status().is_success() {
+        return Err(format!("OAuth token endpoint returned {}", response.status()));
+    }
+    let token: OAuthTokenResponse = response.json().await.map_err(|err| format!("decode OAuth token response: {err}"))?;
+    if token.access_token.trim().is_empty() {
+        return Err("OAuth token response is missing access_token".to_string());
+    }
+    if !token.token_type.trim().is_empty() && !token.token_type.eq_ignore_ascii_case("bearer") {
+        return Err(format!("unsupported OAuth token_type {:?}", token.token_type));
+    }
+    Ok(token.access_token.trim().to_string())
+}
+
+fn oauth2_aad_context(auth: &RuntimeAuth) -> String {
+    [
+        auth.grant_type.trim(),
+        auth.scheme.trim(),
+        auth.token_url.trim(),
+        auth.client_id.trim(),
+        auth.client_auth.method.trim(),
+        auth.client_auth.placement.trim(),
+    ].join("|")
+}
+
 fn unresolved_credential(auth_mode: &str, header: &str) -> AppResult<(String, Option<String>)> {
     if RUNTIME_CREDENTIAL_REQUIRED {
         Err(missing_credential_error(auth_mode))
@@ -152,9 +262,6 @@ fn read_runtime_file(path: &Path) -> AppResult<RuntimeFile> {
         Err(err) => return Err(format!("read runtime config {}: {err}", path.display())),
     };
     let config: RuntimeFile = serde_yaml::from_str(&raw).map_err(|err| format!("parse runtime config {}: {err}", path.display()))?;
-    if config.version.trim() != "v1" {
-        return Err(format!("runtime config {}: version must be v1", path.display()));
-    }
     Ok(config)
 }
 

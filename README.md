@@ -232,7 +232,7 @@ opencli generate \
 | `--module` | ✅ | Go target 下是 Go module 路径；Rust target 下用作 Cargo package 名称来源 |
 | `--app` | ✅ | CLI 二进制名称和根命令名 |
 | `--app-version` | ❌ | 生成出来的 CLI 项目版本；覆盖 `opencli.yaml` 的 `app.version` |
-| `--auth` | ❌ | 生成认证模式：`token`、`api_key`、`ak_sk` 或 `none` |
+| `--auth` | ❌ | 生成认证模式：`token`、`api_key`、`ak_sk`、`oauth2` 或 `none`；默认 `token` |
 | `--signer` | ❌ | AK/SK 签名 profile；当前支持 `supplier_edi` |
 | `--skill-lang` | ❌ | 生成的 Skill 文档语言：`en` 或 `zh`，默认 `en` |
 | `--config` | ❌ | 配置文件路径（可选） |
@@ -244,14 +244,70 @@ opencli generate \
 
 `--skill-lang zh` 会生成中文 `skills/<group>/` 文档；不传时默认生成英文文档。生成出来的文件名保持不变，例如 `SKILL.md`、`README.md`、`generation-report.md`。
 
+#### 认证模式
+
+`--auth` 的值及边界：
+
+| 值 | 凭证来源 | 生成后的请求行为 |
+|---|---|---|
+| `token` | 已有 Bearer Token | 直接注入 `Authorization: Bearer <token>` |
+| `api_key` | API Key | 注入运行配置声明的 API Key 请求头 |
+| `ak_sk` | Access Key / Secret Key | 每次请求计算并注入签名 |
+| `oauth2` | OAuth Client ID / Client Secret | 先通过 Client Credentials 获取 Access Token，再注入 Bearer Token |
+| `none` | 无 | 不注入认证信息 |
+
+未传 `--auth` 时，先读取 `opencli.yaml` 的 `auth.type`；两者都未配置时使用默认值 `token`。因此无需认证的接口应显式使用 `--auth none` 或配置 `auth.type: none`。
+
+`token` 与 `oauth2` 最终都会发送 Bearer Token，但来源不同：`token` 使用调用方已有的 Token，`oauth2` 由生成后的 CLI 自动请求 Token Endpoint。
+
+`token` 模式不要求提供 Runtime Config。完全不使用 `runtime.yaml` 时，生成阶段不需要设置 `OPENCLI_AUTH_TOKEN`：
+
+```bash
+opencli generate \
+  --input ./api.yaml \
+  --output ./my-cli \
+  --module github.com/myorg/my-cli \
+  --app mycli \
+  --auth token
+```
+
+生成后的 CLI 在运行时从环境变量读取 Base URL 和 token：
+
+```bash
+export OPENCLI_BASE_URL='https://api.example.com'
+export OPENCLI_AUTH_TOKEN='your-token'
+./my-cli <group> <command>
+```
+
+如果 CLI 只需要固定 Base URL、接口不需要认证，Runtime Config 可以只写：
+
+```yaml
+base_url: https://api.example.com
+```
+
+生成时应显式使用 `--auth none`：
+
+```bash
+opencli generate \
+  --input ./api.yaml \
+  --output ./my-cli \
+  --module github.com/myorg/my-cli \
+  --app mycli \
+  --auth none \
+  --runtime-config ./runtime.yaml
+```
+
+如果仅配置 Base URL 但仍需要 token 认证，可以保留默认的 `token` 模式；生成阶段不需要 token，生成后的 CLI 会在运行时读取 `OPENCLI_AUTH_TOKEN`。
+
 #### Token 和 API Key
 
-OpenCLI 不提供 `--token <secret>` 或 `--api-key <secret>` 参数，避免秘密出现在 shell history 和进程参数中。认证类型由 `--auth` 指定，秘密在生成时从环境变量读取。
+OpenCLI 不提供 `--token <secret>` 或 `--api-key <secret>` 参数，避免秘密出现在 shell history 和进程参数中。认证类型由 `--auth` 指定；Runtime Config 声明了 `auth`、需要密封凭证时，秘密在生成阶段从环境变量读取。
+
+需要密封 token 时，环境变量由 `opencli generate` 进程自动读取，不需要把 token 写进 `runtime.yaml`，也不需要在生成命令中增加 token 参数。如果当前终端已经导出了 `OPENCLI_AUTH_TOKEN`，直接执行生成命令即可。
 
 Token（Bearer）运行配置源文件统一命名为 `runtime.yaml`：
 
 ```yaml
-version: v1
 base_url: https://api.example.com
 auth:
   type: bearer
@@ -271,10 +327,17 @@ opencli generate \
   --runtime-config ./runtime.yaml
 ```
 
+Token 只填写原始值，不要包含 `Bearer ` 前缀；生成后的 CLI 会自动构造 `Authorization: Bearer <token>`。如果生成时报错：
+
+```text
+Error: OPENCLI_AUTH_TOKEN is required to seal runtime auth
+```
+
+说明当前 `opencli` 进程没有读取到该环境变量。请先在同一个终端执行 `export OPENCLI_AUTH_TOKEN='your-token'`，再重新执行生成命令。也可以先用 `printenv OPENCLI_AUTH_TOKEN` 确认变量是否已导出；不要把真实 token 写入仓库文件。
+
 API Key 也使用统一的运行配置文件名 `runtime.yaml`。`header` 是服务端实际接收 API Key 的请求头名称：
 
 ```yaml
-version: v1
 base_url: https://api.example.com
 auth:
   type: api_key
@@ -306,6 +369,9 @@ OPENCLI_AUTH_TOKEN='temporary-token' ./bin/mycli <group> <command>
 # API Key 临时覆盖
 OPENCLI_API_KEY='temporary-api-key' ./bin/mycli <group> <command>
 
+# OAuth Client Secret 临时覆盖
+OPENCLI_OAUTH_CLIENT_SECRET='temporary-client-secret' ./bin/mycli <group> <command>
+
 # Base URL 或整个配置文件临时覆盖
 OPENCLI_BASE_URL='https://staging-api.example.com' ./bin/mycli <group> <command>
 OPENCLI_CONFIG='./config/staging.yaml' ./bin/mycli <group> <command>
@@ -315,11 +381,66 @@ OPENCLI_CONFIG='./config/staging.yaml' ./bin/mycli <group> <command>
 
 ```text
 命令显式 --header
-  > OPENCLI_AUTH_TOKEN / OPENCLI_API_KEY
+  > OPENCLI_AUTH_TOKEN / OPENCLI_API_KEY / OPENCLI_OAUTH_CLIENT_SECRET
   > config/runtime.yaml 中的密封凭证
 ```
 
 其中 `--auth api_key` 必须同时提供 `--runtime-config`，因为生成器需要从 YAML 中读取 API Key 请求头名称。`--auth token` 如果不提供 `--runtime-config`，则不会生成凭证文件，CLI 继续在运行时读取 `OPENCLI_AUTH_TOKEN`。
+
+当前配置组合的边界如下：
+
+| 需求 | 生成方式 |
+|---|---|
+| Token 模式，不使用 Runtime Config | 不传 `--runtime-config`；生成阶段不需要 token，运行 CLI 时设置 `OPENCLI_BASE_URL` 和 `OPENCLI_AUTH_TOKEN` |
+| 只固定 Base URL，Token 在运行时提供 | `runtime.yaml` 只写 `base_url`；使用 `--auth token`，生成阶段不需要 token，运行 CLI 时设置 `OPENCLI_AUTH_TOKEN` |
+| 只固定 Base URL，不认证 | `runtime.yaml` 只写 `base_url`，并使用 `--auth none` |
+| 固定 Base URL，并把 Token 密封进 CLI | `runtime.yaml` 写 `base_url` 和 `auth.type: bearer`，生成时导出 `OPENCLI_AUTH_TOKEN` |
+
+#### OAuth 2.0 Client Credentials
+
+`--auth oauth2` 当前明确表示 OAuth 2.0 Client Credentials，不是所有 OAuth 2.0 Grant Type 的统称。`--auth` 只选择认证机制，因此不另设只能填写一个值的 Grant Type 参数；生成配置会显式写入 `grant_type: client_credentials`，其他 Grant Type 会被拒绝。生成器从 OpenAPI `components.securitySchemes` 读取唯一的 `clientCredentials.tokenUrl` 和 scopes，并根据 Token 操作中 `client_id`、`client_secret` 参数的位置识别三方兼容方式。当前支持 `basic`、`body` 和 `query` 三种 Client Secret 位置。
+
+运行配置中的 `client_id` 是公开标识，不加密；`client_secret` 在生成时从 `OPENCLI_OAUTH_CLIENT_SECRET` 读取并密封到 `encrypted_value`：
+
+```yaml
+base_url: https://api.example.com
+auth:
+  type: oauth2
+  client_id: my-service-cli
+```
+
+当 OpenAPI 声明唯一的 `clientCredentials` Security Scheme 时，生成器会从文档补齐：
+
+```yaml
+auth:
+  type: oauth2
+  grant_type: client_credentials
+  scheme: serviceOAuth
+  token_url: https://identity.example.com/oauth/token
+  client_id: my-service-cli
+  client_auth:
+    method: client_secret
+    placement: query
+  encrypted_value: ENC[v1:...]
+```
+
+生成命令：
+
+```bash
+export OPENCLI_OAUTH_CLIENT_SECRET='your-client-secret'
+
+opencli generate \
+  --input ./api.yaml \
+  --output ./my-cli \
+  --module github.com/myorg/my-cli \
+  --app mycli \
+  --auth oauth2 \
+  --runtime-config ./runtime.yaml
+```
+
+运行时，CLI 对声明该 OAuth Security Scheme 的受保护操作自动获取 Access Token 并注入 `Authorization: Bearer <access_token>`。当 `--auth oauth2` 启用时，对应的 Token Endpoint operation 不再生成公开命令，避免产生要求用户传入 `--client-secret` 的重复入口。可使用 `OPENCLI_OAUTH_CLIENT_SECRET` 临时覆盖密封的 Client Secret。
+
+`query` 表示三方 Token Endpoint 要求把 `client_id` 和 `client_secret` 放在 URL Query 中。该方式可能被代理或访问日志记录，生成运行时不会在错误信息中输出完整 Token URL；如果三方支持，应优先使用 `basic` 或 `body`。
 
 ### `opencli package`
 

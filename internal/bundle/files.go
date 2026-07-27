@@ -70,7 +70,22 @@ func copyAdaptedFile(source, destination string, mode os.FileMode, appName, pref
 	if err != nil {
 		return err
 	}
-	adapted := removeBundledBinaryRequirement(string(content), appName)
+	adapted := adaptFileContent(string(content), appName, prefix)
+	return writeFileAtomic(destination, []byte(adapted), mode)
+}
+
+func copyAdaptedRootSkill(source, destination string, mode os.FileMode, appName, prefix, skillName string) error {
+	content, err := os.ReadFile(source)
+	if err != nil {
+		return err
+	}
+	adapted := adaptFileContent(string(content), appName, prefix)
+	adapted = replaceFrontmatterName(adapted, skillName)
+	return writeFileAtomic(destination, []byte(adapted), mode)
+}
+
+func adaptFileContent(content, appName, prefix string) string {
+	adapted := removeBundledBinaryRequirement(content, appName)
 	adapted = adaptCommandPaths(adapted, appName, prefix)
 	configPrefix := "./config/runtime.yaml"
 	if prefix == "../bin/" {
@@ -78,9 +93,24 @@ func copyAdaptedFile(source, destination string, mode os.FileMode, appName, pref
 		adapted = strings.ReplaceAll(adapted, "../bin/"+appName+" skills list", "../bin/"+appName+" skills --skills-dir .. list")
 		adapted = strings.ReplaceAll(adapted, "../bin/"+appName+" skills read", "../bin/"+appName+" skills --skills-dir .. read")
 	}
-	adapted = replaceBareReference(adapted, "config/runtime.yaml", configPrefix)
-	content = []byte(adapted)
-	return writeFileAtomic(destination, content, mode)
+	return replaceBareReference(adapted, "config/runtime.yaml", configPrefix)
+}
+
+func replaceFrontmatterName(content, skillName string) string {
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return content
+	}
+	for index := 1; index < len(lines); index++ {
+		if strings.TrimSpace(lines[index]) == "---" {
+			return content
+		}
+		if strings.HasPrefix(strings.TrimSpace(lines[index]), "name:") {
+			lines[index] = "name: " + skillName
+			return strings.Join(lines, "\n")
+		}
+	}
+	return content
 }
 
 func copyFileAtomic(source, destination string, mode os.FileMode) error {

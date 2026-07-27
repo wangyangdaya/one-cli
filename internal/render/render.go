@@ -72,6 +72,7 @@ func renderTemplate(name string, data any) ([]byte, error) {
 			"appUsesToken":                    appUsesToken,
 			"appUsesAPIKey":                   appUsesAPIKey,
 			"appUsesAKSK":                     appUsesAKSK,
+			"appUsesOAuth2":                   appUsesOAuth2,
 			"appSignerProfile":                appSignerProfile,
 			"appSigner":                       appSigner,
 			"goString":                        goString,

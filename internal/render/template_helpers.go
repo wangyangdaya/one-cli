@@ -223,6 +223,10 @@ func appUsesAPIKey(app model.App) bool {
 	return strings.TrimSpace(app.Auth.Type) == model.AuthTypeAPIKey
 }
 
+func appUsesOAuth2(app model.App) bool {
+	return strings.TrimSpace(app.Auth.Type) == model.AuthTypeOAuth2
+}
+
 func appSignerProfile(app model.App) string {
 	if profile := strings.TrimSpace(app.Auth.Signer.Profile); profile != "" {
 		return profile

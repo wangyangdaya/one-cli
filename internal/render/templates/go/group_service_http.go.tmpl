@@ -97,6 +97,10 @@ func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (
 	if err := applyAPIKey(req); err != nil {
 		return Result{}, err
 	}
+{{- else if and (appUsesOAuth2 $.App) .AuthRequired }}
+	if err := applyOAuth2(req); err != nil {
+		return Result{}, err
+	}
 {{- end }}
 
 	resp, err := httpx.NewClient().Do(req)
@@ -410,6 +414,20 @@ func applyAPIKey(req *http.Request) error {
 		return nil
 	}
 	req.Header.Set(header, value)
+	return nil
+}
+{{- end }}
+
+{{- if appUsesOAuth2 .App }}
+func applyOAuth2(req *http.Request) error {
+	if req.Header.Get("Authorization") != "" {
+		return nil
+	}
+	token, err := config.ResolveOAuthToken("{{ $.App.Name }}")
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
 	return nil
 }
 {{- end }}

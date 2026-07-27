@@ -15,7 +15,6 @@ import (
 
 func TestLoadAndSealBearer(t *testing.T) {
 	path := writeRuntimeSource(t, `
-version: v1
 base_url: https://api.example.com
 auth:
   type: bearer
@@ -43,7 +42,6 @@ auth:
 	}
 
 	var generated struct {
-		Version string `yaml:"version"`
 		BaseURL string `yaml:"base_url"`
 		Auth    struct {
 			Type           string `yaml:"type"`
@@ -54,7 +52,7 @@ auth:
 	if err := yaml.Unmarshal(bundle.YAML, &generated); err != nil {
 		t.Fatalf("unmarshal generated YAML: %v", err)
 	}
-	if generated.Version != "v1" || generated.BaseURL != "https://api.example.com" || generated.Auth.Type != "bearer" {
+	if generated.BaseURL != "https://api.example.com" || generated.Auth.Type != "bearer" {
 		t.Fatalf("unexpected generated config: %+v", generated)
 	}
 	if got := decryptForTest(t, generated.Auth.EncryptedValue, generated.Auth.Type, generated.Auth.Header, bundle); got != credential {
@@ -62,9 +60,31 @@ auth:
 	}
 }
 
+func TestLoadAndSealTokenWithoutAuthUsesRuntimeEnvironment(t *testing.T) {
+	path := writeRuntimeSource(t, "base_url: https://api.example.com\n")
+	bundle, err := LoadAndSeal(path, SealOptions{
+		AuthMode: "token",
+		Getenv: func(key string) string {
+			t.Fatalf("unexpected credential lookup for %s", key)
+			return ""
+		},
+	})
+	if err != nil {
+		t.Fatalf("LoadAndSeal: %v", err)
+	}
+	if bundle.HasSecret {
+		t.Fatal("base-URL-only token config unexpectedly has a secret")
+	}
+	if !bytes.Contains(bundle.YAML, []byte("base_url: https://api.example.com")) {
+		t.Fatalf("generated YAML missing base URL: %s", bundle.YAML)
+	}
+	if bytes.Contains(bundle.YAML, []byte("auth:")) {
+		t.Fatalf("generated YAML unexpectedly contains auth metadata: %s", bundle.YAML)
+	}
+}
+
 func TestLoadAndSealAPIKey(t *testing.T) {
 	path := writeRuntimeSource(t, `
-version: v1
 base_url: https://api.example.com
 auth:
   type: api_key
@@ -92,6 +112,72 @@ auth:
 	}
 }
 
+func TestLoadAndSealOAuth2ClientCredentials(t *testing.T) {
+	path := writeRuntimeSource(t, `
+base_url: https://api.example.com
+auth:
+  type: oauth2
+  client_id: fssc-opencli
+`)
+	const credential = "oauth-client-secret"
+	bundle, err := LoadAndSeal(path, SealOptions{
+		AuthMode: "oauth2",
+		OAuth2: OAuth2Defaults{
+			GrantType: "client_credentials",
+			Scheme:    "fsscOAuth",
+			TokenURL:  "https://identity.example.com/oauth/token",
+			Placement: "query",
+		},
+		Getenv: func(key string) string {
+			if key == "OPENCLI_OAUTH_CLIENT_SECRET" {
+				return credential
+			}
+			return ""
+		},
+		Random: bytes.NewReader(bytes.Repeat([]byte{0x6b}, 128)),
+	})
+	if err != nil {
+		t.Fatalf("LoadAndSeal: %v", err)
+	}
+	if bytes.Contains(bundle.YAML, []byte(credential)) {
+		t.Fatalf("generated YAML contains plaintext client secret:\n%s", bundle.YAML)
+	}
+	if !bytes.Contains(bundle.YAML, []byte("client_id: fssc-opencli")) ||
+		!bytes.Contains(bundle.YAML, []byte("token_url: https://identity.example.com/oauth/token")) ||
+		!bytes.Contains(bundle.YAML, []byte("placement: query")) {
+		t.Fatalf("generated YAML is missing OAuth metadata:\n%s", bundle.YAML)
+	}
+
+	var generated struct {
+		Auth struct {
+			Type           string `yaml:"type"`
+			GrantType      string `yaml:"grant_type"`
+			Scheme         string `yaml:"scheme"`
+			TokenURL       string `yaml:"token_url"`
+			ClientID       string `yaml:"client_id"`
+			EncryptedValue string `yaml:"encrypted_value"`
+			ClientAuth     struct {
+				Method    string `yaml:"method"`
+				Placement string `yaml:"placement"`
+			} `yaml:"client_auth"`
+		} `yaml:"auth"`
+	}
+	if err := yaml.Unmarshal(bundle.YAML, &generated); err != nil {
+		t.Fatalf("unmarshal generated YAML: %v", err)
+	}
+	aad := strings.Join([]string{
+		generated.Auth.GrantType,
+		generated.Auth.Scheme,
+		generated.Auth.TokenURL,
+		generated.Auth.ClientID,
+		generated.Auth.ClientAuth.Method,
+		generated.Auth.ClientAuth.Placement,
+	}, "|")
+	if got := decryptForTest(t, generated.Auth.EncryptedValue, generated.Auth.Type, aad, bundle); got != credential {
+		t.Fatalf("decrypted credential = %q, want %q", got, credential)
+	}
+}
+
 func TestLoadAndSealRejectsInvalidSources(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -102,36 +188,54 @@ func TestLoadAndSealRejectsInvalidSources(t *testing.T) {
 	}{
 		{
 			name:     "unknown field",
-			source:   "version: v1\nbase_urll: https://api.example.com\n",
+			source:   "base_urll: https://api.example.com\n",
 			authMode: "none",
 			want:     "base_urll",
 		},
 		{
 			name:     "plaintext token",
-			source:   "version: v1\nauth:\n  type: bearer\n  token: exposed\n",
+			source:   "auth:\n  type: bearer\n  token: exposed\n",
 			authMode: "token",
 			getenv:   func(string) string { return "secret" },
 			want:     "token",
 		},
 		{
 			name:     "missing credential",
-			source:   "version: v1\nauth:\n  type: bearer\n",
+			source:   "auth:\n  type: bearer\n",
 			authMode: "token",
 			want:     "OPENCLI_AUTH_TOKEN",
 		},
 		{
 			name:     "auth mismatch",
-			source:   "version: v1\nauth:\n  type: api_key\n  header: X-API-Key\n",
+			source:   "auth:\n  type: api_key\n  header: X-API-Key\n",
 			authMode: "token",
 			getenv:   func(string) string { return "secret" },
 			want:     "api_key",
 		},
 		{
 			name:     "api key missing header",
-			source:   "version: v1\nauth:\n  type: api_key\n",
+			source:   "auth:\n  type: api_key\n",
 			authMode: "api_key",
 			getenv:   func(string) string { return "secret" },
 			want:     "header",
+		},
+		{
+			name:     "api key missing auth metadata",
+			source:   "base_url: https://api.example.com\n",
+			authMode: "api_key",
+			want:     "auth metadata",
+		},
+		{
+			name:     "oauth2 missing auth metadata",
+			source:   "base_url: https://api.example.com\n",
+			authMode: "oauth2",
+			want:     "auth metadata",
+		},
+		{
+			name:     "unsupported oauth grant type",
+			source:   "auth:\n  type: oauth2\n  grant_type: authorization_code\n",
+			authMode: "oauth2",
+			want:     "grant_type client_credentials",
 		},
 	}
 
@@ -151,7 +255,7 @@ func TestLoadAndSealRejectsInvalidSources(t *testing.T) {
 }
 
 func TestLoadAndSealWithoutAuthDoesNotRequireCredential(t *testing.T) {
-	path := writeRuntimeSource(t, "version: v1\nbase_url: http://localhost:8080\n")
+	path := writeRuntimeSource(t, "base_url: http://localhost:8080\n")
 	bundle, err := LoadAndSeal(path, SealOptions{
 		AuthMode: "none",
 		Random:   bytes.NewReader(bytes.Repeat([]byte{0x11}, 128)),

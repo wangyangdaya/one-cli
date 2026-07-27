@@ -43,9 +43,9 @@ func LoadBytes(data []byte) (Config, error) {
 
 func validate(cfg Config) error {
 	switch strings.TrimSpace(cfg.Auth.Type) {
-	case "", model.AuthTypeNone, model.AuthTypeToken, model.AuthTypeAKSK:
+	case "", model.AuthTypeNone, model.AuthTypeToken, model.AuthTypeAPIKey, model.AuthTypeAKSK, model.AuthTypeOAuth2:
 	default:
-		return fmt.Errorf("auth.type must be one of none, token, or ak_sk, got %q", cfg.Auth.Type)
+		return fmt.Errorf("auth.type must be one of none, token, api_key, ak_sk, or oauth2, got %q", cfg.Auth.Type)
 	}
 
 	for _, key := range slices.Sorted(maps.Keys(cfg.Overrides.BodyMode)) {

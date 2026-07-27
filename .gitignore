@@ -4,10 +4,14 @@ dist/
 tmp/
 examples/*
 !examples/petstore.opencli.yaml
+!examples/oauth2.runtime.yaml
 docs/
 !docs/
 docs/*
 !docs/SWAGGER_EXTERNAL_FIX.md
+!docs/design/
+docs/design/*
+!docs/design/oauth2-client-credentials.md
 !docs/skills/
 docs/skills/*
 !docs/skills/swagger-config/

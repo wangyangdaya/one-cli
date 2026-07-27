@@ -215,8 +215,21 @@ opencli generate \
 | `--target` | 可选 | 生成目标，支持 `go` 或 `rust`，默认 `go` |
 | `--skill-lang` | 可选 | 生成技能文档语言，支持 `en` 或 `zh`，默认 `en` |
 | `--app-version` | 可选 | 生成 CLI 的版本号 |
-| `--auth` | 可选 | 认证模式：`token`、`ak_sk` 或 `none` |
+| `--auth` | 可选 | 认证模式：`token`、`api_key`、`ak_sk`、`oauth2` 或 `none`；默认 `token` |
 | `--signer` | 可选 | AK/SK 签名配置，例如 `supplier_edi` |
+| `--runtime-config` | `api_key`、`oauth2` 必需 | 生成后 CLI 的 Base URL 和认证元数据；需要时从环境变量读取凭证并密封 |
+
+`--auth` 的取值说明：
+
+| 值 | 凭证来源 | 生成后的行为 |
+| --- | --- | --- |
+| `token` | 已有 Bearer Token | 直接注入 `Authorization: Bearer <token>` |
+| `api_key` | API Key | 注入 Runtime Config 声明的请求头 |
+| `ak_sk` | Access Key / Secret Key | 按 signer 配置为每个请求计算签名 |
+| `oauth2` | OAuth Client ID / Client Secret | 通过 Client Credentials 获取 Access Token，再注入 Bearer Token |
+| `none` | 无 | 不注入认证信息 |
+
+未传 `--auth` 时，OpenCLI 先读取 `opencli.yaml` 的 `auth.type`；两者都没有配置时默认使用 `token`。无需认证的接口应明确使用 `--auth none`。
 
 带配置文件生成：
 
@@ -376,7 +389,7 @@ overrides:
 | `app.binary` | 生成的二进制名称 | 交付方、运维方 |
 | `app.root_command` | CLI 根命令名称 | 使用方、交付方 |
 | `app.version` | 生成 CLI 版本号 | 产品或发布负责人 |
-| `auth.type` | 认证类型，支持 `token`、`ak_sk`、`none` | 接口提供方、安全负责人 |
+| `auth.type` | 认证类型，支持 `token`、`api_key`、`ak_sk`、`oauth2`、`none` | 接口提供方、安全负责人 |
 | `auth.signer` | AK/SK 签名规则 | 接口提供方、安全负责人 |
 | `naming.tag_alias` | 接口 tag 到命令组的命名映射 | 业务使用方 |
 | `naming.operation_alias` | `operationId` 到子命令的命名映射 | 业务使用方 |
@@ -384,6 +397,130 @@ overrides:
 | `runtime.default_output` | 默认输出格式 | 使用方 |
 | `overrides.body_mode` | 请求体使用 flags、文件或 JSON 数据 | 业务使用方、测试方 |
 | `overrides.body_fields` | 请求体字段说明和必填规则补充 | 接口提供方、业务使用方 |
+
+### 5.1 Runtime Config 与 OAuth 2.0
+
+`opencli.yaml` 控制生成行为；`--runtime-config` 指向的 `runtime.yaml` 控制生成后 CLI 使用的 Base URL 和认证元数据。Runtime Config 当前只有一种格式，不需要顶层 `version` 字段。
+
+Runtime Config 是可选的。`token` 模式可以完全没有 `runtime.yaml`，此时生成阶段不需要设置 token：
+
+```bash
+opencli generate \
+  --target rust \
+  --input ./examples/leave-makeup.yaml \
+  --output ./tmp/attendance-cli-new \
+  --module attendance-cli \
+  --app attendance-cli \
+  --skill-lang zh \
+  --auth token \
+  --app-version 0.0.1
+```
+
+生成完成后，在实际运行 CLI 时提供环境变量：
+
+```bash
+export OPENCLI_BASE_URL='https://api.example.com'
+export OPENCLI_AUTH_TOKEN='your-token'
+attendance-cli <group> <command>
+```
+
+因此，只有传入包含 `auth.type: bearer` 的 `--runtime-config`、需要在生成阶段密封 token 时，生成器才要求 `OPENCLI_AUTH_TOKEN` 已存在。
+
+如果接口不需要认证，只需要为生成后的 CLI 固定 Base URL，可以只配置：
+
+```yaml
+base_url: https://api.example.com
+```
+
+此时生成命令必须显式传入 `--auth none`。如果接口需要 token 认证，则保留默认的 `token` 模式；仅包含 `base_url` 的 Runtime Config 也可以正常生成，token 在 CLI 运行时从 `OPENCLI_AUTH_TOKEN` 读取。
+
+Bearer Token 示例：
+
+```yaml
+base_url: https://api.example.com
+auth:
+  type: bearer
+```
+
+Bearer Token 的明文不写入 YAML，也不需要通过生成命令参数传入。生成器会自动从当前进程环境读取 `OPENCLI_AUTH_TOKEN`；token 应只包含原始值，不要带 `Bearer ` 前缀。如果当前终端已经执行过 `export OPENCLI_AUTH_TOKEN='your-token'`，后续 `opencli generate` 命令无需再次指定 token。
+
+使用 Bearer Runtime Config 时，如果出现 `OPENCLI_AUTH_TOKEN is required to seal runtime auth`，表示启动生成器的进程没有继承该变量。请在同一个终端导出变量后重试，也可以用 `printenv OPENCLI_AUTH_TOKEN` 检查；不要把真实 token 写入 Runtime Config 或提交到仓库。
+
+如果只需要在生成项目中固定 Base URL，而 token 要到 CLI 运行时再提供，Runtime Config 可以只写 `base_url` 并保持 `--auth token`。这种组合在生成阶段不读取 token，运行 CLI 时设置 `OPENCLI_AUTH_TOKEN` 即可。
+
+如果 Base URL 和 token 都准备在生成后的 CLI 运行时通过环境变量提供，则不传 `--runtime-config`，运行 CLI 时同时设置 `OPENCLI_BASE_URL` 和 `OPENCLI_AUTH_TOKEN`。
+
+API Key 示例：
+
+```yaml
+base_url: https://api.example.com
+auth:
+  type: api_key
+  header: X-API-Key
+```
+
+OAuth 2.0 Client Credentials 示例：
+
+```yaml
+base_url: https://api.example.com
+auth:
+  type: oauth2
+  client_id: my-service-cli
+```
+
+其中：
+
+- `client_id` 是公开客户端标识，不加密。
+- `client_secret` 不写入 YAML，也不通过命令行参数传入。
+- 生成时从 `OPENCLI_OAUTH_CLIENT_SECRET` 读取 Client Secret。
+- `--auth oauth2` 当前只代表 Client Credentials；生成器从 OpenAPI 唯一的 `clientCredentials` Security Scheme 补齐 `grant_type: client_credentials`、scheme、Token URL 和 scopes。
+- 当前不提供单独的 Grant Type CLI 参数，因为除 `client_credentials` 外的值都不受支持；生成时会拒绝其他值。
+- 如果 Token operation 把 `client_id`、`client_secret` 都声明为 Query 参数，生成器会识别为 `placement: query`；否则默认使用标准的 HTTP Basic 方式。
+
+生成示例：
+
+```bash
+export OPENCLI_OAUTH_CLIENT_SECRET='your-client-secret'
+
+opencli generate \
+  --input ./api.yaml \
+  --output ./my-cli \
+  --module github.com/example/my-cli \
+  --app mycli \
+  --auth oauth2 \
+  --runtime-config ./runtime.yaml
+```
+
+生成后的 `config/runtime.yaml` 类似：
+
+```yaml
+base_url: https://api.example.com
+auth:
+  type: oauth2
+  grant_type: client_credentials
+  scheme: serviceOAuth
+  token_url: https://identity.example.com/oauth/token
+  client_id: my-service-cli
+  client_auth:
+    method: client_secret
+    placement: query
+  encrypted_value: ENC[v1:...]
+```
+
+`ENC[v1:...]` 中的 `v1` 是加密信封格式版本，不是 Runtime Config 版本。密封机制用于避免明文凭证误泄漏；解密材料随 CLI 交付，因此不构成对安装包持有者的强安全边界。
+
+运行时流程：
+
+```text
+Agent 调用业务命令
+  -> CLI 解密 Client Secret
+  -> 调用三方 Token Endpoint
+  -> 获得 Access Token
+  -> 注入 Authorization: Bearer <access_token>
+  -> 调用三方业务接口
+```
+
+启用 `--auth oauth2` 后，对应的 Token Endpoint operation 不生成公开命令，避免产生要求用户输入 `--client-secret` 的重复入口。
 
 请求体模式说明：
 
@@ -544,7 +681,9 @@ mycli skills --skills-dir /path/to/skills read users
 | 认证模式 | 常见环境变量 | 说明 |
 | --- | --- | --- |
 | `token` | `OPENCLI_AUTH_TOKEN` | 生成 CLI 会按配置的认证头发送 token |
+| `api_key` | `OPENCLI_API_KEY` | 使用 Runtime Config 声明的请求头发送 API Key |
 | `ak_sk` | `OPENCLI_AK`、`OPENCLI_SK` | 生成 CLI 会按签名配置生成 AK/SK 请求头 |
+| `oauth2` | `OPENCLI_OAUTH_CLIENT_SECRET` | CLI 自动执行 Client Credentials；环境变量可覆盖密封的 Client Secret |
 | `none` | 无 | 不注入认证信息 |
 
 示例：
@@ -560,6 +699,18 @@ AK/SK 示例：
 export OPENCLI_AK="your-access-key"
 export OPENCLI_SK="your-secret-key"
 mycli orders list
+```
+
+OAuth2 模式正常情况下不需要 Agent 手工调用 Token 接口：
+
+```bash
+mycli resources list
+```
+
+CLI 会自动获取 Access Token。需要临时替换 Client Secret 时：
+
+```bash
+OPENCLI_OAUTH_CLIENT_SECRET="temporary-secret" mycli resources list
 ```
 
 ## 8. 接口文档质量对生成结果的影响
@@ -578,7 +729,7 @@ OpenCLI 不会凭空知道真实业务规则，它主要根据接口文档生成
 | `requestBody` schema | `--data`、`--file` 或 flags 的生成方式不符合实际 |
 | `required` 字段 | 必填校验不准确 |
 | 字段类型 | CLI 参数类型、示例值和 JSON 结构不准确 |
-| 认证头、安全方案 | token 或 AK/SK 注入方式不正确 |
+| 认证头、Security Scheme、OAuth Flow | Bearer、API Key、AK/SK 或 OAuth2 注入方式不正确 |
 | 响应说明和错误码 | 使用文档和排错信息不完整 |
 
 如果生成后的 CLI 和实际接口行为不一致，优先检查接口文档是否真实反映了接口实现。
@@ -591,13 +742,14 @@ OpenCLI 不会凭空知道真实业务规则，它主要根据接口文档生成
 | --- | --- | --- |
 | OpenAPI/Swagger 文档 | 接口路径、方法、参数、请求体、必填字段、认证方式、服务地址 | 接口提供方 |
 | `opencli.yaml` | 命令命名、认证模式、签名规则、请求体模式、字段补充说明 | 业务使用方、交付方 |
+| `runtime.yaml` | Base URL、认证类型、公开 Client ID、Token URL 和 Client Authentication 位置 | 接口提供方、安全负责人 |
 | MCP 配置文件 | 服务名、transport、URL、command、args、headers、env | MCP 服务提供方、实施方 |
 | 生成项目 `README.md` | 安装方式、运行方式、环境变量、示例命令是否符合交付场景 | 交付方、使用方 |
 | `skills/SKILL.md` | 多分组时确认：Agent 应用添加 `skills/` 文件夹时能否识别，以及路由说明是否清晰 | 交付方、使用方 |
 | `skills/README.md` | Skill 分组索引是否便于定位目标命令组 | 交付方、使用方 |
 | `skills/<group>/SKILL.md` | 命令说明、风险提示、示例参数、业务术语是否准确 | 业务使用方、测试方 |
 | 示例 JSON 文件 | 请求体字段、枚举值、日期格式、金额单位、组织或租户字段 | 业务使用方、接口提供方 |
-| 环境变量说明 | token、AK/SK、租户、网关、代理等配置是否完整 | 运维方、安全负责人 |
+| 环境变量说明 | Bearer Token、API Key、OAuth Client Secret、AK/SK、租户、网关和代理等配置是否完整 | 运维方、安全负责人 |
 | 测试用例或验收清单 | 关键查询、创建、更新、删除接口是否覆盖 | 测试方、业务验收方 |
 
 特别需要人工确认的业务项：
@@ -666,7 +818,8 @@ overrides:
 优先检查：
 
 - 接口文档中的服务地址是否正确。
-- 当前环境变量中的 token、AK/SK 是否正确。
+- 当前环境变量中的 Bearer Token、API Key、OAuth Client Secret 或 AK/SK 是否正确。
+- OAuth2 模式下的 Client ID、Token URL、`grant_type` 和 Client Authentication placement 是否符合三方文档。
 - 是否需要额外传入租户、组织、供应商等请求头。
 - path、query、header 参数是否和实际接口一致。
 - 请求体字段是否缺失、类型错误或枚举值不正确。
@@ -686,6 +839,7 @@ overrides:
 - 已使用最新接口文档或 MCP 配置生成。
 - `opencli inspect` 的接口列表符合预期。
 - `opencli.yaml` 已经按实际业务调整并确认。
+- 使用 `--runtime-config` 时，`runtime.yaml` 不包含明文 Secret，且无需顶层 `version`。
 - 命令组和子命令名称对使用人员清晰。
 - 查询、写入、更新、删除等关键命令均已在测试环境验证。
 - 认证环境变量和额外请求头说明完整。

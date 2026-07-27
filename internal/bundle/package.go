@@ -45,12 +45,13 @@ func Package(options Options) (Result, error) {
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return Result{}, err
 	}
+	skillName := filepath.Base(filepath.Clean(outputDir))
 	if project.RootSkillMD != "" {
-		if err := copyAdaptedFile(project.RootSkillMD, filepath.Join(outputDir, "SKILL.md"), 0o644, project.AppName, "./bin/"); err != nil {
+		if err := copyAdaptedRootSkill(project.RootSkillMD, filepath.Join(outputDir, "SKILL.md"), 0o644, project.AppName, "./bin/", skillName); err != nil {
 			return Result{}, err
 		}
 	} else {
-		content := singleGroupRouter(project.AppName, project.Groups[0])
+		content := singleGroupRouter(skillName, project.AppName, project.Groups[0])
 		if err := writeFileAtomic(filepath.Join(outputDir, "SKILL.md"), []byte(content), 0o644); err != nil {
 			return Result{}, err
 		}
@@ -90,22 +91,22 @@ func Package(options Options) (Result, error) {
 	return Result{AppName: project.AppName, OutputDir: outputDir, Groups: project.Groups}, nil
 }
 
-func singleGroupRouter(appName, group string) string {
+func singleGroupRouter(skillName, appName, group string) string {
 	return fmt.Sprintf(`---
-name: %[1]s-skills
-description: Route requests for %[1]s to its generated command-group Skill.
+name: %[1]s
+description: Route requests for %[2]s to its generated command-group Skill.
 ---
 
-# %[1]s Skills Router
+# %[2]s Skills Router
 
-Read [%[2]s/SKILL.md](%[2]s/SKILL.md) before invoking the shared CLI.
+Read [%[3]s/SKILL.md](%[3]s/SKILL.md) before invoking the shared CLI.
 
 List installed groups with:
 
 `+"```bash"+`
-./bin/%[1]s skills list
+./bin/%[2]s skills list
 `+"```"+`
-`, appName, group)
+`, skillName, appName, group)
 }
 
 func existingDirectory(value, label string) (string, error) {

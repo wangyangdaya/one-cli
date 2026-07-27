@@ -46,8 +46,9 @@ pub async fn request(
     query: Vec<(String, String)>,
     headers: Vec<(String, String)>,
     body: Option<Value>,
+    oauth2_required: bool,
 ) -> AppResult<Value> {
-    request_json_text(method, path, query, headers, body.map(|value| value.to_string())).await
+    request_json_text(method, path, query, headers, body.map(|value| value.to_string()), oauth2_required).await
 }
 
 pub async fn request_json_text(
@@ -56,8 +57,9 @@ pub async fn request_json_text(
     query: Vec<(String, String)>,
     headers: Vec<(String, String)>,
     body: Option<String>,
+    oauth2_required: bool,
 ) -> AppResult<Value> {
-    request_text(method, path, query, headers, body, "application/json").await
+    request_text(method, path, query, headers, body, "application/json", oauth2_required).await
 }
 
 pub async fn request_form_text(
@@ -66,8 +68,9 @@ pub async fn request_form_text(
     query: Vec<(String, String)>,
     headers: Vec<(String, String)>,
     body: Option<String>,
+    oauth2_required: bool,
 ) -> AppResult<Value> {
-    request_text(method, path, query, headers, body, "application/x-www-form-urlencoded").await
+    request_text(method, path, query, headers, body, "application/x-www-form-urlencoded", oauth2_required).await
 }
 
 async fn request_text(
@@ -77,9 +80,10 @@ async fn request_text(
     headers: Vec<(String, String)>,
     body: Option<String>,
     content_type: &str,
+    {{ if appUsesOAuth2 .App }}oauth2_required{{ else }}_oauth2_required{{ end }}: bool,
 ) -> AppResult<Value> {
     let base_url = crate::runtime_config::resolve_base_url("{{ .App.Name }}", "")?;
-    let {{ if or (appUsesAKSK .App) (appUsesToken .App) (appUsesAPIKey .App) }}mut {{ end }}headers = merged_headers(headers);
+    let {{ if or (appUsesAKSK .App) (appUsesToken .App) (appUsesAPIKey .App) (appUsesOAuth2 .App) }}mut {{ end }}headers = merged_headers(headers);
 {{- if appUsesAKSK .App }}
     crate::auth::apply_aksk(&mut headers, method, path, body.as_deref())?;
 {{- else if appUsesToken .App }}
@@ -95,6 +99,11 @@ async fn request_text(
         if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case(&header)) {
             headers.push((header, value));
         }
+    }
+{{- else if appUsesOAuth2 .App }}
+    if oauth2_required && !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("Authorization")) {
+        let token = crate::runtime_config::resolve_oauth_token("{{ .App.Name }}").await?;
+        headers.push(("Authorization".to_string(), format!("Bearer {token}")));
     }
 {{- end }}
     let trimmed = base_url.trim_end_matches('/');
@@ -153,6 +162,7 @@ pub async fn request_multipart(
     file_spec: &str,
     default_field: &str,
     data: Option<String>,
+    {{ if appUsesOAuth2 .App }}oauth2_required{{ else }}_oauth2_required{{ end }}: bool,
 ) -> AppResult<Value> {
     let (field, file_path) = match file_spec.split_once('=') {
         Some((field, path)) if !field.trim().is_empty() => (field.trim(), path),
@@ -186,7 +196,7 @@ pub async fn request_multipart(
     }
 
     let base_url = crate::runtime_config::resolve_base_url("{{ .App.Name }}", "")?;
-    let {{ if or (appUsesAKSK .App) (appUsesToken .App) (appUsesAPIKey .App) }}mut {{ end }}headers = merged_headers(headers);
+    let {{ if or (appUsesAKSK .App) (appUsesToken .App) (appUsesAPIKey .App) (appUsesOAuth2 .App) }}mut {{ end }}headers = merged_headers(headers);
 {{- if appUsesAKSK .App }}
     crate::auth::apply_aksk(&mut headers, method, path, data.as_deref())?;
 {{- else if appUsesToken .App }}
@@ -202,6 +212,11 @@ pub async fn request_multipart(
         if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case(&header)) {
             headers.push((header, value));
         }
+    }
+{{- else if appUsesOAuth2 .App }}
+    if oauth2_required && !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("Authorization")) {
+        let token = crate::runtime_config::resolve_oauth_token("{{ .App.Name }}").await?;
+        headers.push(("Authorization".to_string(), format!("Bearer {token}")));
     }
 {{- end }}
     let trimmed = base_url.trim_end_matches('/');

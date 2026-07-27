@@ -1,0 +1,4 @@
+base_url: https://api.example.com
+auth:
+  type: oauth2
+  client_id: my-service-cli

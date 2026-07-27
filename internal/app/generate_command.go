@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"one-cli/internal/configgen"
@@ -96,9 +97,9 @@ func NewGenerateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to opencli YAML config")
 	cmd.Flags().StringVar(&target, "target", "go", "Generation target: go or rust")
 	cmd.Flags().StringVar(&skillLang, "skill-lang", "en", "Generated skill language: en or zh")
-	cmd.Flags().StringVar(&auth, "auth", "", "Generated auth mode: token, api_key, ak_sk, or none")
+	cmd.Flags().StringVar(&auth, "auth", "", "Generated auth mode: token, api_key, ak_sk, oauth2, or none (default token)")
 	cmd.Flags().StringVar(&signer, "signer", "", "AK/SK signer profile, for example supplier_edi")
-	cmd.Flags().StringVar(&runtimeConfigPath, "runtime-config", "", "Runtime YAML metadata; seals OPENCLI_AUTH_TOKEN or OPENCLI_API_KEY")
+	cmd.Flags().StringVar(&runtimeConfigPath, "runtime-config", "", "Runtime YAML metadata; seals OPENCLI_AUTH_TOKEN, OPENCLI_API_KEY, or OPENCLI_OAUTH_CLIENT_SECRET")
 	_ = cmd.MarkFlagRequired("output")
 	_ = cmd.MarkFlagRequired("module")
 	_ = cmd.MarkFlagRequired("app")
@@ -130,6 +131,9 @@ func RunGenerate(opts GenerateOptions) error {
 	if auth == model.AuthTypeAPIKey && strings.TrimSpace(opts.RuntimeConfigPath) == "" {
 		return fmt.Errorf("--auth api_key requires --runtime-config to declare the API-key header")
 	}
+	if auth == model.AuthTypeOAuth2 && strings.TrimSpace(opts.RuntimeConfigPath) == "" {
+		return fmt.Errorf("--auth oauth2 requires --runtime-config to declare client credentials")
+	}
 	signer := resolveSigner(opts.Signer, cfg)
 	signerConfig, err := resolveSignerConfig(auth, signer, cfg)
 	if err != nil {
@@ -154,14 +158,21 @@ func RunGenerate(opts GenerateOptions) error {
 		}
 	}
 
+	oauthDefaults := oauth2Defaults(doc)
 	plan := planner.Build(doc, cfg)
+	if auth == model.AuthTypeOAuth2 {
+		plan = withoutOAuthTokenOperation(plan, oauthDefaults.TokenURL)
+	}
 	plan.Name = strings.TrimSpace(opts.AppName)
 	plan.Auth.Type = auth
 	plan.Auth.SignerProfile = signerConfig.Profile
 	plan.Auth.Signer = signerConfig
 	var runtimeBundle *runtimeconfig.Bundle
 	if path := strings.TrimSpace(opts.RuntimeConfigPath); path != "" {
-		bundle, err := runtimeconfig.LoadAndSeal(path, runtimeconfig.SealOptions{AuthMode: auth})
+		bundle, err := runtimeconfig.LoadAndSeal(path, runtimeconfig.SealOptions{
+			AuthMode: auth,
+			OAuth2:   oauthDefaults,
+		})
 		if err != nil {
 			return err
 		}
@@ -178,7 +189,10 @@ func resolveAuth(flag string, cfg configgen.Config) string {
 	if trimmed := strings.TrimSpace(flag); trimmed != "" {
 		return trimmed
 	}
-	return strings.TrimSpace(cfg.Auth.Type)
+	if configured := strings.TrimSpace(cfg.Auth.Type); configured != "" {
+		return configured
+	}
+	return model.AuthTypeToken
 }
 
 func resolveSigner(flag string, cfg configgen.Config) string {
@@ -190,14 +204,78 @@ func resolveSigner(flag string, cfg configgen.Config) string {
 
 func validateAuthAndSigner(auth, signer string) error {
 	switch auth {
-	case "", model.AuthTypeToken, model.AuthTypeAPIKey, model.AuthTypeAKSK, model.AuthTypeNone:
+	case "", model.AuthTypeToken, model.AuthTypeAPIKey, model.AuthTypeAKSK, model.AuthTypeOAuth2, model.AuthTypeNone:
 	default:
-		return fmt.Errorf("unsupported auth %q: expected token, api_key, ak_sk, or none", auth)
+		return fmt.Errorf("unsupported auth %q: expected token, api_key, ak_sk, oauth2, or none", auth)
 	}
 	if strings.TrimSpace(signer) != "" && auth != model.AuthTypeAKSK {
 		return fmt.Errorf("--signer requires --auth ak_sk")
 	}
 	return nil
+}
+
+func withoutOAuthTokenOperation(plan model.App, tokenURL string) model.App {
+	parsed, err := url.Parse(strings.TrimSpace(tokenURL))
+	if err != nil || strings.TrimSpace(parsed.Path) == "" {
+		return plan
+	}
+	groups := make([]model.Group, 0, len(plan.Groups))
+	for _, group := range plan.Groups {
+		operations := make([]model.Operation, 0, len(group.Operations))
+		for _, operation := range group.Operations {
+			if strings.EqualFold(operation.Method, "POST") && operation.Path == parsed.Path {
+				continue
+			}
+			operations = append(operations, operation)
+		}
+		if len(operations) == 0 {
+			continue
+		}
+		group.Operations = operations
+		groups = append(groups, group)
+	}
+	plan.Groups = groups
+	return plan
+}
+
+func oauth2Defaults(doc openapi.Document) runtimeconfig.OAuth2Defaults {
+	var matches []openapi.SecurityScheme
+	for _, scheme := range doc.SecuritySchemes {
+		if strings.EqualFold(strings.TrimSpace(scheme.Type), "oauth2") && strings.TrimSpace(scheme.ClientCredentialsTokenURL) != "" {
+			matches = append(matches, scheme)
+		}
+	}
+	if len(matches) != 1 {
+		return runtimeconfig.OAuth2Defaults{}
+	}
+	selected := matches[0]
+	defaults := runtimeconfig.OAuth2Defaults{
+		GrantType: "client_credentials",
+		Scheme:    strings.TrimSpace(selected.Name),
+		TokenURL:  strings.TrimSpace(selected.ClientCredentialsTokenURL),
+		Placement: "basic",
+		Scopes:    append([]string(nil), selected.ClientCredentialsScopes...),
+	}
+	tokenURL, err := url.Parse(defaults.TokenURL)
+	if err != nil {
+		return defaults
+	}
+	for _, operation := range doc.Operations {
+		if !strings.EqualFold(operation.Method, "POST") || operation.Path != tokenURL.Path {
+			continue
+		}
+		queryFields := make(map[string]bool)
+		for _, parameter := range operation.Parameters {
+			if strings.EqualFold(parameter.In, "query") {
+				queryFields[strings.TrimSpace(parameter.Name)] = true
+			}
+		}
+		if queryFields["client_id"] && queryFields["client_secret"] {
+			defaults.Placement = "query"
+		}
+		break
+	}
+	return defaults
 }
 
 func resolveSignerConfig(auth, signer string, cfg configgen.Config) (model.Signer, error) {

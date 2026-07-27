@@ -1465,6 +1465,61 @@ func TestParseDocumentEmptyInputReturnsEmptyDocument(t *testing.T) {
 	}
 }
 
+func TestParseDocumentCapturesOAuth2ClientCredentialsAndOperationSecurity(t *testing.T) {
+	doc, err := openapi.Parse([]byte(`
+openapi: 3.0.3
+info:
+  title: OAuth API
+  version: 1.0.0
+paths:
+  /oauth/token:
+    post:
+      operationId: getToken
+      security: []
+      parameters:
+        - {name: client_id, in: query, required: true, schema: {type: string}}
+        - {name: client_secret, in: query, required: true, schema: {type: string}}
+      responses:
+        "200": {description: ok}
+  /items:
+    get:
+      operationId: listItems
+      security:
+        - vendorOAuth: [items.read]
+      responses:
+        "200": {description: ok}
+components:
+  securitySchemes:
+    vendorOAuth:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://identity.example.com/oauth/token
+          scopes:
+            items.read: Read items
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(doc.SecuritySchemes) != 1 {
+		t.Fatalf("security schemes = %+v", doc.SecuritySchemes)
+	}
+	scheme := doc.SecuritySchemes[0]
+	if scheme.Name != "vendorOAuth" || scheme.ClientCredentialsTokenURL != "https://identity.example.com/oauth/token" {
+		t.Fatalf("unexpected OAuth scheme: %+v", scheme)
+	}
+	operations := make(map[string]openapi.Operation)
+	for _, operation := range doc.Operations {
+		operations[operation.OperationID] = operation
+	}
+	if len(operations["getToken"].Security) != 0 {
+		t.Fatalf("token operation unexpectedly requires auth: %+v", operations["getToken"].Security)
+	}
+	if got := operations["listItems"].Security; len(got) != 1 || got[0] != "vendorOAuth" {
+		t.Fatalf("business operation security = %+v", got)
+	}
+}
+
 func TestParseDocumentInvalidYAMLReturnsError(t *testing.T) {
 	_, err := openapi.Parse([]byte(`{{{not valid yaml or json!!!`))
 	if err == nil {
