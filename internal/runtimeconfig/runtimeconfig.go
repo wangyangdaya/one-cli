@@ -42,6 +42,7 @@ type Bundle struct {
 }
 
 type sourceConfig struct {
+	Version string      `yaml:"version,omitempty"`
 	BaseURL string      `yaml:"base_url,omitempty"`
 	Auth    *sourceAuth `yaml:"auth,omitempty"`
 }
@@ -63,6 +64,7 @@ type sourceClientAuth struct {
 }
 
 type sealedConfig struct {
+	Version string      `yaml:"version,omitempty"`
 	BaseURL string      `yaml:"base_url,omitempty"`
 	Auth    *sealedAuth `yaml:"auth,omitempty"`
 }
@@ -98,6 +100,7 @@ func LoadAndSeal(path string, opts SealOptions) (Bundle, error) {
 	}
 
 	output := sealedConfig{
+		Version: strings.TrimSpace(source.Version),
 		BaseURL: strings.TrimSpace(source.BaseURL),
 	}
 	if source.Auth == nil {
@@ -183,6 +186,9 @@ func LoadAndSeal(path string, opts SealOptions) (Bundle, error) {
 }
 
 func validateSource(source sourceConfig, authMode string) error {
+	if version := strings.TrimSpace(source.Version); version != "" && version != "v1" {
+		return fmt.Errorf("version must be v1")
+	}
 	mode := strings.TrimSpace(authMode)
 	if mode == "" {
 		mode = "none"

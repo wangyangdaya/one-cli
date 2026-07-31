@@ -20,6 +20,8 @@ const KEY_SHARE_B: [u8; 32] = [{{ if and .RuntimeBundle .RuntimeBundle.HasSecret
 #[serde(deny_unknown_fields)]
 struct RuntimeFile {
     #[serde(default)]
+    version: String,
+    #[serde(default)]
     base_url: String,
     auth: Option<RuntimeAuth>,
 }
@@ -262,6 +264,9 @@ fn read_runtime_file(path: &Path) -> AppResult<RuntimeFile> {
         Err(err) => return Err(format!("read runtime config {}: {err}", path.display())),
     };
     let config: RuntimeFile = serde_yaml::from_str(&raw).map_err(|err| format!("parse runtime config {}: {err}", path.display()))?;
+    if !config.version.trim().is_empty() && config.version.trim() != "v1" {
+        return Err(format!("parse runtime config {}: version must be v1", path.display()));
+    }
     Ok(config)
 }
 

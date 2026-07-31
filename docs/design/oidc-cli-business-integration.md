@@ -274,7 +274,7 @@ OAuth2 PKCE 模式必须调用 Identity Endpoint。两类身份接口统一返�
 - OIDC 的 UserInfo/Identity Endpoint 返回 `sub` 必须与 ID Token `sub` 完全一致，否则登录失败。
 - OAuth2 PKCE 的响应只用于 CLI 识别会话；业务 API 仍以验证后的 Access Token 主体为权限依据。
 
-Public Client 注册要求：
+OIDC/PKCE Public Client 注册要求：
 
 ```yaml
 client_id: business-cli

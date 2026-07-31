@@ -43,6 +43,7 @@ func TestGeneratedGoRuntimeConfig(t *testing.T) {
 			defer server.Close()
 
 			dir := generateRuntimeConfigCLI(t, "go", "token", "bearer", "", server.URL, "file-token")
+			prependLegacyRuntimeVersion(t, dir)
 			args := append([]string{"pet", "list", "--limit", "10"}, tt.extraArgs...)
 			cmd := exec.Command("go", append([]string{"run", "./cmd/petcli"}, args...)...)
 			cmd.Dir = dir
@@ -387,6 +388,7 @@ func testGeneratedRustRuntimeConfig(t *testing.T, authMode, fileAuthType, config
 	defer server.Close()
 
 	dir := generateRuntimeConfigCLI(t, "rust", authMode, fileAuthType, configHeader, server.URL, fileCredential)
+	prependLegacyRuntimeVersion(t, dir)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			wantHeader = tt.wantHeader
@@ -437,6 +439,18 @@ func generateRuntimeConfigCLI(t *testing.T, target, authMode, fileAuthType, head
 		t.Fatalf("generate %s runtime-config CLI: %v", target, err)
 	}
 	return dir
+}
+
+func prependLegacyRuntimeVersion(t *testing.T, dir string) {
+	t.Helper()
+	path := filepath.Join(dir, "config", "runtime.yaml")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read generated runtime config: %v", err)
+	}
+	if err := os.WriteFile(path, append([]byte("version: v1\n"), content...), 0o600); err != nil {
+		t.Fatalf("add legacy runtime version: %v", err)
+	}
 }
 
 func runtimeTestEnv(dir string) []string {

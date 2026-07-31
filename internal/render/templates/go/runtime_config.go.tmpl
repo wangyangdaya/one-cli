@@ -26,6 +26,7 @@ var sealedRuntimeKeyShareA = [32]byte{ {{ if and .RuntimeBundle .RuntimeBundle.H
 var sealedRuntimeKeyShareB = [32]byte{ {{ if and .RuntimeBundle .RuntimeBundle.HasSecret }}{{ range .RuntimeBundle.KeyShareB }}{{ . }}, {{ end }}{{ end }} }
 
 type runtimeFile struct {
+	Version string       `yaml:"version,omitempty"`
 	BaseURL string       `yaml:"base_url,omitempty"`
 	Auth    *runtimeAuth `yaml:"auth,omitempty"`
 }
@@ -294,6 +295,9 @@ func readRuntimeFile(path string) (*runtimeFile, error) {
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&config); err != nil {
 		return nil, fmt.Errorf("parse runtime config %s: %w", path, err)
+	}
+	if version := strings.TrimSpace(config.Version); version != "" && version != "v1" {
+		return nil, fmt.Errorf("parse runtime config %s: version must be v1", path)
 	}
 	return &config, nil
 }

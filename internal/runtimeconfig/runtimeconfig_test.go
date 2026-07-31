@@ -83,6 +83,21 @@ func TestLoadAndSealTokenWithoutAuthUsesRuntimeEnvironment(t *testing.T) {
 	}
 }
 
+func TestLoadAndSealAcceptsLegacyVersionV1(t *testing.T) {
+	path := writeRuntimeSource(t, `
+version: v1
+base_url: https://api.example.com
+`)
+
+	bundle, err := LoadAndSeal(path, SealOptions{AuthMode: "none"})
+	if err != nil {
+		t.Fatalf("LoadAndSeal legacy version: %v", err)
+	}
+	if !bytes.Contains(bundle.YAML, []byte("base_url: https://api.example.com")) {
+		t.Fatalf("generated YAML missing base URL: %s", bundle.YAML)
+	}
+}
+
 func TestLoadAndSealAPIKey(t *testing.T) {
 	path := writeRuntimeSource(t, `
 base_url: https://api.example.com
@@ -191,6 +206,12 @@ func TestLoadAndSealRejectsInvalidSources(t *testing.T) {
 			source:   "base_urll: https://api.example.com\n",
 			authMode: "none",
 			want:     "base_urll",
+		},
+		{
+			name:     "unsupported version",
+			source:   "version: v2\nbase_url: https://api.example.com\n",
+			authMode: "none",
+			want:     "version must be v1",
 		},
 		{
 			name:     "plaintext token",

@@ -158,10 +158,10 @@ func RunGenerate(opts GenerateOptions) error {
 		}
 	}
 
-	oauthDefaults := oauth2Defaults(doc)
+	oauth2RuntimeDefaults := oauth2Defaults(doc)
 	plan := planner.Build(doc, cfg)
 	if auth == model.AuthTypeOAuth2 {
-		plan = withoutOAuthTokenOperation(plan, oauthDefaults.TokenURL)
+		plan = withoutOAuthTokenOperation(plan, oauth2RuntimeDefaults.TokenURL)
 	}
 	plan.Name = strings.TrimSpace(opts.AppName)
 	plan.Auth.Type = auth
@@ -171,7 +171,7 @@ func RunGenerate(opts GenerateOptions) error {
 	if path := strings.TrimSpace(opts.RuntimeConfigPath); path != "" {
 		bundle, err := runtimeconfig.LoadAndSeal(path, runtimeconfig.SealOptions{
 			AuthMode: auth,
-			OAuth2:   oauthDefaults,
+			OAuth2:   oauth2RuntimeDefaults,
 		})
 		if err != nil {
 			return err

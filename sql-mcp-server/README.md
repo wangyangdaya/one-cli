@@ -152,8 +152,9 @@ UV_CACHE_DIR=/tmp/sql-mcp-uv-cache uv run ruff format --check .
 ```bash
 SQL_MCP_TEST_DATABASE_URL="$DATABASE_URL" \
   UV_CACHE_DIR=/tmp/sql-mcp-uv-cache \
-  uv run pytest tests/test_postgres_integration.py -v
+  uv run pytest tests/integration -v
 ```
 
 该测试会执行幂等 demo migration，然后验证 Wren 模型发现、dry-plan、
-dry-run、真实查询、行数限制和截断标记。
+dry-run、真实查询、查询超时、行数限制和截断标记；同一目录还会用官方
+SDK 客户端验证现代与旧版协议在 stdio 和 Streamable HTTP 上的协商行为。
