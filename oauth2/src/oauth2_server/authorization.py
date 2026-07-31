@@ -17,22 +17,9 @@ from .config import Settings
 from .models import AuthorizationCode, RefreshGrant
 from .store import GrantError, InMemoryGrantStore
 from .tokens import TokenService, TokenValidationError
+from .users import authenticate
 
 TEMPLATES = Jinja2Templates(directory=Path(__file__).resolve().parents[2] / "templates")
-PASSWORD_HASHES = {
-    "alice": (
-        "4e40e8ffe0ee32fa53e139147ed559229a5930f89c2204706fc174beb36210b3",
-        "user-alice",
-        "company-a",
-        "Alice",
-    ),
-    "bob": (
-        "8d059c3640b97180dd2ee453e20d34ab0cb0f2eccbe87d01915a8e578a202b11",
-        "user-bob",
-        "company-a",
-        "Bob",
-    ),
-}
 
 
 def _utc_now() -> datetime:
@@ -97,14 +84,6 @@ def _validate_authorization(
     return scopes
 
 
-def _password_matches(username: str, password: str) -> bool:
-    record = PASSWORD_HASHES.get(username)
-    if record is None:
-        return False
-    actual = hashlib.sha256(password.encode()).hexdigest()
-    return hmac.compare_digest(actual, record[0])
-
-
 def create_authorization_router(
     settings: Settings,
     store: InMemoryGrantStore,
@@ -140,7 +119,8 @@ def create_authorization_router(
         except ValueError as exc:
             return _oauth_error("invalid_request", str(exc))
         username = form.get("username", "")
-        if not _password_matches(username, form.get("password", "")):
+        user = authenticate(username, form.get("password", ""))
+        if user is None:
             return TEMPLATES.TemplateResponse(
                 request,
                 "authorize.html",
@@ -159,15 +139,14 @@ def create_authorization_router(
             )
             return RedirectResponse(location, status_code=303)
 
-        _, subject, tenant_id, _ = PASSWORD_HASHES[username]
         code = secrets.token_urlsafe(32)
         store.put_code(
             AuthorizationCode(
                 value=code,
                 client_id=form["client_id"],
                 redirect_uri=form["redirect_uri"],
-                subject=subject,
-                tenant_id=tenant_id,
+                subject=user.subject,
+                tenant_id=user.tenant_id,
                 scopes=scopes,
                 nonce=form["nonce"],
                 code_challenge=form["code_challenge"],
@@ -280,7 +259,7 @@ def _refresh(
             return _oauth_error("invalid_scope", "refresh cannot expand scope")
         scopes = requested or current.scopes
         new_token = secrets.token_urlsafe(32)
-        rotated = store.rotate_refresh(old_token, new_token)
+        rotated = store.rotate_refresh(old_token, new_token, scopes=scopes)
     except GrantError:
         return _oauth_error("invalid_grant", "refresh token is invalid")
     return _token_response(

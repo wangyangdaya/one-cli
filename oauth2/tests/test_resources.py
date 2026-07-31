@@ -24,6 +24,16 @@ def test_userinfo_and_me_return_the_token_subject(client: TestClient) -> None:
     assert me.json()["tenant_id"] == "company-a"
 
 
+def test_userinfo_only_returns_name_with_profile_scope(client: TestClient) -> None:
+    token = login_and_exchange(client, scopes="openid")["access_token"]
+
+    userinfo = client.get("/oauth/userinfo", headers=bearer(token))
+
+    assert userinfo.status_code == 200
+    assert userinfo.json()["sub"] == "user-alice"
+    assert "name" not in userinfo.json()
+
+
 def test_expenses_are_isolated_by_token_subject(client: TestClient) -> None:
     alice = login_and_exchange(client, username="alice", password="alice123")
     bob = login_and_exchange(client, username="bob", password="bob123")

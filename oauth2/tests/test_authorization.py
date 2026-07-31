@@ -1,13 +1,19 @@
+from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
 
 from conftest import (
+    NOW,
     REDIRECT_URI,
     VERIFIER,
     authorization_params,
+    exchange_code,
     login_and_exchange,
     login_and_get_code,
 )
 from fastapi.testclient import TestClient
+
+from oauth2_server.app import create_app
+from oauth2_server.config import Settings
 
 
 def test_authorize_page_describes_client_and_scopes(client: TestClient) -> None:
@@ -36,6 +42,16 @@ def test_authorize_rejects_plain_pkce(client: TestClient) -> None:
 
     assert response.status_code == 400
     assert "S256" in response.json()["error_description"]
+
+
+def test_authorize_rejects_missing_pkce(client: TestClient) -> None:
+    params = authorization_params()
+    params.pop("code_challenge")
+
+    response = client.get("/oauth/authorize", params=params)
+
+    assert response.status_code == 400
+    assert "code_challenge" in response.json()["error_description"]
 
 
 def test_login_failure_does_not_redirect_with_code(client: TestClient) -> None:
@@ -106,6 +122,49 @@ def test_code_exchange_rejects_wrong_verifier_and_burns_code(
     assert replay.status_code == 400
 
 
+def test_successful_authorization_code_cannot_be_replayed(
+    client: TestClient,
+) -> None:
+    code = login_and_get_code(client)
+    exchange_code(client, code)
+
+    replay = client.post(
+        "/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "client_id": "one-cli-demo",
+            "code": code,
+            "redirect_uri": REDIRECT_URI,
+            "code_verifier": VERIFIER,
+        },
+    )
+
+    assert replay.status_code == 400
+    assert replay.json()["error"] == "invalid_grant"
+
+
+def test_expired_authorization_code_is_rejected() -> None:
+    clock = {"now": NOW}
+    app = create_app(Settings(), now=lambda: clock["now"])
+    expiring_client = TestClient(app)
+    code = login_and_get_code(expiring_client)
+    clock["now"] = NOW + timedelta(minutes=3)
+
+    response = expiring_client.post(
+        "/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "client_id": "one-cli-demo",
+            "code": code,
+            "redirect_uri": REDIRECT_URI,
+            "code_verifier": VERIFIER,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_grant"
+
+
 def test_public_client_rejects_client_secret(client: TestClient) -> None:
     code = login_and_get_code(client)
 
@@ -164,6 +223,36 @@ def test_refresh_rotates_token_and_reuse_revokes_session(
     assert after_reuse.status_code == 400
 
 
+def test_refresh_scope_narrowing_cannot_be_expanded_later(
+    client: TestClient,
+) -> None:
+    first = login_and_exchange(client)["refresh_token"]
+    narrowed = client.post(
+        "/oauth/token",
+        data={
+            "grant_type": "refresh_token",
+            "client_id": "one-cli-demo",
+            "refresh_token": first,
+            "scope": "openid profile",
+        },
+    )
+    assert narrowed.status_code == 200
+    second = narrowed.json()["refresh_token"]
+
+    expanded = client.post(
+        "/oauth/token",
+        data={
+            "grant_type": "refresh_token",
+            "client_id": "one-cli-demo",
+            "refresh_token": second,
+            "scope": "openid profile expense:read:self",
+        },
+    )
+
+    assert expanded.status_code == 400
+    assert expanded.json()["error"] == "invalid_scope"
+
+
 def test_revoke_is_idempotent_and_prevents_refresh(client: TestClient) -> None:
     refresh_token = login_and_exchange(client)["refresh_token"]
 
@@ -187,3 +276,32 @@ def test_revoke_is_idempotent_and_prevents_refresh(client: TestClient) -> None:
     assert first.status_code == 200
     assert second.status_code == 200
     assert refresh.status_code == 400
+
+
+def test_sensitive_values_are_not_logged(client: TestClient, caplog) -> None:
+    password_marker = "password-must-not-be-logged"
+    verifier_marker = "z" * 64
+    form = authorization_params()
+    form.update(
+        {
+            "username": "alice",
+            "password": password_marker,
+            "decision": "allow",
+        }
+    )
+    client.post("/oauth/authorize", data=form)
+    client.post(
+        "/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "client_id": "one-cli-demo",
+            "code": "code-must-not-be-logged",
+            "redirect_uri": REDIRECT_URI,
+            "code_verifier": verifier_marker,
+        },
+    )
+
+    logs = caplog.text
+    assert password_marker not in logs
+    assert verifier_marker not in logs
+    assert "code-must-not-be-logged" not in logs

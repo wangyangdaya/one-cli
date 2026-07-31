@@ -30,5 +30,7 @@ class RefreshGrant:
     def without_token(self) -> "RefreshGrant":
         return replace(self, token="")
 
-    def rotated(self, token: str) -> "RefreshGrant":
-        return replace(self, token=token)
+    def rotated(
+        self, token: str, scopes: tuple[str, ...] | None = None
+    ) -> "RefreshGrant":
+        return replace(self, token=token, scopes=scopes or self.scopes)

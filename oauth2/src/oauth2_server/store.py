@@ -81,7 +81,13 @@ class InMemoryGrantStore:
                 raise GrantExpired("refresh token is expired")
             return grant
 
-    def rotate_refresh(self, old_token: str, new_token: str) -> RefreshGrant:
+    def rotate_refresh(
+        self,
+        old_token: str,
+        new_token: str,
+        *,
+        scopes: tuple[str, ...] | None = None,
+    ) -> RefreshGrant:
         with self._lock:
             old_hash = _token_hash(old_token)
             if old_hash in self._used_refresh:
@@ -92,7 +98,7 @@ class InMemoryGrantStore:
             grant = self.get_refresh(old_token)
             self._refresh.pop(old_hash)
             self._used_refresh[old_hash] = grant.session_id
-            rotated = grant.rotated(new_token)
+            rotated = grant.rotated(new_token, scopes)
             self._refresh[_token_hash(new_token)] = rotated.without_token()
             return rotated
 

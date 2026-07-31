@@ -76,6 +76,21 @@ def test_access_token_rejects_expired_token() -> None:
         tokens.verify_access_token(encoded)
 
 
+def test_access_token_rejects_another_signers_signature() -> None:
+    issuer = service()
+    verifier = service()
+    encoded = issuer.issue_access_token(
+        subject="user-alice",
+        tenant_id="company-a",
+        client_id="one-cli-demo",
+        scopes=("openid",),
+        session_id="session-1",
+    )
+
+    with pytest.raises(TokenValidationError):
+        verifier.verify_access_token(encoded)
+
+
 def test_jwks_publishes_the_active_rsa_key() -> None:
     tokens = service()
 

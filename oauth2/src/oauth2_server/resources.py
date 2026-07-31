@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from .store import InMemoryGrantStore
 from .tokens import TokenService, TokenValidationError
+from .users import display_name
 
 
 class ResourceAuthorizationError(Exception):
@@ -145,11 +146,13 @@ def create_resource_router(
     @router.get("/oauth/userinfo")
     async def userinfo(request: Request):
         claims = _claims(request, tokens, store, required_scope="openid")
-        return {
+        result = {
             "sub": claims["sub"],
-            "name": "Alice" if claims["sub"] == "user-alice" else "Bob",
             "tenant_id": claims["tenant_id"],
         }
+        if "profile" in str(claims.get("scope", "")).split():
+            result["name"] = display_name(claims["sub"])
+        return result
 
     @router.get("/api/v1/me")
     async def me(request: Request):
@@ -163,10 +166,8 @@ def create_resource_router(
     @router.get("/api/v1/me/expenses")
     async def list_expenses(request: Request):
         claims = _claims(request, tokens, store, required_scope="expense:read:self")
-        return {
-            "items": expenses.list_for(claims["sub"], claims["tenant_id"]),
-            "total": len(expenses.list_for(claims["sub"], claims["tenant_id"])),
-        }
+        items = expenses.list_for(claims["sub"], claims["tenant_id"])
+        return {"items": items, "total": len(items)}
 
     @router.post("/api/v1/me/expenses", status_code=201)
     async def create_expense(request: Request, value: ExpenseInput):
