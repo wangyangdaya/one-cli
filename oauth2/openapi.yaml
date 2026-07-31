@@ -1,0 +1,182 @@
+openapi: 3.0.3
+info:
+  title: one-cli OIDC Personal Expense API
+  version: 0.1.0
+  description: |
+    本地 OIDC/OAuth2 Authorization Code + PKCE 联调服务。
+    仅用于 one-cli 开发验证，不可部署到生产环境。
+servers:
+  - url: http://127.0.0.1:18080
+tags:
+  - name: identity
+  - name: expenses
+paths:
+  /api/v1/me:
+    get:
+      tags: [identity]
+      operationId: getCurrentIdentity
+      summary: 查询当前 Token 对应的业务主体
+      security:
+        - userOIDC: [openid]
+      x-ai-access:
+        subject_modes: [user]
+        audience: demo-api
+        scopes: [openid]
+        tenant_bound: true
+        resource_type: identity
+        data_classification: personal
+        risk: read
+        confirmation: never
+      responses:
+        "200":
+          description: 当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Identity"
+        "401":
+          $ref: "#/components/responses/AuthError"
+  /api/v1/me/expenses:
+    get:
+      tags: [expenses]
+      operationId: listMyExpenses
+      summary: 查询本人费用
+      security:
+        - userOIDC: [expense:read:self]
+      x-ai-access:
+        subject_modes: [user]
+        audience: demo-api
+        scopes: [expense:read:self]
+        tenant_bound: true
+        resource_type: expense
+        data_classification: personal
+        risk: read
+        confirmation: never
+      responses:
+        "200":
+          description: 本人费用列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Expense"
+                  total:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/AuthError"
+        "403":
+          $ref: "#/components/responses/AuthError"
+    post:
+      tags: [expenses]
+      operationId: createMyExpense
+      summary: 新增本人费用
+      security:
+        - userOIDC: [expense:submit:self]
+      x-ai-access:
+        subject_modes: [user]
+        audience: demo-api
+        scopes: [expense:submit:self]
+        tenant_bound: true
+        resource_type: expense
+        data_classification: personal
+        risk: write
+        confirmation: never
+        idempotency_required: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateExpense"
+      responses:
+        "201":
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+        "401":
+          $ref: "#/components/responses/AuthError"
+        "403":
+          $ref: "#/components/responses/AuthError"
+components:
+  securitySchemes:
+    userOIDC:
+      type: oauth2
+      description: Public Client Authorization Code + PKCE
+      flows:
+        authorizationCode:
+          authorizationUrl: http://127.0.0.1:18080/oauth/authorize
+          tokenUrl: http://127.0.0.1:18080/oauth/token
+          scopes:
+            openid: 获取当前用户身份
+            profile: 获取基础用户信息
+            expense:read:self: 查询本人费用
+            expense:submit:self: 新增本人费用
+  schemas:
+    Identity:
+      type: object
+      required: [subject, tenant_id, client_id]
+      properties:
+        subject:
+          type: string
+        tenant_id:
+          type: string
+        client_id:
+          type: string
+    Expense:
+      type: object
+      required: [id, description, amount, owner, tenant_id]
+      properties:
+        id:
+          type: string
+        description:
+          type: string
+        amount:
+          type: number
+        owner:
+          type: string
+          readOnly: true
+        tenant_id:
+          type: string
+          readOnly: true
+    CreateExpense:
+      type: object
+      required: [description, amount]
+      properties:
+        description:
+          type: string
+        amount:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            type:
+              type: string
+            subtype:
+              type: string
+            message:
+              type: string
+            required_scopes:
+              type: array
+              items:
+                type: string
+            retryable:
+              type: boolean
+  responses:
+    AuthError:
+      description: 认证或授权失败
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
