@@ -6,6 +6,9 @@
 > 仅限本机开发验证。服务使用 HTTP、内存状态、进程内 RSA 密钥和固定测试账号，
 > 不可部署到生产环境。
 
+完整的业务系统与 one-cli 对接要求参见
+[`docs/design/oidc-cli-business-integration.md`](../docs/design/oidc-cli-business-integration.md)。
+
 ## 启动
 
 ```bash

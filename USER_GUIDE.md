@@ -4,6 +4,9 @@
 
 本文不介绍如何编译或构建 `opencli` 本身。使用前请确认你已经拿到可执行的 `opencli` 命令，或所在环境已经可以直接运行 `opencli`。
 
+个人数据和当前用户授权的目标方案参见
+[`docs/design/oidc-cli-business-integration.md`](./docs/design/oidc-cli-business-integration.md)。
+
 ## 1. OpenCLI 是什么
 
 OpenCLI 是一个 CLI 项目生成工具。它读取接口描述文件，然后自动生成一个可继续交付、测试和集成的命令行项目。
@@ -230,6 +233,8 @@ opencli generate \
 | `none` | 无 | 不注入认证信息 |
 
 未传 `--auth` 时，OpenCLI 先读取 `opencli.yaml` 的 `auth.type`；两者都没有配置时默认使用 `token`。无需认证的接口应明确使用 `--auth none`。
+
+当前版本尚不支持 `--auth oidc`。OIDC + Authorization Code + PKCE 是用户级授权的目标模式，不能用现有 `--auth oauth2` 代替。
 
 带配置文件生成：
 
@@ -522,6 +527,71 @@ Agent 调用业务命令
 
 启用 `--auth oauth2` 后，对应的 Token Endpoint operation 不生成公开命令，避免产生要求用户输入 `--client-secret` 的重复入口。
 
+### 5.2 OIDC 用户授权目标契约
+
+本节描述后续版本的目标接口，不代表当前生成器已经支持。个人数据接口不应使用 Client Credentials 冒充用户。
+
+目标生成命令：
+
+```bash
+opencli generate \
+  --input ./business.openapi.yaml \
+  --output ./business-cli \
+  --module example.com/business-cli \
+  --app business \
+  --auth oidc \
+  --runtime-config ./business.runtime.yaml
+```
+
+业务 API 和授权服务地址填写在 Runtime Config：
+
+```yaml
+base_url: https://business-api.example.com
+
+auth:
+  type: oidc
+  issuer: https://business-auth.example.com
+  client_id: business-cli
+  audience: business-api
+  scopes:
+    - openid
+    - profile
+    - expense:read:self
+  redirect:
+    type: loopback
+    path: /oauth/callback
+  token_store: os_keychain
+```
+
+- `base_url` 是业务 API 地址。
+- `issuer` 是授权服务地址。
+- CLI 通过 `<issuer>/.well-known/openid-configuration` 发现 authorize、token、revoke、JWKS 和 UserInfo。
+- `client_id` 是公开的 Public Client 标识。
+- 配置中不得出现用户名、密码、`client_secret`、Access Token 或 Refresh Token。
+
+目标登录命令：
+
+```bash
+business auth login
+business auth status
+business auth check --operation <operation>
+business identity current
+business auth logout
+```
+
+`auth login` 才会启动随机 loopback 端口并打开系统浏览器。业务命令未登录时返回 `login_required`，不在后台自动登录。
+
+仓库根目录的 `oauth2/` FastAPI 服务已经可以验证 Discovery、PKCE、JWT/JWKS、Refresh、Revoke 和个人数据隔离：
+
+```bash
+cd oauth2
+uv sync
+uv run oauth2-server
+```
+
+完整对接和安全规范参见
+[`docs/design/oidc-cli-business-integration.md`](./docs/design/oidc-cli-business-integration.md)。
+
 请求体模式说明：
 
 | 模式 | 适用场景 | 生成后使用方式 |
@@ -686,6 +756,8 @@ mycli skills --skills-dir /path/to/skills read users
 | `oauth2` | `OPENCLI_OAUTH_CLIENT_SECRET` | CLI 自动执行 Client Credentials；环境变量可覆盖密封的 Client Secret |
 | `none` | 无 | 不注入认证信息 |
 
+目标 `oidc` 模式不使用 Secret 环境变量。Access/Refresh Token 应由登录流程写入 OS Keychain，不能通过命令行或普通 YAML 提供。
+
 示例：
 
 ```bash
@@ -840,6 +912,7 @@ overrides:
 - `opencli inspect` 的接口列表符合预期。
 - `opencli.yaml` 已经按实际业务调整并确认。
 - 使用 `--runtime-config` 时，`runtime.yaml` 不包含明文 Secret，且无需顶层 `version`。
+- 个人数据接口未错误使用 `--auth oauth2` Client Credentials；采用 OIDC 时已确认当前生成器版本确实支持 `--auth oidc`。
 - 命令组和子命令名称对使用人员清晰。
 - 查询、写入、更新、删除等关键命令均已在测试环境验证。
 - 认证环境变量和额外请求头说明完整。

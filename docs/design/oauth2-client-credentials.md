@@ -1,5 +1,7 @@
 # OAuth 2.0 Client Credentials 生成设计
 
+> 本文只描述应用身份的 Client Credentials。个人数据和当前用户授权不得使用本模式，请参见 [one-cli OIDC 用户认证对接与本地验证指南](./oidc-cli-business-integration.md)。
+
 ## 目标
 
 为下载并安装给 Agent 使用的 Go/Rust CLI 增加 `--auth oauth2`。首期只实现 OAuth 2.0 Client Credentials，并兼容三方文档中 Client Secret 位于 Basic、表单 Body 或 Query 的接口。

@@ -2,6 +2,12 @@
 
 > 修订说明（2026-07-31）：当前版本收敛为“终端电脑上的 Agent 代表当前用户访问个人数据”。服务器 Agent 用户授权、Device Flow、应用权限和工作负载身份不属于本期范围，后续单独设计。
 
+> 独立对接指南：[one-cli OIDC 用户认证对接与本地验证指南](../../design/oidc-cli-business-integration.md)。
+
+> 实施状态：根目录 `oauth2/` FastAPI 验证服务已经完成。
+>
+> one-cli `--auth oidc`、PKCE 生成客户端、Keychain 和认证命令尚待实施。本文中的相关 CLI 命令是目标契约，不代表当前版本已经支持。
+
 ## 1. 文档摘要
 
 本方案指导企业内部业务系统把个人数据 API 改造成可安全提供给终端电脑上的 AI Agent 和生成式 CLI 使用的 AI Native API。
@@ -949,6 +955,8 @@ auth:
 - 接入审计。
 
 ### 阶段二：OpenCLI 标准化
+
+当前状态：待实施。根目录 `oauth2/` 已提供联调授权服务和个人数据 API，但生成器尚不接受 `--auth oidc`。
 
 - 解析 authorizationCode Security Scheme；
 - 生成 Authorization Code + PKCE 客户端；
