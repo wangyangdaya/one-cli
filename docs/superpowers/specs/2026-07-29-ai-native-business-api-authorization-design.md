@@ -2,11 +2,11 @@
 
 > 修订说明（2026-07-31）：当前版本收敛为“终端电脑上的 Agent 代表当前用户访问个人数据”。服务器 Agent 用户授权、Device Flow、应用权限和工作负载身份不属于本期范围，后续单独设计。
 
-> 独立对接指南：[one-cli OIDC 用户认证对接与本地验证指南](../../design/oidc-cli-business-integration.md)。
+> 独立对接指南：[one-cli 用户授权对接与本地验证指南](../../design/oidc-cli-business-integration.md)。
 
 > 实施状态：根目录 `oauth2/` FastAPI 验证服务已经完成。
 >
-> one-cli `--auth oidc`、PKCE 生成客户端、Keychain 和认证命令尚待实施。本文中的相关 CLI 命令是目标契约，不代表当前版本已经支持。
+> one-cli `--auth oidc`、`--auth oauth2-pkce`、PKCE 生成客户端、Keychain 和认证命令尚待实施。本文中的相关 CLI 命令是目标契约，不代表当前版本已经支持。
 
 ## 1. 文档摘要
 
@@ -374,17 +374,25 @@ code_verifier=original-verifier
 
 ## 10. 授权服务接口规范
 
-业务系统至少提供：
+新系统优先提供标准 OIDC：
 
 | 接口 | 必选 | 说明 |
 | --- | --- | --- |
-| `GET /.well-known/openid-configuration` | 是 | OIDC/OAuth 元数据发现 |
+| `GET /.well-known/openid-configuration` | 推荐 | OIDC 元数据发现；新系统应提供 |
 | `GET /oauth/authorize` | 是 | 浏览器登录与授权 |
 | `POST /oauth/token` | 是 | Code 和 Refresh Token 换取 |
-| `POST /oauth/revoke` | 是 | 登出与撤销 |
-| `GET /oauth/jwks` | JWT 时必选 | Token 验签公钥 |
-| `GET /oauth/userinfo` | OIDC 时建议 | 标准用户信息 |
-| `GET /api/v1/me` | 建议 | 业务主体映射 |
+| `GET /oauth/jwks` | 是 | ID Token 验签公钥 |
+| `POST /oauth/revoke` | 建议 | 登出与撤销 |
+| `GET /oauth/userinfo` | 条件必选 | ID Token 不含业务所需 tenant 时完成主体映射 |
+| `GET /api/v1/me` | 条件必选 | 可代替 UserInfo 完成业务主体映射 |
+
+OIDC 不提供 Discovery 时，仍必须有稳定 issuer、ID Token、JWKS、authorize 和 token endpoint，并在 CLI Runtime Config 中显式配置端点。
+
+存量系统只有 OAuth2 Authorization Code 时，至少提供 authorize、token 和 `/me` 等 Identity Endpoint，并使用 `oauth2_pkce`。Revocation 建议提供。
+
+opaque Access Token 的验证由 Resource Server 通过 Introspection Endpoint 或授权服务提供的等价机制完成。
+
+身份接口统一返回稳定 `sub`、按需返回 `tenant_id`，可返回展示用 `name`。OIDC 返回的 `sub` 必须与验签后的 ID Token `sub` 一致；tenant-bound operation 缺少可信 tenant 时登录失败。
 
 ### 10.1 元数据示例
 
@@ -718,8 +726,10 @@ business-cli payment approve --as user --id PAY-001 --dry-run
 Token 按以下维度隔离：
 
 ```text
-issuer × client_id × tenant × user
+provider identity × client_id × tenant-or-empty × subject
 ```
+
+OIDC 的 provider identity 是 issuer；OAuth2 PKCE 使用显式 `provider_id`。只有非租户绑定接口允许 tenant 为空，两种会话不得共用存储键。
 
 存储优先级：
 
@@ -736,7 +746,7 @@ issuer × client_id × tenant × user
 
 ### 15.4 CLI 认证配置
 
-优先只配置 `issuer`，CLI 通过 `/.well-known/openid-configuration` 发现授权、Token、撤销和 JWKS 地址：
+新系统使用标准 OIDC，优先只配置 `issuer`。CLI 通过 `/.well-known/openid-configuration` 发现授权服务发布的端点：
 
 ```yaml
 base_url: https://finance-api.example.com
@@ -756,12 +766,31 @@ auth:
   token_store: os_keychain
 ```
 
-业务系统暂不支持 Discovery 时，才显式配置公开的：
+如果业务仍是 OIDC，但暂不支持 Discovery，必须保留稳定 issuer，并显式配置公开的：
 
 - `authorization_endpoint`；
 - `token_endpoint`；
-- `revocation_endpoint`；
 - `jwks_uri`。
+- 可选的 `revocation_endpoint` 和 `userinfo_endpoint`。
+
+业务只有 OAuth2 Authorization Code、没有 Discovery 和 ID Token 时，不得声明为 `oidc`。使用独立的 `oauth2_pkce` 类型：
+
+```yaml
+auth:
+  type: oauth2_pkce
+  provider_id: finance-auth
+  client_id: finance-cli
+  audience: finance-api
+  authorization_endpoint: https://finance.example.com/oauth/authorize
+  token_endpoint: https://finance.example.com/oauth/token
+  revocation_endpoint: https://finance.example.com/oauth/revoke
+  identity_endpoint: https://finance-api.example.com/api/v1/me
+  scopes: [profile, expense:read:self]
+```
+
+`authorization_endpoint`、`token_endpoint` 和 `identity_endpoint` 必选。Revocation 建议提供。
+
+`oauth2_pkce` 不校验 OIDC ID Token。Resource Server 仍必须验证 Access Token，并根据 `sub`、tenant 和 scope 做数据授权。
 
 配置不得包含用户名、密码、`client_secret`、Access Token 或 Refresh Token。
 
@@ -956,7 +985,7 @@ auth:
 
 ### 阶段二：OpenCLI 标准化
 
-当前状态：待实施。根目录 `oauth2/` 已提供联调授权服务和个人数据 API，但生成器尚不接受 `--auth oidc`。
+当前状态：待实施。根目录 `oauth2/` 已提供联调授权服务和个人数据 API，但生成器尚不接受 `--auth oidc` 或 `--auth oauth2-pkce`。
 
 - 解析 authorizationCode Security Scheme；
 - 生成 Authorization Code + PKCE 客户端；
@@ -1031,4 +1060,6 @@ auth:
 - OAuth 2.0 Security Best Current Practice：[RFC 9700](https://www.rfc-editor.org/info/rfc9700/)
 - OAuth 2.0 for Native Apps：[RFC 8252](https://www.rfc-editor.org/info/rfc8252/)
 - Proof Key for Code Exchange：[RFC 7636](https://www.rfc-editor.org/info/rfc7636/)
+- OAuth 2.0 Authorization Server Metadata：[RFC 8414](https://www.rfc-editor.org/info/rfc8414/)
+- OpenID Connect Discovery：[OpenID Connect Discovery 1.0](https://openid.net/specs/openid-connect-discovery-1_0-errata2.html)
 - Zero Trust Architecture：[NIST SP 800-207](https://csrc.nist.gov/pubs/sp/800/207/final)

@@ -218,7 +218,7 @@ opencli generate \
 | `--target` | 可选 | 生成目标，支持 `go` 或 `rust`，默认 `go` |
 | `--skill-lang` | 可选 | 生成技能文档语言，支持 `en` 或 `zh`，默认 `en` |
 | `--app-version` | 可选 | 生成 CLI 的版本号 |
-| `--auth` | 可选 | 认证模式：`token`、`api_key`、`ak_sk`、`oauth2` 或 `none`；默认 `token` |
+| `--auth` | 可选 | 当前支持 `token`、`api_key`、`ak_sk`、`oauth2`、`none`；用户授权目标模式为 `oidc`、`oauth2-pkce` |
 | `--signer` | 可选 | AK/SK 签名配置，例如 `supplier_edi` |
 | `--runtime-config` | `api_key`、`oauth2` 必需 | 生成后 CLI 的 Base URL 和认证元数据；需要时从环境变量读取凭证并密封 |
 
@@ -230,11 +230,13 @@ opencli generate \
 | `api_key` | API Key | 注入 Runtime Config 声明的请求头 |
 | `ak_sk` | Access Key / Secret Key | 按 signer 配置为每个请求计算签名 |
 | `oauth2` | OAuth Client ID / Client Secret | 通过 Client Credentials 获取 Access Token，再注入 Bearer Token |
+| `oidc` | 浏览器中的当前用户 | 目标能力：通过 OIDC Authorization Code + PKCE 登录 |
+| `oauth2-pkce` | 浏览器中的当前用户 | 目标能力：通过显式 OAuth2 端点完成 Authorization Code + PKCE |
 | `none` | 无 | 不注入认证信息 |
 
 未传 `--auth` 时，OpenCLI 先读取 `opencli.yaml` 的 `auth.type`；两者都没有配置时默认使用 `token`。无需认证的接口应明确使用 `--auth none`。
 
-当前版本尚不支持 `--auth oidc`。OIDC + Authorization Code + PKCE 是用户级授权的目标模式，不能用现有 `--auth oauth2` 代替。
+当前版本尚不支持 `--auth oidc` 和 `--auth oauth2-pkce`。两者是用户级授权目标模式，不能用现有 `--auth oauth2` Client Credentials 代替。
 
 带配置文件生成：
 
@@ -527,7 +529,7 @@ Agent 调用业务命令
 
 启用 `--auth oauth2` 后，对应的 Token Endpoint operation 不生成公开命令，避免产生要求用户输入 `--client-secret` 的重复入口。
 
-### 5.2 OIDC 用户授权目标契约
+### 5.2 用户授权目标契约
 
 本节描述后续版本的目标接口，不代表当前生成器已经支持。个人数据接口不应使用 Client Credentials 冒充用户。
 
@@ -543,7 +545,7 @@ opencli generate \
   --runtime-config ./business.runtime.yaml
 ```
 
-业务 API 和授权服务地址填写在 Runtime Config：
+新系统推荐使用标准 OIDC。业务 API 和授权服务地址填写在 Runtime Config：
 
 ```yaml
 base_url: https://business-api.example.com
@@ -565,9 +567,39 @@ auth:
 
 - `base_url` 是业务 API 地址。
 - `issuer` 是授权服务地址。
-- CLI 通过 `<issuer>/.well-known/openid-configuration` 发现 authorize、token、revoke、JWKS 和 UserInfo。
+- CLI 通过 `<issuer>/.well-known/openid-configuration` 发现授权服务公开的端点。
 - `client_id` 是公开的 Public Client 标识。
 - 配置中不得出现用户名、密码、`client_secret`、Access Token 或 Refresh Token。
+
+`issuer + Discovery` 是 OIDC 标准方式，但不是 Authorization Code + PKCE 的强制条件。业务没有 Discovery 时分两种情况：
+
+1. 业务仍是 OIDC，具有稳定 issuer、JWKS 和 ID Token：保留 `type: oidc`，显式配置 authorize、token、JWKS 等端点。
+2. 业务只有 OAuth2 authorize/token，没有 Discovery 和 ID Token：使用 `--auth oauth2-pkce` 与 `type: oauth2_pkce`。
+
+存量 OAuth2 PKCE 示例：
+
+```yaml
+base_url: https://business-api.example.com
+
+auth:
+  type: oauth2_pkce
+  provider_id: business-auth
+  client_id: business-cli
+  audience: business-api
+  authorization_endpoint: https://business.example.com/oauth/authorize
+  token_endpoint: https://business.example.com/oauth/token
+  revocation_endpoint: https://business.example.com/oauth/revoke # 可选
+  identity_endpoint: https://business-api.example.com/api/v1/me
+  scopes:
+    - profile
+    - expense:read:self
+  redirect:
+    type: loopback
+    path: /oauth/callback
+  token_store: os_keychain
+```
+
+不要把没有 OIDC Discovery 和 ID Token 的系统标记成 `oidc`。现有 `--auth oauth2` 仍表示 Client Credentials；用户授权兼容模式必须使用独立的 `oauth2-pkce` 名称。
 
 目标登录命令：
 
@@ -589,7 +621,7 @@ uv sync
 uv run oauth2-server
 ```
 
-完整对接和安全规范参见
+完整的模式选择、接口必选项和安全规范参见
 [`docs/design/oidc-cli-business-integration.md`](./docs/design/oidc-cli-business-integration.md)。
 
 请求体模式说明：
@@ -912,7 +944,7 @@ overrides:
 - `opencli inspect` 的接口列表符合预期。
 - `opencli.yaml` 已经按实际业务调整并确认。
 - 使用 `--runtime-config` 时，`runtime.yaml` 不包含明文 Secret，且无需顶层 `version`。
-- 个人数据接口未错误使用 `--auth oauth2` Client Credentials；采用 OIDC 时已确认当前生成器版本确实支持 `--auth oidc`。
+- 个人数据接口未错误使用 `--auth oauth2` Client Credentials；采用用户授权时已确认当前生成器支持所选的 `--auth oidc` 或 `--auth oauth2-pkce`。
 - 命令组和子命令名称对使用人员清晰。
 - 查询、写入、更新、删除等关键命令均已在测试环境验证。
 - 认证环境变量和额外请求头说明完整。

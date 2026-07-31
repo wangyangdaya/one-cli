@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让 `one-cli` 能从 OpenAPI 生成面向终端桌面 Agent 的用户授权 CLI，使用 OIDC/OAuth 2.0 Authorization Code + PKCE、loopback 回调和 OS Keychain，同时保持现有 `oauth2=client_credentials`、Token、API Key、AK/SK 行为兼容。
+**Goal:** 让 `one-cli` 能从 OpenAPI 生成面向终端桌面 Agent 的用户授权 CLI，支持标准 OIDC 和存量 OAuth2 Authorization Code + PKCE、loopback 回调和 OS Keychain，同时保持现有 `oauth2=client_credentials`、Token、API Key、AK/SK 行为兼容。
 
-**Architecture:** 在生成器中新增独立认证类型 `oidc`，不改变现有 `oauth2` 的应用身份语义。OpenAPI 解析层提取 Authorization Code 与 operation scope，runtime config 只承载 Public Client 的公开元数据。生成的 CLI 通过显式 `auth login` 完成浏览器授权，通过 Keychain 保存用户会话；受保护业务命令调用统一 Token Manager 刷新和注入 Bearer Token。业务系统仍是最终权限边界。
+**Architecture:** 在生成器中新增 `oidc` 和 `oauth2-pkce` 两个用户授权类型，不改变现有 `oauth2` 的应用身份语义。OIDC 默认使用 Discovery；存量 OAuth2 PKCE 使用显式端点且不假定 ID Token。两种模式共享浏览器授权、PKCE、loopback、Keychain 和 Token Manager，业务系统仍是最终权限边界。
 
 **Tech Stack:** Go 1.23、Cobra、kin-openapi、`golang.org/x/oauth2`、`github.com/coreos/go-oidc/v3/oidc`、`github.com/zalando/go-keyring`、Rust 2021、Clap、Reqwest、`openidconnect`、`keyring`、Go test、Cargo test。
 
@@ -19,11 +19,12 @@
 - 不支持服务器 Agent 用户授权、Device Flow、Token Vault、应用权限或工作负载身份。
 - 不支持 Resource Owner Password Grant，不接收 username/password。
 - Public Client 不配置、不生成、不保存 `client_secret`。
-- 每个业务系统使用自己的 issuer、client_id、audience 和 Token。
-- `oauth2` 保持为现有 Client Credentials；新用户授权类型命名为 `oidc`。
+- 每个业务系统使用自己的 provider identity、client_id、audience 和 Token。
+- `oauth2` 保持为现有 Client Credentials；用户授权类型为 `oidc` 和 `oauth2-pkce`。
+- 没有 Discovery 和 ID Token 的服务不得配置成 `oidc`。
 - 受保护命令未登录时返回结构化 `login_required`，不自动打开浏览器。
 - 只有显式执行 `auth login` 才启动 loopback listener 和系统浏览器。
-- 第一交付版本完成 Go 生成目标；在 Rust 等价实现完成前，生成器必须明确拒绝 `--target rust --auth oidc`，不能生成缺少安全能力的半成品。
+- 第一交付版本完成 Go 生成目标；在 Rust 等价实现完成前，生成器必须明确拒绝 Rust 的两种用户授权模式，不能生成缺少安全能力的半成品。
 
 ### 1.1 不做的内容
 
@@ -37,7 +38,7 @@
 
 | 里程碑 | 范围 | 退出条件 |
 | --- | --- | --- |
-| M1 协议模型 | OpenAPI、模型、runtime config、生成参数 | `oidc` 配置可验证，旧认证测试全通过 |
+| M1 协议模型 | OpenAPI、模型、runtime config、生成参数 | `oidc`、`oauth2-pkce` 配置可验证，旧认证测试全通过 |
 | M2 Go 最小闭环 | login/status/check/logout、Keychain、刷新、请求注入 | 本地模拟授权服务 E2E 通过 |
 | M3 AI 契约 | `x-ai-access`、结构化错误、Skill/README | Agent 不接触 Token，scope 提示可解析 |
 | M4 Rust 对齐 | Rust OIDC、Keychain、命令和 E2E | 与 Go 同一验收矩阵通过 |
@@ -62,7 +63,8 @@ internal/render/rust_project.go
 ### 2.2 新增 Go 生成模板
 
 ```text
-internal/render/templates/go/auth_oidc.go.tmpl
+internal/render/templates/go/auth_pkce.go.tmpl
+internal/render/templates/go/auth_oidc_verify.go.tmpl
 internal/render/templates/go/auth_store.go.tmpl
 internal/render/templates/go/auth_command.go.tmpl
 internal/render/templates/go/identity_command.go.tmpl
@@ -71,7 +73,8 @@ internal/render/templates/go/identity_command.go.tmpl
 生成结果：
 
 ```text
-internal/auth/oidc.go
+internal/auth/pkce.go
+internal/auth/oidc_verify.go
 internal/auth/store.go
 internal/auth/command.go
 internal/auth/identity.go
@@ -83,7 +86,8 @@ internal/auth/identity.go
 ### 2.3 新增 Rust 生成模板
 
 ```text
-internal/render/templates/rust/oidc.rs.tmpl
+internal/render/templates/rust/pkce.rs.tmpl
+internal/render/templates/rust/oidc_verify.rs.tmpl
 internal/render/templates/rust/token_store.rs.tmpl
 internal/render/templates/rust/auth_command.rs.tmpl
 internal/render/templates/rust/identity_command.rs.tmpl
@@ -92,7 +96,8 @@ internal/render/templates/rust/identity_command.rs.tmpl
 生成结果：
 
 ```text
-src/oidc.rs
+src/pkce.rs
+src/oidc_verify.rs
 src/token_store.rs
 src/auth_command.rs
 src/identity_command.rs
@@ -103,12 +108,13 @@ src/identity_command.rs
 ```text
 examples/oidc_user.yaml
 examples/opencli-oidc.yaml
+examples/opencli-oauth2-pkce.yaml
 tests/unit/openapi_parser_test.go
 internal/runtimeconfig/runtimeconfig_test.go
 tests/command/opencli_generate_test.go
 tests/unit/render_test.go
-tests/integration/oidc_go_cli_test.go
-tests/integration/oidc_rust_cli_test.go
+tests/integration/user_auth_go_cli_test.go
+tests/integration/user_auth_rust_cli_test.go
 tests/integration/testdata/oidc/
 ```
 
@@ -121,31 +127,35 @@ tests/integration/testdata/oidc/
 - Modify: `internal/planner/plan.go`
 - Test: `tests/unit/planner_test.go`
 
-- [ ] **Step 1: 先写失败测试，证明 `oauth2` 和 `oidc` 是两种不同语义**
+- [ ] **Step 1: 先写失败测试，证明三种 OAuth 相关类型语义不同**
 
 增加测试断言：
 
 ```go
-func TestPlanPreservesDistinctOAuthClientCredentialsAndOIDCAuthTypes(t *testing.T) {
+func TestPlanPreservesDistinctOAuthAuthTypes(t *testing.T) {
     // oauth2 仍表示 client_credentials。
     // oidc 表示 authorization_code + PKCE 用户授权。
+    // oauth2-pkce 表示无 OIDC 身份层的 authorization_code + PKCE。
 }
 ```
 
 运行：
 
 ```bash
-go test ./tests/unit -run 'TestPlanPreservesDistinctOAuthClientCredentialsAndOIDCAuthTypes' -v
+go test ./tests/unit -run 'TestPlanPreservesDistinctOAuthAuthTypes' -v
 ```
 
-预期：FAIL，`AuthTypeOIDC` 尚不存在。
+预期：FAIL，用户授权类型尚不存在。
 
 - [ ] **Step 2: 增加领域类型**
 
 在 `internal/model/app.go` 增加：
 
 ```go
-const AuthTypeOIDC = "oidc"
+const (
+    AuthTypeOIDC       = "oidc"
+    AuthTypeOAuth2PKCE = "oauth2-pkce"
+)
 
 type AIAccess struct {
     SubjectModes       []string
@@ -300,7 +310,7 @@ git add internal/openapi/document.go internal/openapi/parser.go tests/unit/opena
 git commit -m "parse oidc authorization code metadata"
 ```
 
-## 5. Task 3：增加无 Secret 的 OIDC runtime config
+## 5. Task 3：增加无 Secret 的用户授权 runtime config
 
 **Files:**
 
@@ -339,16 +349,38 @@ auth:
 - issuer 不是 HTTPS。
 - loopback path 为空或不是绝对 path。
 - token_store 不是 `os_keychain`。
-- scopes 缺少 `openid`。
+- `oidc` scopes 缺少 `openid`。
 - 显式 endpoints 不是 HTTPS。
-- 同时缺少 issuer 和 authorization/token endpoints。
+- `oidc` 缺少 issuer。
+- `oidc` 禁用 Discovery 时缺少 authorization/token/JWKS endpoint。
+- `oauth2_pkce` 缺少 provider_id、authorization endpoint、token endpoint 或 identity endpoint。
+- `oauth2_pkce` 配置 issuer、JWKS 或要求 ID Token。
+
+增加合法的存量 OAuth2 PKCE 输入：
+
+```yaml
+base_url: https://finance-api.example.com
+auth:
+  type: oauth2_pkce
+  provider_id: finance-auth
+  client_id: finance-cli
+  audience: finance-api
+  authorization_endpoint: https://finance.example.com/oauth/authorize
+  token_endpoint: https://finance.example.com/oauth/token
+  identity_endpoint: https://finance-api.example.com/api/v1/me
+  scopes: [profile, expense:read:self]
+  redirect:
+    type: loopback
+    path: /oauth/callback
+  token_store: os_keychain
+```
 
 - [ ] **Step 2: 扩展配置结构**
 
-新增：
+新增 OIDC 与 OAuth2 PKCE 公共配置结构。OIDC 使用 issuer 作为 provider identity；OAuth2 PKCE 使用显式 `provider_id`：
 
 ```go
-type OIDCDefaults struct {
+type UserAuthorizationDefaults struct {
     Scheme          string
     AuthorizationURL string
     TokenURL         string
@@ -364,12 +396,13 @@ type sourceRedirect struct {
 `sourceAuth` 和 `sealedAuth` 增加公开字段：
 
 ```go
-Issuer, AuthorizationURL, RevocationURL, JWKSURL string
+Issuer, ProviderID, AuthorizationURL, RevocationURL, JWKSURL string
+UserInfoURL, IdentityURL string
 Audience, TokenStore string
 Redirect sourceRedirect
 ```
 
-OIDC 分支直接 marshal 公开配置并返回，无加密、无 key share。
+OIDC 和 OAuth2 PKCE 分支直接 marshal 公开配置并返回，无加密、无 key share。
 现有 bearer、api_key、oauth2 分支保持现状。
 
 - [ ] **Step 3: 应用 OpenAPI 默认值**
@@ -382,7 +415,9 @@ OIDC 分支直接 marshal 公开配置并返回，无加密、无 key share。
 - scopes
 
 但 `client_id` 和 `audience` 必须由 runtime config 显式提供，生成器不得猜测。
-有 issuer 时运行期优先 Discovery；显式 endpoint 仅作为不支持 Discovery 的 fallback。
+`oidc` 有 issuer 时运行期优先 Discovery；显式 endpoint 仅作为 OIDC 不支持 Discovery 的 fallback。
+
+`oauth2_pkce` 只使用显式 authorization/token endpoints，不执行 OIDC Discovery，不要求 `openid` scope，也不校验 ID Token。
 
 - [ ] **Step 4: 运行测试**
 
@@ -415,6 +450,8 @@ git commit -m "add public oidc runtime configuration"
 --auth oidc --runtime-config <file> --target go      => success
 --auth oidc without runtime config                   => clear error
 --auth oidc --target rust                            => explicit not-yet-supported error
+--auth oauth2-pkce --runtime-config <file>            => success
+--auth oauth2-pkce without explicit endpoints         => clear error
 --auth oauth2                                        => existing client_credentials behavior
 --auth token|api_key|ak_sk|none                      => unchanged
 ```
@@ -424,7 +461,7 @@ git commit -m "add public oidc runtime configuration"
 支持列表改为：
 
 ```text
-token, api_key, ak_sk, oauth2, oidc, or none
+token, api_key, ak_sk, oauth2, oidc, oauth2-pkce, or none
 ```
 
 错误信息必须明确：
@@ -432,16 +469,17 @@ token, api_key, ak_sk, oauth2, oidc, or none
 ```text
 oauth2 means client_credentials application auth
 oidc means authorization_code + PKCE user auth
+oauth2-pkce means authorization_code + PKCE without OIDC discovery or ID token
 ```
 
-新增 `oidcDefaults(doc)`，不得复用 `oauth2Defaults`，防止两种 flow 混淆。
+新增用户授权默认值解析，不得复用 Client Credentials 的 `oauth2Defaults`。OpenAPI 只能提供 authorize、token 和 scope 默认值，不能把普通 OAuth2 自动推断为 OIDC。
 
 - [ ] **Step 3: 加 Rust 显式拒绝**
 
 在 `ProjectWithOptions` 之前校验，返回：
 
 ```text
-target rust does not support auth mode oidc yet; use target go
+target rust does not support user authorization modes yet; use target go
 ```
 
 M4 完成时删除此限制及其测试，替换为 Rust 成功测试。
@@ -458,14 +496,14 @@ go test ./tests/command -run 'TestOpenCLI.*(Auth|OIDC|OAuth)' -v
 
 ```bash
 git add internal/app/generate_command.go internal/render/project.go tests/command/opencli_generate_test.go tests/command/opencli_root_test.go
-git commit -m "add oidc generation mode"
+git commit -m "add user authorization generation modes"
 ```
 
-## 7. Task 5：生成 Go OIDC 协议核心
+## 7. Task 5：生成 Go 用户授权协议核心
 
 **Files:**
 
-- Add: `internal/render/templates/go/auth_oidc.go.tmpl`
+- Add: `internal/render/templates/go/auth_pkce.go.tmpl`
 - Modify: `internal/render/go_project.go`
 - Modify: `internal/render/template_helpers.go`
 - Modify: `internal/render/render.go`
@@ -475,11 +513,12 @@ git commit -m "add oidc generation mode"
 
 - [ ] **Step 1: 写生成文件失败测试**
 
-生成 `--auth oidc` Go 项目并断言：
+分别生成 `--auth oidc` 和 `--auth oauth2-pkce` Go 项目并断言：
 
-- 存在 `internal/auth/oidc.go`。
-- `go.mod` 仅在 OIDC 项目包含 OIDC、OAuth2 和 Keyring 依赖。
-- 非 OIDC 项目不生成 OIDC 文件，依赖不变化。
+- 存在 `internal/auth/pkce.go`。
+- OIDC 项目包含 OIDC、OAuth2 和 Keyring 依赖。
+- OAuth2 PKCE 项目不引入 OIDC ID Token 校验依赖。
+- 非用户授权项目不生成 PKCE 文件，依赖不变化。
 - 生成项目通过 `go test ./...`。
 
 - [ ] **Step 2: 添加条件模板函数和生成文件**
@@ -487,14 +526,14 @@ git commit -m "add oidc generation mode"
 新增：
 
 ```go
-func appUsesOIDC(app model.App) bool
+func appUsesUserAuthorization(app model.App) bool
 ```
 
-只在 `app.Auth.Type == model.AuthTypeOIDC` 时生成 OIDC 文件与依赖。
+只在 auth type 为 `AuthTypeOIDC` 或 `AuthTypeOAuth2PKCE` 时生成共享 PKCE 文件；OIDC 校验模块只为 OIDC 生成。
 
 - [ ] **Step 3: 定义可测试协议边界**
 
-生成的 `internal/auth/oidc.go` 提供：
+生成的 `internal/auth/pkce.go` 提供：
 
 ```go
 type BrowserOpener interface {
@@ -542,10 +581,11 @@ client_id
 redirect_uri
 scope
 state
-nonce
 code_challenge
 code_challenge_method=S256
 ```
+
+`nonce` 只在 OIDC authorize 请求中发送；OAuth2 PKCE 没有 ID Token，不发送 `nonce`。
 
 `audience` 是 CLI 对业务 Access Token 目标系统的期望值，不是 OAuth 标准授权请求参数。
 生成器不得擅自向 authorize endpoint 添加非标准 `audience` 参数；如果企业授权服务需要
@@ -563,14 +603,14 @@ code_verifier
 
 不得发送 `client_secret`。
 
-- [ ] **Step 5: 实现 Discovery 安全校验**
+- [ ] **Step 5: 实现 Provider 元数据安全校验**
 
-- issuer URL 必须为 HTTPS。
-- Discovery 文档 issuer 必须与配置 issuer 完全匹配（规范化尾部 `/` 后比较）。
-- authorization、token、revocation、jwks endpoint 必须为 HTTPS。
-- `code_challenge_methods_supported` 必须包含 `S256`。
-- 只接受 `response_type=code`。
-- 显式 endpoint fallback 仍执行 HTTPS 校验。
+- OIDC issuer URL 必须为 HTTPS。
+- OIDC 默认 Discovery，文档 issuer 必须与配置 issuer 完全匹配。
+- OIDC 显式 fallback 仍要求 issuer、authorization、token、JWKS 和 ID Token 校验。
+- OAuth2 PKCE 不执行 OIDC Discovery，只读取显式 authorization/token endpoints。
+- authorization、token 和所有已配置的 revocation、JWKS、Identity Endpoint 必须为 HTTPS。
+- 两种模式都只接受 Authorization Code 和 PKCE S256。
 
 - [ ] **Step 6: 写模板级生成测试并构建样例**
 
@@ -591,8 +631,8 @@ cd ./tmp/oidc-go && go test ./...
 - [ ] **Step 7: 提交**
 
 ```bash
-git add internal/render/templates/go/auth_oidc.go.tmpl internal/render/go_project.go internal/render/template_helpers.go internal/render/render.go internal/render/gomod.tmpl internal/render/gosum.tmpl tests/unit/render_test.go
-git commit -m "generate go oidc pkce client"
+git add internal/render/templates/go/auth_pkce.go.tmpl internal/render/go_project.go internal/render/template_helpers.go internal/render/render.go internal/render/gomod.tmpl internal/render/gosum.tmpl tests/unit/render_test.go
+git commit -m "generate go user authorization client"
 ```
 
 ## 8. Task 6：实现 OS Keychain 会话存储
@@ -611,7 +651,7 @@ git commit -m "generate go oidc pkce client"
 - 不存在会话返回 `ErrLoginRequired`。
 - Save 后可 Load。
 - Delete 幂等。
-- 多 issuer/client_id/tenant/user 不串用。
+- 多 provider identity/client_id/tenant/subject 不串用。
 - 序列化错误不泄漏 Token。
 
 - [ ] **Step 2: 实现 Keychain key 设计**
@@ -619,19 +659,21 @@ git commit -m "generate go oidc pkce client"
 Token 隔离维度：
 
 ```text
-issuer × client_id × tenant × user
+provider identity × client_id × tenant-or-empty × subject
 ```
 
 Keychain 使用：
 
 ```text
-service = opencli/<app>/<sha256(issuer|client_id)>
+service = opencli/<app>/<sha256(providerIdentity|client_id)>
 account = session/<sha256(tenant|subject)>
 active  = active-session
 ```
 
 `active-session` 也必须保存在 Keychain，而不是普通配置文件。CLI 本期只允许一个当前用户，
 新登录覆盖 active pointer，但不允许 Agent 通过参数选择任意用户。
+
+只有所有受保护 operation 都不是 tenant-bound 时才允许空 tenant。
 
 - [ ] **Step 3: 定义 Session**
 
@@ -684,7 +726,7 @@ git commit -m "store generated oidc sessions in keychain"
 - Modify: `internal/render/templates/go/root_main.go.tmpl`
 - Modify: `internal/render/go_project.go`
 - Modify: `tests/unit/render_test.go`
-- Add: `tests/integration/oidc_go_cli_test.go`
+- Add: `tests/integration/user_auth_go_cli_test.go`
 
 - [ ] **Step 1: 写命令树失败测试**
 
@@ -698,19 +740,19 @@ finance auth logout
 finance identity current
 ```
 
-非 OIDC CLI 不增加这些命令，避免改变现有 UX。
+非用户授权 CLI 不增加这些命令，避免改变现有 UX。
 
 - [ ] **Step 2: 实现 `auth login`**
 
 行为：
 
-1. 发现并校验元数据。
-2. 生成 state 和 PKCE verifier/challenge。
+1. OIDC 发现并校验元数据；OAuth2 PKCE 校验显式端点。
+2. 两种模式生成 state 和 PKCE verifier/challenge；仅 OIDC 生成 nonce。
 3. 启动 loopback 随机端口。
 4. 打开系统外部浏览器。
 5. 等待回调并校验 state。
 6. 用 code + verifier 换 Token。
-7. 校验 OIDC ID Token 的 issuer、aud 中的 client_id、nonce、exp 和签名。
+7. OIDC 从验签后的 ID Token 取得 `sub`，按需调用 UserInfo/Identity Endpoint 补充 tenant；OAuth2 PKCE 调用必选的 Identity Endpoint。
 8. 保存 Session 到 Keychain。
 9. stdout 输出不含 Token 的 JSON。
 
@@ -725,6 +767,13 @@ finance identity current
   "expires_at": "2026-07-31T15:15:00+08:00"
 }
 ```
+
+身份解析必须遵循：
+
+- Identity Endpoint 返回 `sub`、可选 `tenant_id` 和展示用 `name`。
+- OIDC 的端点 `sub` 必须等于 ID Token `sub`。
+- tenant-bound operation 缺少可信 `tenant_id` 时登录失败。
+- 非 tenant-bound CLI 的 `tenant_id` 可省略，Session 存储键使用空 tenant。
 
 - [ ] **Step 3: 实现 `auth status`、`check`、`identity current`**
 
@@ -747,9 +796,11 @@ scope 不足输出：
 
 - [ ] **Step 4: 实现 `auth logout`**
 
-优先向 revocation endpoint 撤销 Refresh Token，其次 Access Token；无论远端撤销是否返回
+已配置 revocation endpoint 时，优先撤销 Refresh Token，其次 Access Token；无论远端撤销是否返回
 “Token 已失效”，都删除本地会话。网络失败时默认保留本地会话并返回 retryable 错误；
 提供显式 `--local-only` 才允许只删除本地凭据。
+
+未配置 revocation endpoint 时删除本地会话，并在结果中明确 `remote_revocation: unsupported`，不得声称远端 Token 已失效。
 
 - [ ] **Step 5: 测试 stdout/stderr 红线**
 
@@ -777,7 +828,7 @@ go test ./tests/integration -run 'TestGeneratedGoOIDCAuthCommands' -v
 - [ ] **Step 7: 提交**
 
 ```bash
-git add internal/render/templates/go/auth_command.go.tmpl internal/render/templates/go/identity_command.go.tmpl internal/render/templates/go/root_main.go.tmpl internal/render/go_project.go tests/unit/render_test.go tests/integration/oidc_go_cli_test.go
+git add internal/render/templates/go/auth_command.go.tmpl internal/render/templates/go/identity_command.go.tmpl internal/render/templates/go/root_main.go.tmpl internal/render/go_project.go tests/unit/render_test.go tests/integration/user_auth_go_cli_test.go
 git commit -m "generate oidc auth and identity commands"
 ```
 
@@ -785,10 +836,10 @@ git commit -m "generate oidc auth and identity commands"
 
 **Files:**
 
-- Modify: `internal/render/templates/go/auth_oidc.go.tmpl`
+- Modify: `internal/render/templates/go/auth_pkce.go.tmpl`
 - Modify: `internal/render/templates/go/group_service_http.go.tmpl`
 - Modify: `internal/render/templates/go/group_command.go.tmpl`
-- Modify: `tests/integration/oidc_go_cli_test.go`
+- Modify: `tests/integration/user_auth_go_cli_test.go`
 
 - [ ] **Step 1: 写受保护请求失败测试**
 
@@ -801,7 +852,7 @@ git commit -m "generate oidc auth and identity commands"
 - refresh invalid_grant：删除失效会话并返回 `login_required`。
 - operation scope 不足：调用前返回 `insufficient_scope`。
 - OpenAPI 无 security 的 operation：不要求登录。
-- `--header Authorization: ...`：OIDC 受保护 operation 拒绝覆盖。
+- `--header Authorization: ...`：用户授权 operation 拒绝覆盖。
 
 - [ ] **Step 2: 实现并发安全 Token Manager**
 
@@ -810,10 +861,10 @@ git commit -m "generate oidc auth and identity commands"
 
 - [ ] **Step 3: 按 operation security 注入认证**
 
-只对声明对应 OIDC scheme 的 operation 注入用户 Token。
-不得根据“全局 auth=oidc”给公开 operation 强行加 Token。
+只对声明对应用户授权 scheme 的 operation 注入用户 Token。
+不得根据全局 auth type 给公开 operation 强行加 Token。
 
-保留现有 `applyOAuth2`，新增独立 `applyOIDC`，禁止互相 fallback。
+保留现有 Client Credentials `applyOAuth2`，新增独立 `applyUserAccessToken`，禁止互相 fallback。
 
 - [ ] **Step 4: 标准化 API 认证错误**
 
@@ -836,8 +887,8 @@ go test ./tests/integration -run 'TestGeneratedGoOIDC(Request|Refresh|Scope|Head
 - [ ] **Step 6: 提交**
 
 ```bash
-git add internal/render/templates/go/auth_oidc.go.tmpl internal/render/templates/go/group_service_http.go.tmpl internal/render/templates/go/group_command.go.tmpl tests/integration/oidc_go_cli_test.go
-git commit -m "apply oidc user sessions to protected requests"
+git add internal/render/templates/go/auth_pkce.go.tmpl internal/render/templates/go/group_service_http.go.tmpl internal/render/templates/go/group_command.go.tmpl tests/integration/user_auth_go_cli_test.go
+git commit -m "apply user sessions to protected requests"
 ```
 
 ## 11. Task 9：把 `x-ai-access` 写入 CLI/Skill 契约
@@ -900,12 +951,12 @@ git add internal/render/templates/go/group_command.go.tmpl internal/render/templ
 git commit -m "publish ai access metadata in generated cli"
 ```
 
-## 12. Task 10：建立可重复的本地 OIDC 安全 E2E
+## 12. Task 10：建立可重复的本地用户授权安全 E2E
 
 **Files:**
 
 - Add: `tests/integration/testdata/oidc/server.go`
-- Modify: `tests/integration/oidc_go_cli_test.go`
+- Modify: `tests/integration/user_auth_go_cli_test.go`
 - Modify: `scripts/smoke.sh`
 - Modify: `scripts/SMOKE_TEST.md`
 
@@ -934,6 +985,8 @@ git commit -m "publish ai access metadata in generated cli"
 - wrong issuer/audience/signature
 - insufficient scope
 
+同一测试服务增加无 Discovery、无 ID Token 的 OAuth2 PKCE 配置，用于验证显式端点和 Identity Endpoint；不得让该配置走 OIDC 校验分支。
+
 - [ ] **Step 2: 自动化浏览器与 listener**
 
 E2E 不启动真实浏览器，通过注入 `BrowserOpener` 访问授权 URL；
@@ -951,7 +1004,8 @@ Keychain 使用合同一致的 fake store，平台 Keychain 另做手工 smoke�
 - 无 client_secret 成功。
 - refresh rotation。
 - revoke 后不可刷新。
-- iss/aud/exp/signature/scope 错误。
+- OIDC 的 iss/aud/exp/signature/scope 错误。
+- OAuth2 PKCE 无 Discovery/ID Token 时仍能登录、识别当前用户并调用 API。
 - Token 不出现在输出。
 - 不自动切换身份。
 
@@ -968,8 +1022,8 @@ make test
 - [ ] **Step 5: 提交**
 
 ```bash
-git add tests/integration/testdata/oidc tests/integration/oidc_go_cli_test.go scripts/smoke.sh scripts/SMOKE_TEST.md
-git commit -m "add oidc pkce security integration suite"
+git add tests/integration/testdata/oidc tests/integration/user_auth_go_cli_test.go scripts/smoke.sh scripts/SMOKE_TEST.md
+git commit -m "add user authorization security integration suite"
 ```
 
 ## 13. Task 11：Rust 功能对齐
@@ -978,7 +1032,8 @@ git commit -m "add oidc pkce security integration suite"
 
 **Files:**
 
-- Add: `internal/render/templates/rust/oidc.rs.tmpl`
+- Add: `internal/render/templates/rust/pkce.rs.tmpl`
+- Add: `internal/render/templates/rust/oidc_verify.rs.tmpl`
 - Add: `internal/render/templates/rust/token_store.rs.tmpl`
 - Add: `internal/render/templates/rust/auth_command.rs.tmpl`
 - Add: `internal/render/templates/rust/identity_command.rs.tmpl`
@@ -988,14 +1043,14 @@ git commit -m "add oidc pkce security integration suite"
 - Modify: `internal/render/templates/rust/client.rs.tmpl`
 - Modify: `internal/render/rust_project.go`
 - Modify: `tests/integration/rust_generate_smoke_test.go`
-- Add: `tests/integration/oidc_rust_cli_test.go`
+- Add: `tests/integration/user_auth_rust_cli_test.go`
 
 - [ ] **Step 1: 把“Rust 暂不支持”测试改为生成成功测试**
 
 先修改测试期望，然后确认失败。
 
 ```bash
-go test ./tests/command -run 'TestOpenCLIGenerate.*RustOIDC' -v
+go test ./tests/command -run 'TestOpenCLIGenerate.*Rust(OIDC|OAuth2PKCE)' -v
 ```
 
 预期：FAIL，因为护栏仍存在。
@@ -1004,7 +1059,8 @@ go test ./tests/command -run 'TestOpenCLIGenerate.*RustOIDC' -v
 
 Rust 目标使用：
 
-- `openidconnect`：Discovery、Authorization Code、PKCE、ID Token 校验。
+- `oauth2`：两种模式共享的 Authorization Code、PKCE 和 Token 刷新。
+- `openidconnect`：仅 OIDC 使用的 Discovery 和 ID Token 校验。
 - `keyring`：OS Credential Store。
 - `open`：系统浏览器。
 - loopback listener 采用小型 HTTP server 或 Tokio TCP，仍只绑定 `127.0.0.1:0`。
@@ -1019,21 +1075,22 @@ Rust 目标使用：
 - [ ] **Step 4: 复用假授权服务器运行 Rust E2E**
 
 ```bash
-go test ./tests/integration -run 'TestGeneratedRustOIDC' -v
+go test ./tests/integration -run 'TestGeneratedRust(OIDC|OAuth2PKCE)' -v
 cargo test --manifest-path ./tmp/oidc-rust/Cargo.toml
+cargo test --manifest-path ./tmp/oauth2-pkce-rust/Cargo.toml
 ```
 
 预期：PASS。
 
 - [ ] **Step 5: 删除 Rust 拒绝护栏**
 
-删除 Task 4 的暂时限制，确保 `--target rust --auth oidc` 正常生成。
+删除 Task 4 的暂时限制，确保 Rust 的 `oidc` 和 `oauth2-pkce` 都能正常生成。
 
 - [ ] **Step 6: 提交**
 
 ```bash
-git add internal/render/templates/rust internal/render/rust_project.go tests/command/opencli_generate_test.go tests/integration/rust_generate_smoke_test.go tests/integration/oidc_rust_cli_test.go
-git commit -m "add rust oidc pkce parity"
+git add internal/render/templates/rust internal/render/rust_project.go tests/command/opencli_generate_test.go tests/integration/rust_generate_smoke_test.go tests/integration/user_auth_rust_cli_test.go
+git commit -m "add rust user authorization parity"
 ```
 
 ## 14. Task 12：文档、迁移与发布验收
@@ -1052,24 +1109,24 @@ git commit -m "add rust oidc pkce parity"
 必须提供：
 
 ```text
-issuer
 authorization endpoint
 token endpoint
-revocation endpoint
-jwks_uri
 public client_id
 API audience
 allowed scopes
 loopback redirect path
-userinfo 或 /me 主体映射
 ```
+
+OIDC 另外提供 issuer、Discovery 或显式 JWKS，以及 ID Token；Revocation 和 UserInfo 按需提供。
+
+OAuth2 PKCE 另外提供 provider_id 和 Identity Endpoint。opaque Access Token 的 Introspection 由 Resource Server 对接。
 
 明确服务端要求：
 
 - 强制 PKCE S256。
 - Public Client Token 请求不要求 client_secret。
 - Code 一次性且短期。
-- Access Token 校验 iss/aud/exp/scope。
+- JWT Access Token 校验签名、iss/aud/exp/scope；opaque Token 通过 introspection 或等价机制校验。
 - Refresh Token 轮换与复用检测。
 - API 做资源/租户级授权。
 
@@ -1079,6 +1136,7 @@ userinfo 或 /me 主体映射
 
 ```bash
 opencli generate ... --auth oidc --runtime-config ...
+opencli generate ... --auth oauth2-pkce --runtime-config ...
 finance auth login
 finance auth status
 finance auth check --operation expense.list
@@ -1133,7 +1191,7 @@ git status --short
 
 ```bash
 git add README.md docs/auth Makefile internal/render/templates/go/readme.md.tmpl internal/render/templates/rust/readme.md.tmpl
-git commit -m "document generated oidc user authorization"
+git commit -m "document generated user authorization"
 ```
 
 ## 15. Definition of Done
@@ -1142,19 +1200,22 @@ git commit -m "document generated oidc user authorization"
 
 - [ ] `oauth2` Client Credentials 现有测试和生成结果保持兼容。
 - [ ] `oidc` 只实现 Authorization Code + PKCE，不存在密码模式。
+- [ ] `oauth2-pkce` 只使用显式端点，不执行 OIDC Discovery 或要求 ID Token。
 - [ ] Public Client 不发送或保存 client_secret。
 - [ ] listener 只绑定 loopback 随机端口，回调后立即关闭。
-- [ ] CLI 验证 state、PKCE S256、issuer、ID Token 的 client_id audience、签名和 expiry；业务 API 验证 Access Token 的 API audience。
+- [ ] 两种用户模式都验证 state 和 PKCE S256；OIDC 额外验证 issuer、ID Token audience、签名、nonce 和 expiry。
+- [ ] JWT Access Token 由业务 API 验证签名、issuer、API audience、expiry 和 scope。
+- [ ] opaque Access Token 由业务 API 通过 introspection 或等价机制验证有效性、主体、目标资源和 scope。
 - [ ] Access/Refresh Token 只保存于 OS Keychain。
 - [ ] 未登录、scope 不足和 Token 失效均输出结构化错误。
-- [ ] OIDC 受保护 operation 不能覆盖 Authorization Header。
+- [ ] 用户授权保护的 operation 不能覆盖 Authorization Header。
 - [ ] 用户认证失败后不 fallback 到 oauth2、Token、AK/SK 或 API Key。
 - [ ] 公开 operation 不强制登录。
 - [ ] `auth login/status/check/logout` 与 `identity current` 可用。
 - [ ] `x-ai-access` 被严格解析，但不冒充服务端授权。
 - [ ] Go 和 Rust 都通过同一安全测试矩阵；若 Rust 未完成则生成器明确拒绝。
 - [ ] stdout、stderr、日志、Skill、README 和生成配置中没有 Token 或 Secret。
-- [ ] `make test`、`make build` 和 OIDC smoke test 全部通过。
+- [ ] `make test`、`make build` 和两种用户授权 smoke test 全部通过。
 
 ## 16. 建议执行顺序与工作量
 

@@ -70,8 +70,12 @@ auth:
 ```
 
 CLI 根据 `issuer` 访问 `/.well-known/openid-configuration`，自动发现
-authorize、token、revoke、JWKS 和 UserInfo。账号密码只在浏览器登录页输入；
+本 Demo 发布的 authorize、token、revoke、JWKS 和 UserInfo。账号密码只在浏览器登录页输入；
 配置中没有 `client_secret`、密码或 Token。
+
+这是标准 OIDC 示例。存量业务只有 OAuth2 authorize/token、没有 Discovery 和
+ID Token 时，不得伪装成 OIDC；应使用独立的 `oauth2-pkce` 兼容模式并显式配置端点。
+具体契约参见上面的对接指南。
 
 当前目录提供授权服务及对接契约。若当前 one-cli 分支尚未实现 `--auth oidc`，
 需先完成仓库中的
