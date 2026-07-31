@@ -1,8 +1,10 @@
 # 企业业务系统 AI Native 认证授权架构与开发规范
 
+> 修订说明（2026-07-31）：当前版本收敛为“终端电脑上的 Agent 代表当前用户访问个人数据”。服务器 Agent 用户授权、Device Flow、应用权限和工作负载身份不属于本期范围，后续单独设计。
+
 ## 1. 文档摘要
 
-本方案用于指导企业内部业务系统把传统 API 改造成可安全提供给客户端 AI Agent、生成式 CLI 和自动化程序使用的 AI Native API。
+本方案指导企业内部业务系统把个人数据 API 改造成可安全提供给终端电脑上的 AI Agent 和生成式 CLI 使用的 AI Native API。
 
 本方案采用“分布式业务授权、统一协议与客户端契约”的架构：
 
@@ -10,10 +12,10 @@
 - 不提供可以调用所有企业系统的万能 Token；
 - 每个业务系统独立签发仅面向本系统的短期 Token；
 - 每个业务系统负责用户、租户、资源和操作级最终授权；
-- OpenCLI 统一登录命令、身份选择、Token 存储、错误格式和 OpenAPI 扩展；
-- 个人数据使用用户委托身份；
-- 非个人数据使用独立 Agent/工作负载身份；
-- 传统 OAuth Client Credentials、AK/SK、API Key 只作为兼容机制，不作为所有 Agent 共享的身份。
+- OpenCLI 统一登录命令、Token 存储、错误格式和 OpenAPI 扩展；
+- 个人数据使用 OIDC/OAuth 2.0 Authorization Code + PKCE；
+- CLI 在终端电脑上临时监听 loopback 回调，Token 存入 OS Keychain；
+- CLI 不接收账号密码，也不内置 `client_secret`。
 
 核心原则是：
 
@@ -57,23 +59,23 @@
 
 完成登录不等于获得所有业务权限，持有有效 Token 也不等于可以访问任意资源。
 
-### 3.2 一次 AI 调用可能包含两个主体
+### 3.2 当前调用包含两个上下文
 
 ```text
-调用主体：Agent、CLI 或工作负载
-被代表主体：用户，可选
+工具调用方：终端电脑上的 Agent
+授权主体：当前登录用户
 ```
 
-个人数据请求必须同时保留 Agent 和用户两条责任链。非个人数据请求可以没有用户主体，但必须有独立工作负载主体。
+本期所有受保护业务请求都必须具有用户主体。Agent 只能表达操作意图，不能自行指定用户、租户、角色或 Token。
 
 ### 3.3 Public Client 不能保守共享秘密
 
-分发到员工电脑、Agent 沙箱、容器、npm 包或安装包中的 CLI 属于 Public Client。
+分发到员工电脑、npm 包或安装包中的 CLI 属于 Public Client。
 
 - `client_id` 可以公开并内置；
 - 共享 `client_secret` 不能作为可信安全边界；
-- 用户登录必须使用 Authorization Code + PKCE，Headless 环境可使用 Device Authorization；
-- 需要应用身份时，每个工作负载应拥有独立凭据或不可导出的私钥。
+- 用户授权必须使用 Authorization Code + PKCE；
+- 用户账号密码、MFA 和 SSO 只在业务系统授权页面中处理。
 
 ### 3.4 Token 必须限定使用范围
 
@@ -106,20 +108,24 @@ CLI 隐藏参数、Skill 约束和 Agent 提示属于减少误操作面的措施
 
 ### 4.1 目标
 
-- 支持客户端 Agent 以个人身份访问本人或获授权范围内的数据；
-- 支持 Agent 以工作负载身份访问非个人数据；
+- 支持终端电脑上的 Agent 以当前用户身份访问本人或获授权范围内的数据；
 - 不要求存在统一业务请求网关；
 - 不要求所有业务系统使用同一个 Token；
 - 为不同业务系统提供一致的认证授权开发规范；
 - 为 OpenCLI 提供可自动生成的认证和授权元数据；
-- 支持单用户、单 Agent、单租户和单授权会话独立撤销；
+- 支持单用户、单客户端、单租户和单授权会话独立撤销；
 - 对 AI 调用提供结构化错误、确认、审计和恢复指引；
-- 兼容存量 OAuth2、AK/SK 和 API Key 接口。
+- 兼容存量个人 Bearer Token 接口的迁移。
 
 ### 4.2 非目标
 
 第一阶段不实现：
 
+- 服务器 Agent 代表个人用户调用业务 API；
+- Device Authorization Flow；
+- 服务器回调服务和用户 Token Vault；
+- 应用权限和工作负载身份；
+- OAuth Client Credentials、AK/SK、API Key 的应用级改造；
 - 一个 Token 调用所有企业系统；
 - 统一代理所有业务流量；
 - 由 CLI 代替业务系统做最终授权；
@@ -138,7 +144,6 @@ CLI 隐藏参数、Skill 约束和 Agent 提示属于减少误操作面的措施
 | Authorization Server | 完成用户授权并签发 Token 的服务 |
 | Resource Server | 接受 Token 并提供业务 API 的服务 |
 | User Delegation | Agent 获准代表某个用户执行限定操作 |
-| Workload Identity | Agent、服务或运行实例自身的机器身份 |
 | Access Token | 调用业务 API 的短期凭证 |
 | Refresh Token | 用于刷新 Access Token 的长期凭证 |
 | PKCE | 将 Authorization Code 绑定到发起登录的客户端实例 |
@@ -197,7 +202,7 @@ flowchart LR
 
 即使没有统一登录，也必须遵守同一协议和开发规范。不得由各团队自行设计不兼容的密码登录和 Token 格式。
 
-## 7. 信任边界与身份模型
+## 7. 信任边界与用户身份模型
 
 ### 7.1 用户委托身份
 
@@ -209,13 +214,12 @@ flowchart LR
 - 提交本人申请；
 - 使用用户已有数据权限进行查询。
 
-用户委托请求包含：
+用户授权上下文包含：
 
 ```json
 {
-  "workload": {
-    "client_id": "finance-cli",
-    "agent_id": "agent-instance-123"
+  "client": {
+    "client_id": "finance-cli"
   },
   "actor": {
     "type": "user",
@@ -229,41 +233,11 @@ flowchart LR
 }
 ```
 
-### 7.2 工作负载身份
+### 7.2 可信边界
 
-适用于：
+可信信息来自授权服务器签发的 Token，包括用户主体、客户端、租户、scope 和 audience。
 
-- 读取企业公共知识；
-- 生成非个人统计报表；
-- 定时同步；
-- 系统健康检查；
-- 获得组织授权的批处理任务。
-
-工作负载 Token 的主体应为：
-
-```text
-sub=agent:finance-report-agent
-```
-
-不得伪装成某个用户，也不得使用一个所有 Agent 共享的全局身份。
-
-### 7.3 双主体请求
-
-高安全用户委托场景需要同时证明：
-
-- 用户是谁；
-- 哪个 CLI 获得授权；
-- 哪个 Agent 实例正在使用授权；
-- Agent 是否持有已登记的设备私钥。
-
-推荐身份组合：
-
-```text
-sub       = 用户主体
-azp       = CLI client_id
-agent_id  = Agent 实例
-cnf.jkt   = Agent 公钥指纹，可选
-```
+Agent 传入的 `userId`、员工号、租户 Header、角色和 Token 均不可信。CLI 隐藏这些参数只能减少误操作，业务 API 仍必须服务端校验。
 
 ## 8. 用户授权：Authorization Code + PKCE
 
@@ -374,71 +348,23 @@ code_verifier=original-verifier
 }
 ```
 
-### 8.6 Headless Agent
+### 8.6 服务器 Agent
 
-不能启动浏览器或监听 loopback 的 Agent 应使用 Device Authorization Flow：
+服务器 Agent 用户授权不属于本期范围。CLI 不为服务器 Agent 启动用户回调服务，也不在服务器保存个人 Refresh Token。
 
-```bash
-business-cli auth login --device
-```
+如果未来确有需求，应针对可信 Agent Runtime、多用户隔离和凭据托管单独设计，不复用终端用户授权实现。
 
-业务系统可选提供：
+## 9. 后续独立议题
 
-```http
-POST /oauth/device_authorization
-POST /oauth/token
-```
+以下能力与本期用户授权隔离，不能作为认证失败后的自动降级路径：
 
-Device Flow 和 PKCE Flow 必须签发相同语义、相同 audience、相同 scope 模型的用户 Token。
-
-## 9. Agent/工作负载认证
-
-### 9.1 推荐方案
-
-工作负载认证优先级：
-
-1. 工作负载身份联邦；
-2. `private_key_jwt`；
-3. mTLS；
-4. 每个部署实例独立的 Client Credentials；
-5. 每个 Agent 独立 AK/SK；
-6. 每个 Agent 独立 API Key。
-
-禁止所有 Agent 共享同一长期 Secret。
-
-### 9.2 Agent Enrollment
-
-需要精确识别 Agent 实例时，业务系统提供管理面 enrollment 能力：
-
-1. Agent 首次运行生成密钥对；
-2. 私钥保存到 Keychain、TPM 或系统证书存储；
-3. 管理员使用一次性注册码批准注册；
-4. 业务系统登记 `agent_id`、`client_id`、公钥、租户和 scope；
-5. Agent 使用私钥证明身份；
-6. 业务系统可以独立暂停或撤销 Agent。
-
-示例登记数据：
-
-```json
-{
-  "agent_id": "agent-instance-123",
-  "client_id": "finance-agent",
-  "tenant_id": "company-a",
-  "public_key_thumbprint": "sha256-thumbprint",
-  "allowed_scopes": ["report:read:company"],
-  "status": "active"
-}
-```
-
-### 9.3 过渡方案
-
-业务系统暂时只支持 Client Credentials 时：
-
-- 每个部署实例使用独立 `client_id`；
-- Secret 由 Vault、Secret Manager、Kubernetes Secret 或 CI Secret 注入；
-- Secret 不进入 OpenAPI、Skill、Git、普通 YAML 或生成二进制；
-- Access Token 短期有效；
-- 支持单实例撤销和轮换。
+- 服务器 Agent；
+- 应用权限；
+- 工作负载身份；
+- Client Credentials；
+- `private_key_jwt`、mTLS；
+- AK/SK 和 API Key；
+- Device Authorization Flow。
 
 ## 10. 授权服务接口规范
 
@@ -453,7 +379,6 @@ Device Flow 和 PKCE Flow 必须签发相同语义、相同 audience、相同 sc
 | `GET /oauth/jwks` | JWT 时必选 | Token 验签公钥 |
 | `GET /oauth/userinfo` | OIDC 时建议 | 标准用户信息 |
 | `GET /api/v1/me` | 建议 | 业务主体映射 |
-| `POST /oauth/device_authorization` | 可选 | Headless Agent |
 
 ### 10.1 元数据示例
 
@@ -518,7 +443,6 @@ allowed_scopes:
   "sub": "user-10086",
   "aud": "finance-api",
   "azp": "finance-cli",
-  "agent_id": "agent-instance-123",
   "tenant_id": "company-a",
   "scope": "expense:read:self",
   "auth_time": 1785310000,
@@ -722,22 +646,6 @@ paths:
         confirmation: never
 ```
 
-非个人数据：
-
-```yaml
-x-ai-access:
-  subject_modes:
-    - agent
-    - user
-  audience: finance-api
-  scopes:
-    - report:read:company
-  tenant_bound: true
-  data_classification: internal
-  risk: read
-  confirmation: never
-```
-
 高风险操作：
 
 ```yaml
@@ -779,7 +687,6 @@ x-ai-access:
 
 ```bash
 business-cli auth login
-business-cli auth login --device
 business-cli auth status
 business-cli auth check --operation <operation>
 business-cli auth logout
@@ -790,33 +697,28 @@ business-cli identity current
 
 ```bash
 business-cli expense list --as user
-business-cli report summary --as agent
 business-cli payment approve --as user --id PAY-001 --dry-run
 ```
 
 ### 15.1 身份选择
 
-- `--as user` 使用用户委托 Token；
-- `--as agent` 使用工作负载 Token；
-- operation 只允许一种主体时可以自动确定；
-- operation 同时允许多种主体时必须显式选择；
-- 用户认证失败后不得自动降级为 Agent 身份；
-- Agent 认证失败后不得尝试其他用户的 Token。
+- 本期受保护 operation 只允许 `user` 主体；
+- `--as user` 可以保留为显式说明，也可由 operation 唯一确定；
+- CLI 不允许选择任意用户 Profile；
+- 用户认证失败后不得改用应用凭据或静态 Token。
 
 ### 15.2 Token 存储
 
 Token 按以下维度隔离：
 
 ```text
-issuer × client_id × tenant × user/agent × profile
+issuer × client_id × tenant × user
 ```
 
 存储优先级：
 
 1. OS Keychain / Credential Manager；
-2. 企业 Secret Manager；
-3. 受控服务器凭据存储；
-4. 禁止普通 YAML、命令行参数和生成二进制。
+2. 禁止普通 YAML、命令行参数和生成二进制。
 
 ### 15.3 输出规范
 
@@ -825,6 +727,37 @@ issuer × client_id × tenant × user/agent × profile
 - 不输出 Access Token、Refresh Token、Authorization Header；
 - 日志对 Cookie、Secret、签名和敏感参数脱敏；
 - `auth status` 只输出身份、scope、状态和过期时间。
+
+### 15.4 CLI 认证配置
+
+优先只配置 `issuer`，CLI 通过 `/.well-known/openid-configuration` 发现授权、Token、撤销和 JWKS 地址：
+
+```yaml
+base_url: https://finance-api.example.com
+
+auth:
+  type: oidc
+  issuer: https://finance-auth.example.com
+  client_id: finance-cli
+  audience: finance-api
+  scopes:
+    - openid
+    - profile
+    - expense:read:self
+  redirect:
+    type: loopback
+    path: /oauth/callback
+  token_store: os_keychain
+```
+
+业务系统暂不支持 Discovery 时，才显式配置公开的：
+
+- `authorization_endpoint`；
+- `token_endpoint`；
+- `revocation_endpoint`；
+- `jwks_uri`。
+
+配置不得包含用户名、密码、`client_secret`、Access Token 或 Refresh Token。
 
 ## 16. 错误契约
 
@@ -892,7 +825,6 @@ issuer × client_id × tenant × user/agent × profile
   "issuer": "https://finance.example.com",
   "subject": "user-10086",
   "client_id": "finance-cli",
-  "agent_id": "agent-instance-123",
   "tenant_id": "company-a",
   "operation": "expense.list",
   "resource_type": "expense",
@@ -927,20 +859,19 @@ issuer × client_id × tenant × user/agent × profile
 | 现有方式 | 过渡处理 | 目标处理 |
 | --- | --- | --- |
 | 固定个人 Token | Keychain 保存、短期使用 | Authorization Code + PKCE |
-| OAuth Client Credentials | 每实例独立 Secret | `private_key_jwt` 或工作负载联邦 |
-| AK/SK | 每 Agent 独立 AK/SK | 非对称工作负载身份 |
-| API Key | 每 Agent 独立 Key、最小权限 | 短期工作负载 Token |
 | 任意 employeeId | CLI 隐藏并服务端覆盖 | `/me` 资源接口 |
-| 自定义认证 Header | 适配器注入 | 标准 Bearer/PoP Token |
+| 自定义用户认证 Header | 短期兼容 | 标准 Bearer Token |
 
 兼容阶段仍必须满足：
 
-- 每个 Agent 独立凭据；
+- 每个用户独立凭据；
 - 可撤销；
 - 可轮换；
 - 可审计；
 - 资源级授权；
 - Secret 不进入分发包。
+
+应用级 OAuth Client Credentials、AK/SK 和 API Key 不在本期迁移范围。
 
 ## 20. 共享开发资产
 
@@ -984,7 +915,6 @@ issuer × client_id × tenant × user/agent × profile
 - scope 缺失；
 - 租户不匹配；
 - Client 被停用；
-- Agent 被停用；
 - 密钥轮换期间新旧 `kid` 行为正确。
 
 ### 21.3 越权测试
@@ -994,8 +924,7 @@ issuer × client_id × tenant × user/agent × profile
 - 修改 Body 中的 `userId` 不能越权；
 - 修改 Header 中的 `tenantId` 不能跨租户；
 - 直接绕过 CLI 调用 API 仍不能越权；
-- Agent 身份不能调用只允许用户的 operation；
-- 用户身份不能自动获得工作负载的组织级权限。
+- 用户认证失败后不能自动使用应用凭据。
 
 ### 21.4 AI Agent 测试
 
@@ -1005,7 +934,7 @@ issuer × client_id × tenant × user/agent × profile
 - 高风险操作必须先 dry-run 和确认；
 - 提示注入不能修改身份、租户或授权 Header；
 - Skill 中不包含真实 Secret；
-- Agent 只能调用 OpenAPI 声明允许的主体模式。
+- Agent 只能调用 OpenAPI 声明为 `user` 主体的受保护 operation。
 
 ## 22. 分阶段实施
 
@@ -1022,21 +951,13 @@ issuer × client_id × tenant × user/agent × profile
 ### 阶段二：OpenCLI 标准化
 
 - 解析 authorizationCode Security Scheme；
-- 生成 PKCE 和 Device Flow 客户端；
+- 生成 Authorization Code + PKCE 客户端；
 - 增加 `x-ai-access`；
-- 生成 `--as user|agent`；
+- 生成用户身份前置检查；
 - 统一结构化错误；
 - 增加 OpenAPI Linter 和协议测试。
 
-### 阶段三：工作负载身份
-
-- 建设 Agent Enrollment；
-- 支持 `private_key_jwt` 或 mTLS；
-- 每个 Agent 独立身份和撤销；
-- 支持 DPoP 或等价 Token 绑定；
-- 淘汰共享 Client Secret。
-
-### 阶段四：高风险治理
+### 阶段三：高风险治理
 
 - operation 风险分级；
 - 一次性确认授权；
@@ -1044,12 +965,11 @@ issuer × client_id × tenant × user/agent × profile
 - 风险审计和告警；
 - 批量与不可逆操作治理。
 
-### 阶段五：存量认证收敛
+### 阶段四：存量用户认证收敛
 
-- AK/SK、API Key 改为每 Agent 独立；
 - 固定 Token 迁移为短期 Token；
 - 任意用户参数迁移为主体派生；
-- 删除分发包中的共享 Secret；
+- 删除分发包中的个人静态 Token；
 - 统一安全基线。
 
 ## 23. 团队职责
@@ -1059,7 +979,7 @@ issuer × client_id × tenant × user/agent × profile
 | 业务系统团队 | 资源级授权、接口改造、scope、审计、风险分级 |
 | 身份平台/授权服务团队 | 用户认证、授权页、Token、撤销、密钥轮换 |
 | OpenCLI 团队 | 登录客户端、Provider、Keychain、OpenAPI 生成、错误契约 |
-| Agent Runtime 团队 | 工具 allowlist、Agent 身份、确认交互、Secret 隔离 |
+| Agent Runtime 团队 | 工具 allowlist、确认交互、禁止读取或输出 Token |
 | 安全团队 | 协议基线、威胁模型、渗透测试、审计规则 |
 | 测试团队 | 协议、越权、跨租户、Agent 提示注入测试 |
 
@@ -1069,32 +989,32 @@ issuer × client_id × tenant × user/agent × profile
 
 - 可以使用 Authorization Code + PKCE 完成用户授权；
 - Public CLI Client 不需要 `client_secret`；
-- Headless 场景有明确方案；
+- 用户授权仅在终端电脑和本机 loopback 场景启用；
 - Access Token 仅对当前业务系统有效；
 - Access Token 短期有效；
 - Refresh Token 支持轮换和撤销；
 - Token 不进入 Skill、日志和模型上下文；
 - 个人数据从 Token 主体派生用户范围；
 - 直接绕过 CLI 不能读取其他用户数据；
-- 支持用户和 Agent 身份显式区分；
-- 认证失败不会自动切换高权限身份；
+- CLI 不允许选择任意用户身份；
+- 用户认证失败不会自动切换应用身份；
 - 每个 operation 声明 scope、主体模式、风险和数据分类；
 - 高风险操作具有确认、幂等和审计机制；
 - 通过协议、Token、越权和 AI Agent 测试；
-- 传统凭据可以单 Agent 撤销和轮换。
+- 用户授权可以单用户、单客户端和单会话撤销。
 
 ## 25. 架构决策结论
 
 1. 不建设统一业务请求网关；
 2. 不建设万能 Token；
 3. 各业务系统独立签发或接收本系统 audience 的 Token；
-4. 用户个人数据使用 Authorization Code + PKCE；
-5. Headless Agent 使用 Device Authorization；
-6. 非个人数据使用独立工作负载身份；
-7. 业务系统是最终授权边界；
-8. CLI 统一客户端体验，但不保存共享业务 Secret；
-9. OpenAPI 通过 `x-ai-access` 声明 AI 授权语义；
-10. 采用共享 SDK、Linter 和一致性测试降低多系统重复建设成本。
+4. 本期仅支持终端电脑上的用户级 Authorization Code + PKCE；
+5. CLI 使用本机 loopback 回调和 OS Keychain；
+6. CLI 不接收账号密码，也不配置 `client_secret`；
+7. 服务器 Agent 用户授权和 Device Flow 不在本期范围；
+8. 应用权限和工作负载身份后续独立设计；
+9. 业务系统是最终授权边界；
+10. OpenAPI 通过 `x-ai-access` 声明 AI 授权语义。
 
 该架构在不引入统一网关的前提下，实现了统一规范、独立授权、最小权限、可撤销和可审计，适合作为企业内部业务 API 向客户端 Agent 开放时的标准技术基线。
 
@@ -1103,10 +1023,4 @@ issuer × client_id × tenant × user/agent × profile
 - OAuth 2.0 Security Best Current Practice：[RFC 9700](https://www.rfc-editor.org/info/rfc9700/)
 - OAuth 2.0 for Native Apps：[RFC 8252](https://www.rfc-editor.org/info/rfc8252/)
 - Proof Key for Code Exchange：[RFC 7636](https://www.rfc-editor.org/info/rfc7636/)
-- OAuth 2.0 Device Authorization Grant：[RFC 8628](https://www.rfc-editor.org/info/rfc8628/)
-- OAuth 2.0 Token Exchange：[RFC 8693](https://www.rfc-editor.org/info/rfc8693/)
-- OAuth 2.0 Mutual TLS：[RFC 8705](https://www.rfc-editor.org/info/rfc8705/)
-- JWT Client Authentication：[RFC 7523](https://www.rfc-editor.org/info/rfc7523/)
-- Demonstrating Proof of Possession：[RFC 9449](https://www.rfc-editor.org/info/rfc9449/)
 - Zero Trust Architecture：[NIST SP 800-207](https://csrc.nist.gov/pubs/sp/800/207/final)
-- Cloud-Native Zero Trust Access Control：[NIST SP 800-207A](https://csrc.nist.gov/pubs/sp/800/207/a/final)
