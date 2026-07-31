@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>SQL Explorer</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
+      }
+      body {
+        margin: 0;
+        padding: 18px;
+        color: var(--color-text-primary, CanvasText);
+        background: var(--color-background-primary, Canvas);
+      }
+      main {
+        display: grid;
+        gap: 14px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 1.15rem;
+      }
+      textarea {
+        box-sizing: border-box;
+        width: 100%;
+        min-height: 130px;
+        resize: vertical;
+        padding: 10px;
+        border: 1px solid var(--color-border-primary, #8886);
+        border-radius: 8px;
+        background: var(--color-background-secondary, #8881);
+        color: inherit;
+        font: 0.9rem/1.45 ui-monospace, monospace;
+      }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+      input {
+        width: 82px;
+        padding: 7px;
+      }
+      button {
+        padding: 8px 12px;
+        border: 1px solid var(--color-border-primary, #8886);
+        border-radius: 7px;
+        background: var(--color-background-secondary, #8882);
+        color: inherit;
+        cursor: pointer;
+      }
+      button.primary {
+        background: var(--color-accent, #2563eb);
+        color: white;
+      }
+      button:disabled {
+        cursor: wait;
+        opacity: 0.55;
+      }
+      #status {
+        min-height: 1.2em;
+        font-size: 0.88rem;
+      }
+      #status.error {
+        color: var(--color-text-danger, #dc2626);
+      }
+      .table-wrap {
+        max-width: 100%;
+        overflow: auto;
+        border: 1px solid var(--color-border-primary, #8885);
+        border-radius: 8px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.85rem;
+      }
+      th,
+      td {
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--color-border-primary, #8884);
+        text-align: left;
+        white-space: nowrap;
+      }
+      th {
+        cursor: pointer;
+        background: var(--color-background-secondary, #8882);
+      }
+      pre {
+        margin: 0;
+        padding: 12px;
+        overflow: auto;
+        border-radius: 8px;
+        background: var(--color-background-secondary, #8882);
+        font-size: 0.82rem;
+      }
+      .hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>SQL Explorer</h1>
+        <small>Wren semantic SQL · read-only PostgreSQL</small>
+      </header>
+
+      <textarea id="sql" spellcheck="false">SELECT id, status, total FROM orders ORDER BY id</textarea>
+
+      <div class="toolbar">
+        <label>Rows <input id="limit" type="number" min="1" max="10000" value="100" /></label>
+        <button id="dry-plan" type="button">Dry Plan</button>
+        <button id="dry-run" type="button">Dry Run</button>
+        <button id="run-sql" class="primary" type="button">Run with approval</button>
+        <button id="copy-csv" type="button" disabled>Copy CSV</button>
+      </div>
+
+      <div id="status" aria-live="polite">Connecting to host…</div>
+      <pre id="plan" class="hidden"></pre>
+      <div id="results" class="table-wrap hidden">
+        <table>
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </main>
+
+    <script>
+      (() => {
+        let nextId = 1;
+        const pending = new Map();
+        let rows = [];
+        let columns = [];
+        let sortColumn = "";
+        let sortAscending = true;
+
+        const status = document.querySelector("#status");
+        const plan = document.querySelector("#plan");
+        const results = document.querySelector("#results");
+        const copyCsv = document.querySelector("#copy-csv");
+        const buttons = [...document.querySelectorAll("button")];
+
+        function send(message) {
+          window.parent.postMessage(message, "*");
+        }
+
+        function request(method, params) {
+          const id = nextId++;
+          send({ jsonrpc: "2.0", id, method, params });
+          return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+        }
+
+        function notify(method, params = {}) {
+          send({ jsonrpc: "2.0", method, params });
+        }
+
+        function setBusy(busy, message = "") {
+          buttons.forEach((button) => {
+            if (button !== copyCsv) button.disabled = busy;
+          });
+          status.className = "";
+          status.textContent = message;
+        }
+
+        function structured(result) {
+          const value = result?.structuredContent ?? result?.structured_content ?? {};
+          return value.result ?? value;
+        }
+
+        function renderTable(payload) {
+          rows = payload.rows || [];
+          columns = payload.columns || [];
+          const head = results.querySelector("thead");
+          const headerRow = document.createElement("tr");
+          columns.forEach((name) => {
+            const cell = document.createElement("th");
+            cell.dataset.column = name;
+            cell.textContent = name;
+            cell.addEventListener("click", () => {
+              sortAscending = sortColumn === name ? !sortAscending : true;
+              sortColumn = name;
+              renderRows();
+            });
+            headerRow.append(cell);
+          });
+          head.replaceChildren(headerRow);
+          renderRows();
+          results.classList.remove("hidden");
+          copyCsv.disabled = rows.length === 0;
+          status.textContent = `${payload.row_count ?? rows.length} row(s)${payload.truncated ? " · truncated" : ""}`;
+        }
+
+        function renderRows() {
+          const visible = [...rows];
+          if (sortColumn) {
+            visible.sort((left, right) => {
+              const a = left[sortColumn];
+              const b = right[sortColumn];
+              return (a === b ? 0 : a > b ? 1 : -1) * (sortAscending ? 1 : -1);
+            });
+          }
+          const body = results.querySelector("tbody");
+          const renderedRows = visible.map((row) => {
+            const tableRow = document.createElement("tr");
+            columns.forEach((name) => {
+              const cell = document.createElement("td");
+              cell.textContent = row[name] ?? "";
+              tableRow.append(cell);
+            });
+            return tableRow;
+          });
+          body.replaceChildren(...renderedRows);
+        }
+
+        async function callTool(name) {
+          const sql = document.querySelector("#sql").value;
+          const limit = Number(document.querySelector("#limit").value);
+          setBusy(true, name === "run_sql" ? "Waiting for approval…" : "Working…");
+          plan.classList.add("hidden");
+          try {
+            const result = await request("tools/call", {
+              name,
+              arguments: name === "run_sql" ? { sql, limit } : { sql },
+            });
+            const payload = structured(result);
+            if (payload.executed === false) {
+              status.textContent = payload.reason;
+            } else if (name === "dry_plan") {
+              plan.textContent = payload.sql || "";
+              plan.classList.remove("hidden");
+              status.textContent = "Plan ready";
+            } else if (name === "dry_run") {
+              status.textContent = "Query is valid";
+            } else {
+              renderTable(payload);
+            }
+          } catch (error) {
+            status.className = "error";
+            status.textContent = error.message || String(error);
+          } finally {
+            buttons.forEach((button) => {
+              if (button !== copyCsv) button.disabled = false;
+            });
+          }
+        }
+
+        window.addEventListener("message", (event) => {
+          if (event.source !== window.parent) return;
+          const message = event.data;
+          if (!message || message.jsonrpc !== "2.0") return;
+          if (message.id && pending.has(message.id)) {
+            const waiter = pending.get(message.id);
+            pending.delete(message.id);
+            if (message.error) waiter.reject(new Error(message.error.message));
+            else waiter.resolve(message.result);
+            return;
+          }
+          if (message.method === "ui/notifications/tool-result") {
+            const payload = structured(message.params);
+            if (payload.rows) renderTable(payload);
+          }
+        });
+
+        document.querySelector("#dry-plan").addEventListener("click", () => callTool("dry_plan"));
+        document.querySelector("#dry-run").addEventListener("click", () => callTool("dry_run"));
+        document.querySelector("#run-sql").addEventListener("click", () => callTool("run_sql"));
+        copyCsv.addEventListener("click", async () => {
+          const escape = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+          const csv = [columns, ...rows.map((row) => columns.map((name) => row[name]))]
+            .map((line) => line.map(escape).join(","))
+            .join("\n");
+          await navigator.clipboard.writeText(csv);
+          status.textContent = "CSV copied";
+        });
+
+        request("ui/initialize", {
+          appInfo: { name: "sql-explorer", version: "0.1.0" },
+          appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] },
+          protocolVersion: "2026-01-26",
+        })
+          .then(() => {
+            notify("ui/notifications/initialized");
+            status.textContent = "Ready";
+          })
+          .catch((error) => {
+            status.className = "error";
+            status.textContent = error.message || String(error);
+          });
+      })();
+    </script>
+  </body>
+</html>

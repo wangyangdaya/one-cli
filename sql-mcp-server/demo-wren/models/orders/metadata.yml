@@ -1,0 +1,42 @@
+name: orders
+properties:
+  description: One row per demo order.
+table_reference:
+  catalog: ""
+  schema: mcp_demo
+  table: orders
+columns:
+  - name: id
+    type: BIGINT
+    is_calculated: false
+    not_null: true
+    is_primary_key: true
+    properties:
+      description: Order identifier.
+  - name: customer_id
+    type: BIGINT
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Customer identifier.
+  - name: ordered_at
+    type: TIMESTAMPTZ
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Order creation timestamp.
+  - name: status
+    type: VARCHAR
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Current order status.
+  - name: total
+    type: DECIMAL
+    is_calculated: false
+    not_null: true
+    properties:
+      description: Order total.
+primary_key: id
+cached: false
+

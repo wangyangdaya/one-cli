@@ -1,0 +1,6 @@
+schema_version: 5
+name: sql_mcp_demo
+catalog: ""
+schema: mcp_demo
+data_source: postgres
+
