@@ -36,11 +36,12 @@ type runtimeAuth struct {
 	Header         string            `yaml:"header,omitempty"`
 	GrantType      string            `yaml:"grant_type,omitempty"`
 	Scheme         string            `yaml:"scheme,omitempty"`
+	AuthorizationURL string          `yaml:"authorization_url,omitempty"`
 	TokenURL       string            `yaml:"token_url,omitempty"`
 	ClientID       string            `yaml:"client_id,omitempty"`
 	ClientAuth     runtimeClientAuth `yaml:"client_auth,omitempty"`
 	Scopes         []string          `yaml:"scopes,omitempty"`
-	EncryptedValue string            `yaml:"encrypted_value"`
+	EncryptedValue string            `yaml:"encrypted_value,omitempty"`
 }
 
 type runtimeClientAuth struct {
@@ -135,8 +136,20 @@ func ResolveOAuthToken(appName string) (string, error) {
 		return "", fmt.Errorf("missing OAuth runtime config")
 	}
 	auth := config.Auth
-	if strings.TrimSpace(auth.Type) != "oauth2" || strings.TrimSpace(auth.GrantType) != "client_credentials" {
-		return "", fmt.Errorf("runtime auth must be oauth2 client_credentials")
+	if strings.TrimSpace(auth.Type) != "oauth2" {
+		return "", fmt.Errorf("runtime auth must be oauth2")
+	}
+	if strings.TrimSpace(auth.GrantType) == "authorization_code" {
+		token, expiresAt, err := loadOAuthAuthorizationToken(appName)
+		if err != nil {
+			return "", err
+		}
+		oauthTokenCache.value = token
+		oauthTokenCache.expiresAt = expiresAt
+		return token, nil
+	}
+	if strings.TrimSpace(auth.GrantType) != "client_credentials" {
+		return "", fmt.Errorf("unsupported OAuth grant_type %q", auth.GrantType)
 	}
 	if strings.TrimSpace(auth.ClientID) == "" || strings.TrimSpace(auth.TokenURL) == "" {
 		return "", fmt.Errorf("OAuth runtime config requires client_id and token_url")
@@ -163,6 +176,123 @@ func ResolveOAuthToken(appName string) (string, error) {
 		oauthTokenCache.expiresAt = time.Now().Add(5 * time.Minute)
 	}
 	return token, nil
+}
+
+type OAuthAuthorizationConfig struct {
+	AuthorizationURL string
+	TokenURL         string
+	ClientID         string
+	Scopes           []string
+}
+
+func LoadOAuthAuthorizationConfig(appName string) (OAuthAuthorizationConfig, error) {
+	config, _, err := loadRuntimeFile(appName)
+	if err != nil {
+		return OAuthAuthorizationConfig{}, err
+	}
+	if config == nil || config.Auth == nil {
+		return OAuthAuthorizationConfig{}, fmt.Errorf("missing OAuth runtime config")
+	}
+	auth := config.Auth
+	if strings.TrimSpace(auth.Type) != "oauth2" || strings.TrimSpace(auth.GrantType) != "authorization_code" {
+		return OAuthAuthorizationConfig{}, fmt.Errorf("runtime auth must be oauth2 authorization_code")
+	}
+	if strings.TrimSpace(auth.AuthorizationURL) == "" || strings.TrimSpace(auth.TokenURL) == "" || strings.TrimSpace(auth.ClientID) == "" {
+		return OAuthAuthorizationConfig{}, fmt.Errorf("OAuth authorization_code requires authorization_url, token_url, and client_id")
+	}
+	return OAuthAuthorizationConfig{
+		AuthorizationURL: strings.TrimSpace(auth.AuthorizationURL),
+		TokenURL:         strings.TrimSpace(auth.TokenURL),
+		ClientID:         strings.TrimSpace(auth.ClientID),
+		Scopes:           append([]string(nil), auth.Scopes...),
+	}, nil
+}
+
+type oauthAuthorizationToken struct {
+	AccessToken string    `json:"access_token"`
+	ExpiresAt   time.Time `json:"expires_at"`
+}
+
+func SaveOAuthAuthorizationToken(appName, accessToken string, expiresIn int64) error {
+	accessToken = strings.TrimSpace(accessToken)
+	if accessToken == "" {
+		return fmt.Errorf("OAuth token response is missing access_token")
+	}
+	expiresAt := time.Now().Add(5 * time.Minute)
+	if expiresIn > 0 {
+		expiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second)
+	}
+	payload, err := json.Marshal(oauthAuthorizationToken{AccessToken: accessToken, ExpiresAt: expiresAt})
+	if err != nil {
+		return fmt.Errorf("encode OAuth session: %w", err)
+	}
+	path, err := oauthAuthorizationTokenPath(appName)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create OAuth session directory: %w", err)
+	}
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		return fmt.Errorf("write OAuth session: %w", err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("protect OAuth session: %w", err)
+	}
+	oauthTokenCache.Lock()
+	oauthTokenCache.value = accessToken
+	oauthTokenCache.expiresAt = expiresAt
+	oauthTokenCache.Unlock()
+	return nil
+}
+
+func ClearOAuthAuthorizationToken(appName string) error {
+	path, err := oauthAuthorizationTokenPath(appName)
+	if err != nil {
+		return err
+	}
+	err = os.Remove(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove OAuth session: %w", err)
+	}
+	oauthTokenCache.Lock()
+	oauthTokenCache.value = ""
+	oauthTokenCache.expiresAt = time.Time{}
+	oauthTokenCache.Unlock()
+	return nil
+}
+
+func loadOAuthAuthorizationToken(appName string) (string, time.Time, error) {
+	path, err := oauthAuthorizationTokenPath(appName)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", time.Time{}, fmt.Errorf("login_required: run %s auth login", appName)
+		}
+		return "", time.Time{}, fmt.Errorf("read OAuth session: %w", err)
+	}
+	var token oauthAuthorizationToken
+	if err := json.Unmarshal(raw, &token); err != nil {
+		return "", time.Time{}, fmt.Errorf("decode OAuth session: %w", err)
+	}
+	if strings.TrimSpace(token.AccessToken) == "" || !token.ExpiresAt.After(time.Now()) {
+		return "", time.Time{}, fmt.Errorf("login_required: run %s auth login", appName)
+	}
+	return strings.TrimSpace(token.AccessToken), token.ExpiresAt, nil
+}
+
+func oauthAuthorizationTokenPath(appName string) (string, error) {
+	if explicit := strings.TrimSpace(os.Getenv("OPENCLI_OAUTH_TOKEN_FILE")); explicit != "" {
+		return explicit, nil
+	}
+	root, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve OAuth session directory: %w", err)
+	}
+	return filepath.Join(root, appName, "oauth-token.json"), nil
 }
 
 func requestClientCredentialsToken(auth runtimeAuth, secret string) (string, int64, error) {

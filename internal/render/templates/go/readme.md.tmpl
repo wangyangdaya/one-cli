@@ -83,9 +83,15 @@ The `supplier_edi` profile uses the supplier `sha512Hex` canonical string: `meth
 {{- else if appUsesOAuth2 .App }}
 ## Auth
 
+{{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
+Mode: `oauth2` (`authorization_code`)
+
+Run `./bin/{{ .App.Name }} auth login` to authenticate in the IAM browser flow. The CLI sends the returned authorization code to the configured business `token_url`, stores the business access token locally, and injects `Authorization: Bearer <access_token>` for protected operations. Run `./bin/{{ .App.Name }} auth logout` to delete the local session.
+{{- else }}
 Mode: `oauth2` (`client_credentials`)
 
 The CLI obtains an access token from the configured OAuth token endpoint and injects `Authorization: Bearer <access_token>` for protected operations. The public `client_id` and sealed client secret are stored in `config/runtime.yaml`. Set `OPENCLI_OAUTH_CLIENT_SECRET` only for a plaintext per-run override.
+{{- end }}
 {{- else }}
 ## Auth
 

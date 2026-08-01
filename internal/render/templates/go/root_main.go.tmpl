@@ -3,6 +3,9 @@ package main
 import (
 	"os"
 
+	{{- if and (appUsesOAuth2 .App) .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
+	"{{ .Module }}/internal/auth"
+	{{- end }}
 	"{{ .Module }}/internal/cli"
 	"{{ .Module }}/internal/httpx"
 {{- range .App.Groups }}
@@ -15,6 +18,9 @@ var version = {{ printf "%q" (goAppVersion .App) }}
 func main() {
 	root := cli.NewRootCommand("{{ .App.Name }}", "{{ .App.Name }} CLI", version)
 	cli.BindTrace(httpx.SetTraceEnabled)
+	{{- if and (appUsesOAuth2 .App) .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
+	root.AddCommand(auth.NewOAuth2Command("{{ .App.Name }}"))
+	{{- end }}
 {{- range .App.Groups }}
 	root.AddCommand({{ groupPackageName . }}.NewCommand())
 {{- end }}

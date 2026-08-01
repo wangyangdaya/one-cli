@@ -1,0 +1,209 @@
+package auth
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"os/exec"
+	"runtime"
+	"strings"
+	"time"
+
+	"{{ .Module }}/internal/config"
+
+	"github.com/spf13/cobra"
+)
+
+func NewOAuth2Command(appName string) *cobra.Command {
+	cmd := &cobra.Command{Use: "auth", Short: "Manage OAuth2 login"}
+	var noBrowser bool
+	login := &cobra.Command{
+		Use:   "login",
+		Short: "Log in with OAuth2 authorization code",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return loginAuthorizationCode(cmd, appName, noBrowser)
+		},
+	}
+	login.Flags().BoolVar(&noBrowser, "no-browser", false, "Print the login URL without opening a browser")
+	cmd.AddCommand(login)
+	cmd.AddCommand(&cobra.Command{
+		Use:   "logout",
+		Short: "Delete the stored OAuth2 session",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := config.ClearOAuthAuthorizationToken(appName); err != nil {
+				return err
+			}
+			_, err := fmt.Fprintln(cmd.OutOrStdout(), "logged out")
+			return err
+		},
+	})
+	return cmd
+}
+
+func loginAuthorizationCode(cmd *cobra.Command, appName string, noBrowser bool) error {
+	auth, err := config.LoadOAuthAuthorizationConfig(appName)
+	if err != nil {
+		return err
+	}
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Errorf("start OAuth callback listener: %w", err)
+	}
+	defer listener.Close()
+
+	const callbackPath = "/oauth/callback"
+	redirectURI := "http://" + listener.Addr().String() + callbackPath
+	state, err := randomValue(32)
+	if err != nil {
+		return err
+	}
+	authorizeURL, err := buildAuthorizeURL(auth, redirectURI, state)
+	if err != nil {
+		return err
+	}
+
+	type callbackResult struct {
+		code string
+		err  error
+	}
+	result := make(chan callbackResult, 1)
+	mux := http.NewServeMux()
+	mux.HandleFunc(callbackPath, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("state") != state {
+			http.Error(w, "invalid OAuth state", http.StatusBadRequest)
+			select {
+			case result <- callbackResult{err: fmt.Errorf("OAuth callback state mismatch")}:
+			default:
+			}
+			return
+		}
+		code := strings.TrimSpace(r.URL.Query().Get("code"))
+		if code == "" {
+			http.Error(w, "missing authorization code", http.StatusBadRequest)
+			select {
+			case result <- callbackResult{err: fmt.Errorf("OAuth callback is missing code")}:
+			default:
+			}
+			return
+		}
+		_, _ = io.WriteString(w, "Login completed. You may close this window.")
+		select {
+		case result <- callbackResult{code: code}:
+		default:
+		}
+	})
+	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	go func() { _ = server.Serve(listener) }()
+
+	if _, err := fmt.Fprintln(cmd.OutOrStdout(), authorizeURL); err != nil {
+		return err
+	}
+	if !noBrowser {
+		if err := openBrowser(authorizeURL); err != nil {
+			return fmt.Errorf("open browser: %w", err)
+		}
+	}
+
+	var callback callbackResult
+	select {
+	case callback = <-result:
+	case <-time.After(2 * time.Minute):
+		return fmt.Errorf("OAuth login timed out")
+	}
+	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), time.Second)
+	_ = server.Shutdown(shutdownContext)
+	cancelShutdown()
+	if callback.err != nil {
+		return callback.err
+	}
+	token, expiresIn, err := exchangeAuthorizationCode(auth, callback.code, redirectURI)
+	if err != nil {
+		return err
+	}
+	if err := config.SaveOAuthAuthorizationToken(appName, token, expiresIn); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(cmd.OutOrStdout(), "login successful")
+	return err
+}
+
+func buildAuthorizeURL(auth config.OAuthAuthorizationConfig, redirectURI, state string) (string, error) {
+	endpoint, err := url.Parse(auth.AuthorizationURL)
+	if err != nil || endpoint.Scheme == "" || endpoint.Host == "" {
+		return "", fmt.Errorf("invalid OAuth authorization_url")
+	}
+	query := endpoint.Query()
+	query.Set("client_id", auth.ClientID)
+	query.Set("redirect_uri", redirectURI)
+	query.Set("response_type", "code")
+	query.Set("state", state)
+	if len(auth.Scopes) > 0 {
+		query.Set("scope", strings.Join(auth.Scopes, " "))
+	}
+	endpoint.RawQuery = query.Encode()
+	return endpoint.String(), nil
+}
+
+func exchangeAuthorizationCode(auth config.OAuthAuthorizationConfig, code, redirectURI string) (string, int64, error) {
+	values := url.Values{
+		"grant_type":  {"authorization_code"},
+		"client_id":   {auth.ClientID},
+		"code":        {code},
+		"redirect_uri": {redirectURI},
+	}
+	req, err := http.NewRequest(http.MethodPost, auth.TokenURL, strings.NewReader(values.Encode()))
+	if err != nil {
+		return "", 0, fmt.Errorf("build OAuth token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return "", 0, fmt.Errorf("request business login endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", 0, fmt.Errorf("business login endpoint returned %s", resp.Status)
+	}
+	var result struct {
+		AccessToken string `json:"access_token"`
+		TokenType   string `json:"token_type"`
+		ExpiresIn   int64  `json:"expires_in"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
+		return "", 0, fmt.Errorf("decode business token response: %w", err)
+	}
+	if strings.TrimSpace(result.AccessToken) == "" {
+		return "", 0, fmt.Errorf("business token response is missing access_token")
+	}
+	if result.TokenType != "" && !strings.EqualFold(strings.TrimSpace(result.TokenType), "bearer") {
+		return "", 0, fmt.Errorf("unsupported business token_type %q", result.TokenType)
+	}
+	return strings.TrimSpace(result.AccessToken), result.ExpiresIn, nil
+}
+
+func randomValue(size int) (string, error) {
+	value := make([]byte, size)
+	if _, err := rand.Read(value); err != nil {
+		return "", fmt.Errorf("generate OAuth state: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(value), nil
+}
+
+func openBrowser(target string) error {
+	var command *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		command = exec.Command("open", target)
+	case "windows":
+		command = exec.Command("rundll32", "url.dll,FileProtocolHandler", target)
+	default:
+		command = exec.Command("xdg-open", target)
+	}
+	return command.Start()
+}

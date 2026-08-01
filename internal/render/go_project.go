@@ -10,7 +10,7 @@ import (
 
 func writeGoProject(outputDir, module string, app model.App, skillLang string, runtimeBundle *runtimeconfig.Bundle) error {
 	app = normalizeGoApp(app)
-	data := templateData{Module: module, Target: "go", SkillLang: skillLang, App: app}
+	data := templateData{Module: module, Target: "go", SkillLang: skillLang, App: app, RuntimeBundle: runtimeBundle}
 	runtimeData := data
 	runtimeData.RuntimeBundle = runtimeBundle
 	files := []generatedFile{
@@ -26,6 +26,9 @@ func writeGoProject(outputDir, module string, app model.App, skillLang string, r
 	}
 	if appUsesAKSK(app) {
 		files = append(files, generatedFile{Path: filepath.Join("internal", "auth", "aksk.go"), Template: "go/auth_aksk.go.tmpl", Data: data})
+	}
+	if appUsesOAuth2(app) && runtimeBundle != nil && runtimeBundle.OAuth2GrantType == "authorization_code" {
+		files = append(files, generatedFile{Path: filepath.Join("internal", "auth", "oauth2.go"), Template: "go/auth_oauth2.go.tmpl", Data: data})
 	}
 	for _, group := range app.Groups {
 		groupData := data

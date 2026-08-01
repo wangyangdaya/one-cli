@@ -193,6 +193,42 @@ auth:
 	}
 }
 
+func TestLoadAndSealOAuth2AuthorizationCode(t *testing.T) {
+	path := writeRuntimeSource(t, `
+base_url: https://business-api.example.com
+auth:
+  type: oauth2
+  grant_type: authorization_code
+  client_id: business-cli
+  authorization_url: https://iam.example.com/idp/oauth2/authorize
+  token_url: https://business.example.com/cli-auth/login
+`)
+
+	bundle, err := LoadAndSeal(path, SealOptions{
+		AuthMode: "oauth2",
+		Getenv: func(key string) string {
+			t.Fatalf("authorization_code must not read credential %s", key)
+			return ""
+		},
+	})
+	if err != nil {
+		t.Fatalf("LoadAndSeal: %v", err)
+	}
+	if bundle.HasSecret {
+		t.Fatal("authorization_code config unexpectedly sealed a secret")
+	}
+	for _, want := range []string{
+		"grant_type: authorization_code",
+		"client_id: business-cli",
+		"authorization_url: https://iam.example.com/idp/oauth2/authorize",
+		"token_url: https://business.example.com/cli-auth/login",
+	} {
+		if !bytes.Contains(bundle.YAML, []byte(want)) {
+			t.Fatalf("generated YAML is missing %q:\n%s", want, bundle.YAML)
+		}
+	}
+}
+
 func TestLoadAndSealRejectsInvalidSources(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -253,10 +289,10 @@ func TestLoadAndSealRejectsInvalidSources(t *testing.T) {
 			want:     "auth metadata",
 		},
 		{
-			name:     "unsupported oauth grant type",
+			name:     "authorization code missing endpoints",
 			source:   "auth:\n  type: oauth2\n  grant_type: authorization_code\n",
 			authMode: "oauth2",
-			want:     "grant_type client_credentials",
+			want:     "authorization_url",
 		},
 	}
 

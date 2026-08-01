@@ -35,10 +35,12 @@ type OAuth2Defaults struct {
 }
 
 type Bundle struct {
-	YAML      []byte
-	KeyShareA [32]byte
-	KeyShareB [32]byte
-	HasSecret bool
+	YAML            []byte
+	KeyShareA       [32]byte
+	KeyShareB       [32]byte
+	HasSecret       bool
+	OAuth2GrantType string
+	OAuth2TokenURL  string
 }
 
 type sourceConfig struct {
@@ -48,14 +50,15 @@ type sourceConfig struct {
 }
 
 type sourceAuth struct {
-	Type       string           `yaml:"type"`
-	Header     string           `yaml:"header,omitempty"`
-	GrantType  string           `yaml:"grant_type,omitempty"`
-	Scheme     string           `yaml:"scheme,omitempty"`
-	TokenURL   string           `yaml:"token_url,omitempty"`
-	ClientID   string           `yaml:"client_id,omitempty"`
-	ClientAuth sourceClientAuth `yaml:"client_auth,omitempty"`
-	Scopes     []string         `yaml:"scopes,omitempty"`
+	Type             string           `yaml:"type"`
+	Header           string           `yaml:"header,omitempty"`
+	GrantType        string           `yaml:"grant_type,omitempty"`
+	Scheme           string           `yaml:"scheme,omitempty"`
+	AuthorizationURL string           `yaml:"authorization_url,omitempty"`
+	TokenURL         string           `yaml:"token_url,omitempty"`
+	ClientID         string           `yaml:"client_id,omitempty"`
+	ClientAuth       sourceClientAuth `yaml:"client_auth,omitempty"`
+	Scopes           []string         `yaml:"scopes,omitempty"`
 }
 
 type sourceClientAuth struct {
@@ -70,15 +73,16 @@ type sealedConfig struct {
 }
 
 type sealedAuth struct {
-	Type           string           `yaml:"type"`
-	Header         string           `yaml:"header,omitempty"`
-	GrantType      string           `yaml:"grant_type,omitempty"`
-	Scheme         string           `yaml:"scheme,omitempty"`
-	TokenURL       string           `yaml:"token_url,omitempty"`
-	ClientID       string           `yaml:"client_id,omitempty"`
-	ClientAuth     sourceClientAuth `yaml:"client_auth,omitempty"`
-	Scopes         []string         `yaml:"scopes,omitempty"`
-	EncryptedValue string           `yaml:"encrypted_value"`
+	Type             string           `yaml:"type"`
+	Header           string           `yaml:"header,omitempty"`
+	GrantType        string           `yaml:"grant_type,omitempty"`
+	Scheme           string           `yaml:"scheme,omitempty"`
+	AuthorizationURL string           `yaml:"authorization_url,omitempty"`
+	TokenURL         string           `yaml:"token_url,omitempty"`
+	ClientID         string           `yaml:"client_id,omitempty"`
+	ClientAuth       sourceClientAuth `yaml:"client_auth,omitempty"`
+	Scopes           []string         `yaml:"scopes,omitempty"`
+	EncryptedValue   string           `yaml:"encrypted_value,omitempty"`
 }
 
 func LoadAndSeal(path string, opts SealOptions) (Bundle, error) {
@@ -109,6 +113,18 @@ func LoadAndSeal(path string, opts SealOptions) (Bundle, error) {
 			return Bundle{}, fmt.Errorf("encode runtime config: %w", err)
 		}
 		return Bundle{YAML: rendered}, nil
+	}
+	if strings.TrimSpace(source.Auth.Type) == "oauth2" && strings.TrimSpace(source.Auth.GrantType) == "authorization_code" {
+		output.Auth = sealedAuthFromSource(*source.Auth)
+		rendered, err := yaml.Marshal(output)
+		if err != nil {
+			return Bundle{}, fmt.Errorf("encode runtime config: %w", err)
+		}
+		return Bundle{
+			YAML:            rendered,
+			OAuth2GrantType: "authorization_code",
+			OAuth2TokenURL:  strings.TrimSpace(source.Auth.TokenURL),
+		}, nil
 	}
 
 	getenv := opts.Getenv
@@ -164,20 +180,10 @@ func LoadAndSeal(path string, opts SealOptions) (Bundle, error) {
 		bundle.KeyShareB[i] = key[i] ^ bundle.KeyShareA[i]
 	}
 	bundle.HasSecret = true
-	output.Auth = &sealedAuth{
-		Type:      authType,
-		Header:    header,
-		GrantType: strings.TrimSpace(source.Auth.GrantType),
-		Scheme:    strings.TrimSpace(source.Auth.Scheme),
-		TokenURL:  strings.TrimSpace(source.Auth.TokenURL),
-		ClientID:  strings.TrimSpace(source.Auth.ClientID),
-		ClientAuth: sourceClientAuth{
-			Method:    strings.TrimSpace(source.Auth.ClientAuth.Method),
-			Placement: strings.TrimSpace(source.Auth.ClientAuth.Placement),
-		},
-		Scopes:         append([]string(nil), source.Auth.Scopes...),
-		EncryptedValue: EnvelopePrefix + base64.RawURLEncoding.EncodeToString(payload) + EnvelopeSuffix,
-	}
+	output.Auth = sealedAuthFromSource(*source.Auth)
+	output.Auth.EncryptedValue = EnvelopePrefix + base64.RawURLEncoding.EncodeToString(payload) + EnvelopeSuffix
+	bundle.OAuth2GrantType = strings.TrimSpace(source.Auth.GrantType)
+	bundle.OAuth2TokenURL = strings.TrimSpace(source.Auth.TokenURL)
 	bundle.YAML, err = yaml.Marshal(output)
 	if err != nil {
 		return Bundle{}, fmt.Errorf("encode runtime config: %w", err)
@@ -218,8 +224,24 @@ func validateSource(source sourceConfig, authMode string) error {
 			return fmt.Errorf("api_key auth requires header")
 		}
 	case "oauth2":
-		if strings.TrimSpace(source.Auth.GrantType) != "client_credentials" {
-			return fmt.Errorf("oauth2 auth requires grant_type client_credentials")
+		switch strings.TrimSpace(source.Auth.GrantType) {
+		case "authorization_code":
+			if strings.TrimSpace(source.Auth.AuthorizationURL) == "" {
+				return fmt.Errorf("oauth2 authorization_code requires authorization_url")
+			}
+			if strings.TrimSpace(source.Auth.TokenURL) == "" {
+				return fmt.Errorf("oauth2 authorization_code requires token_url")
+			}
+			if strings.TrimSpace(source.Auth.ClientID) == "" {
+				return fmt.Errorf("oauth2 authorization_code requires client_id")
+			}
+			if strings.TrimSpace(source.Auth.ClientAuth.Method) != "" || strings.TrimSpace(source.Auth.ClientAuth.Placement) != "" {
+				return fmt.Errorf("oauth2 authorization_code must not define client_auth")
+			}
+			return nil
+		case "client_credentials":
+		default:
+			return fmt.Errorf("oauth2 grant_type must be client_credentials or authorization_code")
 		}
 		if strings.TrimSpace(source.Auth.TokenURL) == "" {
 			return fmt.Errorf("oauth2 auth requires token_url or one clientCredentials security scheme in OpenAPI")
@@ -254,17 +276,34 @@ func applyOAuth2Defaults(source *sourceConfig, defaults OAuth2Defaults) {
 	if strings.TrimSpace(source.Auth.TokenURL) == "" {
 		source.Auth.TokenURL = strings.TrimSpace(defaults.TokenURL)
 	}
-	if strings.TrimSpace(source.Auth.ClientAuth.Method) == "" {
+	if strings.TrimSpace(source.Auth.GrantType) == "client_credentials" && strings.TrimSpace(source.Auth.ClientAuth.Method) == "" {
 		source.Auth.ClientAuth.Method = "client_secret"
 	}
-	if strings.TrimSpace(source.Auth.ClientAuth.Placement) == "" {
+	if strings.TrimSpace(source.Auth.GrantType) == "client_credentials" && strings.TrimSpace(source.Auth.ClientAuth.Placement) == "" {
 		source.Auth.ClientAuth.Placement = strings.TrimSpace(defaults.Placement)
 	}
-	if source.Auth.ClientAuth.Placement == "" {
+	if strings.TrimSpace(source.Auth.GrantType) == "client_credentials" && source.Auth.ClientAuth.Placement == "" {
 		source.Auth.ClientAuth.Placement = "basic"
 	}
 	if len(source.Auth.Scopes) == 0 {
 		source.Auth.Scopes = append([]string(nil), defaults.Scopes...)
+	}
+}
+
+func sealedAuthFromSource(auth sourceAuth) *sealedAuth {
+	return &sealedAuth{
+		Type:             strings.TrimSpace(auth.Type),
+		Header:           strings.TrimSpace(auth.Header),
+		GrantType:        strings.TrimSpace(auth.GrantType),
+		Scheme:           strings.TrimSpace(auth.Scheme),
+		AuthorizationURL: strings.TrimSpace(auth.AuthorizationURL),
+		TokenURL:         strings.TrimSpace(auth.TokenURL),
+		ClientID:         strings.TrimSpace(auth.ClientID),
+		ClientAuth: sourceClientAuth{
+			Method:    strings.TrimSpace(auth.ClientAuth.Method),
+			Placement: strings.TrimSpace(auth.ClientAuth.Placement),
+		},
+		Scopes: append([]string(nil), auth.Scopes...),
 	}
 }
 

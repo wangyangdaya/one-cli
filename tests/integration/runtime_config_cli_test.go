@@ -1,9 +1,12 @@
 package integration_test
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -207,6 +210,196 @@ components:
 	}
 	if tokenRequests.Load() != 1 || businessRequests.Load() != 1 {
 		t.Fatalf("requests: token=%d business=%d, want 1 each", tokenRequests.Load(), businessRequests.Load())
+	}
+}
+
+func TestGeneratedGoOAuth2AuthorizationCode(t *testing.T) {
+	const (
+		clientID    = "business-cli"
+		accessToken = "business-access-token"
+	)
+	var loginRequests atomic.Int32
+	var businessRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/idp/oauth2/authorize":
+			if got := r.URL.Query().Get("client_id"); got != clientID {
+				t.Errorf("authorize client_id = %q, want %q", got, clientID)
+			}
+			if got := r.URL.Query().Get("response_type"); got != "code" {
+				t.Errorf("response_type = %q, want code", got)
+			}
+			redirectURI := r.URL.Query().Get("redirect_uri")
+			state := r.URL.Query().Get("state")
+			http.Redirect(w, r, redirectURI+"?code=iam-code&state="+url.QueryEscape(state), http.StatusFound)
+		case "/cli-auth/login":
+			loginRequests.Add(1)
+			if err := r.ParseForm(); err != nil {
+				t.Errorf("parse login form: %v", err)
+			}
+			if got := r.Form.Get("grant_type"); got != "authorization_code" {
+				t.Errorf("grant_type = %q, want authorization_code", got)
+			}
+			if got := r.Form.Get("code"); got != "iam-code" {
+				t.Errorf("code = %q, want iam-code", got)
+			}
+			if got := r.Form.Get("client_id"); got != clientID {
+				t.Errorf("login client_id = %q, want %q", got, clientID)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"` + accessToken + `","token_type":"bearer","expires_in":3600}`))
+		case "/items":
+			businessRequests.Add(1)
+			if got := r.Header.Get("Authorization"); got != "Bearer "+accessToken {
+				t.Errorf("business Authorization = %q, want Bearer token", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"message":"ok"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	specPath := filepath.Join(t.TempDir(), "oauth.yaml")
+	spec := fmt.Sprintf(`
+openapi: 3.0.3
+info: {title: OAuth API, version: 1.0.0}
+paths:
+  /cli-auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      security: []
+      responses:
+        "200": {description: ok}
+  /items:
+    get:
+      tags: [items]
+      operationId: listItems
+      security:
+        - userOAuth: []
+      responses:
+        "200": {description: ok}
+components:
+  securitySchemes:
+    userOAuth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: %s/idp/oauth2/authorize
+          tokenUrl: %s/cli-auth/login
+          scopes: {}
+`, server.URL, server.URL)
+	if err := os.WriteFile(specPath, []byte(spec), 0o600); err != nil {
+		t.Fatalf("write OAuth spec: %v", err)
+	}
+	runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
+	runtimeYAML := fmt.Sprintf(`
+base_url: %s
+auth:
+  type: oauth2
+  grant_type: authorization_code
+  client_id: %s
+  authorization_url: %s/idp/oauth2/authorize
+  token_url: %s/cli-auth/login
+`, server.URL, clientID, server.URL, server.URL)
+	if err := os.WriteFile(runtimeSource, []byte(runtimeYAML), 0o600); err != nil {
+		t.Fatalf("write OAuth runtime source: %v", err)
+	}
+	dir := t.TempDir()
+	if err := app.RunGenerate(app.GenerateOptions{
+		Input:             specPath,
+		Output:            dir,
+		Module:            "github.com/acme/generated",
+		AppName:           "oauthcli",
+		Auth:              "oauth2",
+		Target:            "go",
+		RuntimeConfigPath: runtimeSource,
+	}); err != nil {
+		t.Fatalf("generate OAuth CLI: %v", err)
+	}
+
+	tokenFile := filepath.Join(t.TempDir(), "oauth-token.json")
+	login := exec.Command("go", "run", "./cmd/oauthcli", "auth", "login", "--no-browser")
+	login.Dir = dir
+	login.Env = append(runtimeTestEnv(dir),
+		"OPENCLI_CONFIG="+filepath.Join(dir, "config", "runtime.yaml"),
+		"OPENCLI_OAUTH_TOKEN_FILE="+tokenFile,
+	)
+	stdout, err := login.StdoutPipe()
+	if err != nil {
+		t.Fatalf("login stdout: %v", err)
+	}
+	var stderr bytes.Buffer
+	login.Stderr = &stderr
+	if err := login.Start(); err != nil {
+		t.Fatalf("start login: %v", err)
+	}
+	reader := bufio.NewReader(stdout)
+	authorizeURL, readErr := reader.ReadString('\n')
+	if readErr != nil {
+		_ = login.Wait()
+		t.Fatalf("read authorize URL: %v; stderr=%s", readErr, stderr.String())
+	}
+	authorizeURL = strings.TrimSpace(authorizeURL)
+	browserResponse, err := http.Get(authorizeURL)
+	if err != nil {
+		_ = login.Process.Kill()
+		t.Fatalf("complete browser login: %v", err)
+	}
+	_ = browserResponse.Body.Close()
+	if err := login.Wait(); err != nil {
+		t.Fatalf("login failed: %v; stderr=%s", err, stderr.String())
+	}
+	if info, err := os.Stat(tokenFile); err != nil {
+		t.Fatalf("stat OAuth token file: %v", err)
+	} else if info.Mode().Perm() != 0o600 {
+		t.Fatalf("OAuth token file mode = %o, want 600", info.Mode().Perm())
+	}
+
+	call := exec.Command("go", "run", "./cmd/oauthcli", "items", "list")
+	call.Dir = dir
+	call.Env = append(runtimeTestEnv(dir),
+		"OPENCLI_CONFIG="+filepath.Join(dir, "config", "runtime.yaml"),
+		"OPENCLI_OAUTH_TOKEN_FILE="+tokenFile,
+	)
+	out, err := call.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run generated OAuth CLI: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "ok") {
+		t.Fatalf("generated OAuth CLI output = %s", out)
+	}
+	if loginRequests.Load() != 1 || businessRequests.Load() != 1 {
+		t.Fatalf("requests: login=%d business=%d, want 1 each", loginRequests.Load(), businessRequests.Load())
+	}
+}
+
+func TestOAuth2AuthorizationCodeRejectsRustTarget(t *testing.T) {
+	runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
+	if err := os.WriteFile(runtimeSource, []byte(`
+base_url: https://business-api.example.com
+auth:
+  type: oauth2
+  grant_type: authorization_code
+  client_id: business-cli
+  authorization_url: https://iam.example.com/idp/oauth2/authorize
+  token_url: https://business.example.com/cli-auth/login
+`), 0o600); err != nil {
+		t.Fatalf("write OAuth runtime source: %v", err)
+	}
+	err := app.RunGenerate(app.GenerateOptions{
+		Input:             filepath.Join("..", "..", "examples", "petstore.yaml"),
+		Output:            t.TempDir(),
+		Module:            "github.com/acme/generated",
+		AppName:           "oauthcli",
+		Auth:              "oauth2",
+		Target:            "rust",
+		RuntimeConfigPath: runtimeSource,
+	})
+	if err == nil || !strings.Contains(err.Error(), "authorization_code currently supports target go") {
+		t.Fatalf("error = %v, want Go-only authorization_code error", err)
 	}
 }
 

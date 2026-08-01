@@ -74,9 +74,15 @@ This is a generated OpenCLI skill package. It contains API-derived facts and man
 {{- else if appUsesAPIKey .App }}
 - Environment variable `OPENCLI_API_KEY`: API-key override; the header name comes from the runtime file
 {{- else if appUsesOAuth2 .App }}
+{{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
+- OAuth 2.0 Authorization Code is used for protected operations
+- Run `{{ .App.Name }} auth login` before invoking protected business commands
+- The CLI stores and injects the business access token; IAM credentials are not configured in the CLI
+{{- else }}
 - OAuth 2.0 Client Credentials is handled automatically for protected operations
 - Environment variable `OPENCLI_OAUTH_CLIENT_SECRET`: plaintext per-run Client Secret override
 - The public Client ID and sealed default Client Secret come from `config/runtime.yaml`
+{{- end }}
 {{- else }}
 - No authentication is configured; use `-H` / `--header` only for non-auth internal routing headers when needed
 {{- end }}

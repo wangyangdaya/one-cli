@@ -8,6 +8,7 @@ import (
 
 	"one-cli/internal/model"
 	"one-cli/internal/render"
+	"one-cli/internal/runtimeconfig"
 )
 
 func TestRenderedRuntimeRequiresConfiguredCredentialsAndIgnoresCWDConfig(t *testing.T) {
@@ -97,5 +98,69 @@ func TestRenderedRustTraceUsesHeaderSpecificRedaction(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("Rust client missing trace redaction contract %q", want)
 		}
+	}
+}
+
+func TestRenderedGoOAuth2IncludesAuthLoginCommand(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name: "businesscli",
+		Auth: model.Auth{Type: model.AuthTypeOAuth2},
+		Groups: []model.Group{{
+			Name:       "records",
+			Operations: []model.Operation{{CommandName: "list", Method: "GET", Path: "/records", AuthRequired: true}},
+		}},
+	}
+	if err := render.ProjectWithOptions(dir, "github.com/acme/businesscli", app, render.ProjectOptions{
+		Target:        "go",
+		RuntimeBundle: &runtimeconfig.Bundle{OAuth2GrantType: "authorization_code"},
+	}); err != nil {
+		t.Fatalf("render Go: %v", err)
+	}
+
+	root, err := os.ReadFile(filepath.Join(dir, "cmd", "businesscli", "main.go"))
+	if err != nil {
+		t.Fatalf("read generated root: %v", err)
+	}
+	if !strings.Contains(string(root), "auth.NewOAuth2Command") {
+		t.Fatalf("generated root missing OAuth2 auth command:\n%s", root)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "internal", "auth", "oauth2.go")); err != nil {
+		t.Fatalf("generated OAuth2 auth command missing: %v", err)
+	}
+	readme, err := os.ReadFile(filepath.Join(dir, "README.md"))
+	if err != nil {
+		t.Fatalf("read generated README: %v", err)
+	}
+	if !strings.Contains(string(readme), "auth login") || strings.Contains(string(readme), "sealed client secret") {
+		t.Fatalf("generated authorization-code README has incorrect OAuth guidance:\n%s", readme)
+	}
+}
+
+func TestRenderedGoOAuth2ClientCredentialsDoesNotAddAuthLoginCommand(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name: "servicecli",
+		Auth: model.Auth{Type: model.AuthTypeOAuth2},
+		Groups: []model.Group{{
+			Name:       "records",
+			Operations: []model.Operation{{CommandName: "list", Method: "GET", Path: "/records", AuthRequired: true}},
+		}},
+	}
+	if err := render.ProjectWithOptions(dir, "github.com/acme/servicecli", app, render.ProjectOptions{
+		Target:        "go",
+		RuntimeBundle: &runtimeconfig.Bundle{OAuth2GrantType: "client_credentials"},
+	}); err != nil {
+		t.Fatalf("render Go: %v", err)
+	}
+	root, err := os.ReadFile(filepath.Join(dir, "cmd", "servicecli", "main.go"))
+	if err != nil {
+		t.Fatalf("read generated root: %v", err)
+	}
+	if strings.Contains(string(root), "auth.NewOAuth2Command") {
+		t.Fatalf("client_credentials root unexpectedly contains interactive auth command:\n%s", root)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "internal", "auth", "oauth2.go")); !os.IsNotExist(err) {
+		t.Fatalf("client_credentials unexpectedly generated interactive auth command: %v", err)
 	}
 }

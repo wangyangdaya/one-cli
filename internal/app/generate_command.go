@@ -99,7 +99,7 @@ func NewGenerateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&skillLang, "skill-lang", "en", "Generated skill language: en or zh")
 	cmd.Flags().StringVar(&auth, "auth", "", "Generated auth mode: token, api_key, ak_sk, oauth2, or none (default token)")
 	cmd.Flags().StringVar(&signer, "signer", "", "AK/SK signer profile, for example supplier_edi")
-	cmd.Flags().StringVar(&runtimeConfigPath, "runtime-config", "", "Runtime YAML metadata; seals OPENCLI_AUTH_TOKEN, OPENCLI_API_KEY, or OPENCLI_OAUTH_CLIENT_SECRET")
+	cmd.Flags().StringVar(&runtimeConfigPath, "runtime-config", "", "Runtime YAML metadata; seals OPENCLI_AUTH_TOKEN, OPENCLI_API_KEY, or OPENCLI_OAUTH_CLIENT_SECRET for credential modes; authorization_code uses no build-time secret")
 	_ = cmd.MarkFlagRequired("output")
 	_ = cmd.MarkFlagRequired("module")
 	_ = cmd.MarkFlagRequired("app")
@@ -132,7 +132,7 @@ func RunGenerate(opts GenerateOptions) error {
 		return fmt.Errorf("--auth api_key requires --runtime-config to declare the API-key header")
 	}
 	if auth == model.AuthTypeOAuth2 && strings.TrimSpace(opts.RuntimeConfigPath) == "" {
-		return fmt.Errorf("--auth oauth2 requires --runtime-config to declare client credentials")
+		return fmt.Errorf("--auth oauth2 requires --runtime-config to declare OAuth2 settings")
 	}
 	signer := resolveSigner(opts.Signer, cfg)
 	signerConfig, err := resolveSignerConfig(auth, signer, cfg)
@@ -159,14 +159,6 @@ func RunGenerate(opts GenerateOptions) error {
 	}
 
 	oauth2RuntimeDefaults := oauth2Defaults(doc)
-	plan := planner.Build(doc, cfg)
-	if auth == model.AuthTypeOAuth2 {
-		plan = withoutOAuthTokenOperation(plan, oauth2RuntimeDefaults.TokenURL)
-	}
-	plan.Name = strings.TrimSpace(opts.AppName)
-	plan.Auth.Type = auth
-	plan.Auth.SignerProfile = signerConfig.Profile
-	plan.Auth.Signer = signerConfig
 	var runtimeBundle *runtimeconfig.Bundle
 	if path := strings.TrimSpace(opts.RuntimeConfigPath); path != "" {
 		bundle, err := runtimeconfig.LoadAndSeal(path, runtimeconfig.SealOptions{
@@ -176,8 +168,23 @@ func RunGenerate(opts GenerateOptions) error {
 		if err != nil {
 			return err
 		}
+		if bundle.OAuth2GrantType == "authorization_code" && !strings.EqualFold(strings.TrimSpace(opts.Target), "go") && strings.TrimSpace(opts.Target) != "" {
+			return fmt.Errorf("oauth2 authorization_code currently supports target go")
+		}
 		runtimeBundle = &bundle
 	}
+	plan := planner.Build(doc, cfg)
+	if auth == model.AuthTypeOAuth2 {
+		tokenURL := oauth2RuntimeDefaults.TokenURL
+		if runtimeBundle != nil && strings.TrimSpace(runtimeBundle.OAuth2TokenURL) != "" {
+			tokenURL = runtimeBundle.OAuth2TokenURL
+		}
+		plan = withoutOAuthTokenOperation(plan, tokenURL)
+	}
+	plan.Name = strings.TrimSpace(opts.AppName)
+	plan.Auth.Type = auth
+	plan.Auth.SignerProfile = signerConfig.Profile
+	plan.Auth.Signer = signerConfig
 	return render.ProjectWithOptions(strings.TrimSpace(opts.Output), strings.TrimSpace(opts.Module), plan, render.ProjectOptions{
 		Target:        strings.TrimSpace(opts.Target),
 		SkillLang:     strings.TrimSpace(opts.SkillLang),

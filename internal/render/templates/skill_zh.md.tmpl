@@ -74,9 +74,15 @@ metadata:
 {{- else if appUsesAPIKey .App }}
 - 环境变量 `OPENCLI_API_KEY`：API Key 覆盖值；请求头名称来自运行时配置
 {{- else if appUsesOAuth2 .App }}
+{{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
+- 受保护操作使用 OAuth 2.0 Authorization Code
+- 调用受保护业务命令前执行 `{{ .App.Name }} auth login`
+- CLI 只保存并注入业务 Access Token，不配置 IAM 凭据
+{{- else }}
 - 受保护操作由 CLI 自动执行 OAuth 2.0 Client Credentials
 - 环境变量 `OPENCLI_OAUTH_CLIENT_SECRET`：单次运行的明文 Client Secret 覆盖值
 - 公开的 Client ID 和默认密封 Client Secret 来自 `config/runtime.yaml`
+{{- end }}
 {{- else }}
 - 未配置认证；如需内部路由请求头，可仅使用 `-H` / `--header`
 {{- end }}
