@@ -1456,3 +1456,32 @@ func TestRenderMCPHTTPUsesRuntimeConfigurationForGoAndRust(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderGoProjectRenamesKeywordGroup(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name: "keyword-cli",
+		Groups: []model.Group{{
+			Name: "type",
+			Operations: []model.Operation{{
+				CommandName: "list",
+				Method:      "GET",
+				Path:        "/type/list",
+			}},
+		}},
+	}
+
+	if err := render.Project(dir, "github.com/acme/keyword-cli", app, "go"); err != nil {
+		t.Fatalf("render Go project with keyword group: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "internal", "type_value", "command.go")); err != nil {
+		t.Fatalf("missing renamed group command: %v", err)
+	}
+	mainContent, err := os.ReadFile(filepath.Join(dir, "cmd", "keyword-cli", "main.go"))
+	if err != nil {
+		t.Fatalf("read generated main.go: %v", err)
+	}
+	if !strings.Contains(string(mainContent), `type_value "github.com/acme/keyword-cli/internal/type_value"`) {
+		t.Fatalf("generated main.go should use renamed keyword group:\n%s", mainContent)
+	}
+}

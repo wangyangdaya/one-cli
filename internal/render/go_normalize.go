@@ -13,6 +13,7 @@ func normalizeGoApp(app model.App) model.App {
 	app.Groups = slices.Clone(app.Groups)
 	for groupIndex := range app.Groups {
 		group := &app.Groups[groupIndex]
+		group.PackageName = goPackageName(groupPackageName(*group))
 		group.Operations = slices.Clone(group.Operations)
 		for operationIndex := range group.Operations {
 			operation := &group.Operations[operationIndex]
@@ -23,6 +24,20 @@ func normalizeGoApp(app model.App) model.App {
 		}
 	}
 	return app
+}
+
+func goPackageName(value string) string {
+	value = strings.TrimSpace(value)
+	switch value {
+	case "break", "default", "func", "interface", "select",
+		"case", "defer", "go", "map", "struct",
+		"chan", "else", "goto", "package", "switch",
+		"const", "fallthrough", "if", "range", "type",
+		"continue", "for", "import", "return", "var":
+		return value + "_value"
+	default:
+		return value
+	}
 }
 
 func normalizeGoOperationArgs(operation *model.Operation) {
