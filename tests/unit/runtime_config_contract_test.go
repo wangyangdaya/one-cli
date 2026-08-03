@@ -101,14 +101,14 @@ func TestRenderedRustTraceUsesHeaderSpecificRedaction(t *testing.T) {
 	}
 }
 
-func TestRenderedGoOAuth2IncludesAuthLoginCommand(t *testing.T) {
+func TestRenderedGoOAuth2IncludesTopLevelLoginCommand(t *testing.T) {
 	dir := t.TempDir()
 	app := model.App{
 		Name: "businesscli",
 		Auth: model.Auth{Type: model.AuthTypeOAuth2},
 		Groups: []model.Group{{
-			Name:       "records",
-			Operations: []model.Operation{{CommandName: "list", Method: "GET", Path: "/records", AuthRequired: true}},
+			Name:       "auth",
+			Operations: []model.Operation{{CommandName: "business-login", Method: "POST", Path: "/api/login"}},
 		}},
 	}
 	if err := render.ProjectWithOptions(dir, "github.com/acme/businesscli", app, render.ProjectOptions{
@@ -122,22 +122,65 @@ func TestRenderedGoOAuth2IncludesAuthLoginCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read generated root: %v", err)
 	}
-	if !strings.Contains(string(root), "auth.NewOAuth2Command") {
-		t.Fatalf("generated root missing OAuth2 auth command:\n%s", root)
+	if !strings.Contains(string(root), "auth.NewOAuth2LoginCommand") || !strings.Contains(string(root), "auth.NewOAuth2LogoutCommand") {
+		t.Fatalf("generated root missing OAuth2 login/logout commands:\n%s", root)
+	}
+	if got := strings.Count(string(root), `"github.com/acme/businesscli/internal/auth"`); got != 1 {
+		t.Fatalf("generated root imports auth package %d times, want once:\n%s", got, root)
+	}
+	if !strings.Contains(string(root), "auth.NewCommand()") {
+		t.Fatalf("generated root missing business auth command group:\n%s", root)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "internal", "auth", "oauth2.go")); err != nil {
 		t.Fatalf("generated OAuth2 auth command missing: %v", err)
+	}
+	for _, rel := range []string{filepath.Join("skills", "cli-auth", "SKILL.md"), filepath.Join("skills", "SKILL.md")} {
+		content, err := os.ReadFile(filepath.Join(dir, rel))
+		if err != nil {
+			t.Fatalf("read generated OAuth2 skill %s: %v", rel, err)
+		}
+		if !strings.Contains(string(content), "businesscli login") && !strings.Contains(string(content), "cli-auth/SKILL.md") {
+			t.Fatalf("generated OAuth2 skill %s lacks login routing:\n%s", rel, content)
+		}
 	}
 	readme, err := os.ReadFile(filepath.Join(dir, "README.md"))
 	if err != nil {
 		t.Fatalf("read generated README: %v", err)
 	}
-	if !strings.Contains(string(readme), "auth login") || strings.Contains(string(readme), "sealed client secret") {
+	if !strings.Contains(string(readme), "businesscli login") || !strings.Contains(string(readme), "businesscli logout") || strings.Contains(string(readme), "sealed client secret") {
 		t.Fatalf("generated authorization-code README has incorrect OAuth guidance:\n%s", readme)
 	}
 }
 
-func TestRenderedGoOAuth2ClientCredentialsDoesNotAddAuthLoginCommand(t *testing.T) {
+func TestRenderedOAuth2LoginReportsBusinessErrorBody(t *testing.T) {
+	app := model.App{Name: "businesscli", Auth: model.Auth{Type: model.AuthTypeOAuth2}}
+	for _, target := range []string{"go", "rust"} {
+		t.Run(target, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := render.ProjectWithOptions(dir, "github.com/acme/businesscli", app, render.ProjectOptions{
+				Target:        target,
+				RuntimeBundle: &runtimeconfig.Bundle{OAuth2GrantType: "authorization_code"},
+			}); err != nil {
+				t.Fatalf("render %s: %v", target, err)
+			}
+			path := filepath.Join(dir, "src", "oauth_auth.rs")
+			want := "business login endpoint returned {}: {}"
+			if target == "go" {
+				path = filepath.Join(dir, "internal", "auth", "oauth2.go")
+				want = "business login endpoint returned %s: %s"
+			}
+			content, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read generated OAuth login: %v", err)
+			}
+			if !strings.Contains(string(content), want) {
+				t.Fatalf("generated %s OAuth login does not report the business error response body", target)
+			}
+		})
+	}
+}
+
+func TestRenderedGoOAuth2ClientCredentialsDoesNotAddLoginCommand(t *testing.T) {
 	dir := t.TempDir()
 	app := model.App{
 		Name: "servicecli",
@@ -157,10 +200,13 @@ func TestRenderedGoOAuth2ClientCredentialsDoesNotAddAuthLoginCommand(t *testing.
 	if err != nil {
 		t.Fatalf("read generated root: %v", err)
 	}
-	if strings.Contains(string(root), "auth.NewOAuth2Command") {
+	if strings.Contains(string(root), "auth.NewOAuth2LoginCommand") || strings.Contains(string(root), "auth.NewOAuth2LogoutCommand") {
 		t.Fatalf("client_credentials root unexpectedly contains interactive auth command:\n%s", root)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "internal", "auth", "oauth2.go")); !os.IsNotExist(err) {
 		t.Fatalf("client_credentials unexpectedly generated interactive auth command: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "skills", "cli-auth", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("client_credentials unexpectedly generated cli-auth skill: %v", err)
 	}
 }

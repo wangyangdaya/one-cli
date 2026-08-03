@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -12,27 +13,31 @@ import (
 	"net/url"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"{{ .Module }}/internal/config"
+	"{{ .Module }}/internal/httpx"
 
 	"github.com/spf13/cobra"
 )
 
-func NewOAuth2Command(appName string) *cobra.Command {
-	cmd := &cobra.Command{Use: "auth", Short: "Manage OAuth2 login"}
+func NewOAuth2LoginCommand(appName string) *cobra.Command {
 	var noBrowser bool
-	login := &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Log in with OAuth2 authorization code",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return loginAuthorizationCode(cmd, appName, noBrowser)
 		},
 	}
-	login.Flags().BoolVar(&noBrowser, "no-browser", false, "Print the login URL without opening a browser")
-	cmd.AddCommand(login)
-	cmd.AddCommand(&cobra.Command{
+	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Print the login URL without opening a browser")
+	return cmd
+}
+
+func NewOAuth2LogoutCommand(appName string) *cobra.Command {
+	return &cobra.Command{
 		Use:   "logout",
 		Short: "Delete the stored OAuth2 session",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -42,8 +47,7 @@ func NewOAuth2Command(appName string) *cobra.Command {
 			_, err := fmt.Fprintln(cmd.OutOrStdout(), "logged out")
 			return err
 		},
-	})
-	return cmd
+	}
 }
 
 func loginAuthorizationCode(cmd *cobra.Command, appName string, noBrowser bool) error {
@@ -122,7 +126,7 @@ func loginAuthorizationCode(cmd *cobra.Command, appName string, noBrowser bool) 
 	if callback.err != nil {
 		return callback.err
 	}
-	token, expiresIn, err := exchangeAuthorizationCode(auth, callback.code, redirectURI)
+	token, expiresIn, err := exchangeAuthorizationCode(auth, callback.code, state, redirectURI)
 	if err != nil {
 		return err
 	}
@@ -150,41 +154,208 @@ func buildAuthorizeURL(auth config.OAuthAuthorizationConfig, redirectURI, state 
 	return endpoint.String(), nil
 }
 
-func exchangeAuthorizationCode(auth config.OAuthAuthorizationConfig, code, redirectURI string) (string, int64, error) {
-	values := url.Values{
-		"grant_type":  {"authorization_code"},
-		"client_id":   {auth.ClientID},
-		"code":        {code},
-		"redirect_uri": {redirectURI},
+func exchangeAuthorizationCode(auth config.OAuthAuthorizationConfig, code, state, redirectURI string) (string, int64, error) {
+	method := http.MethodPost
+	endpoint, err := url.Parse(auth.TokenURL)
+	if err != nil || endpoint.Scheme == "" || endpoint.Host == "" {
+		return "", 0, fmt.Errorf("invalid OAuth token_url")
 	}
-	req, err := http.NewRequest(http.MethodPost, auth.TokenURL, strings.NewReader(values.Encode()))
+	form := url.Values{}
+	requestHeaders := http.Header{}
+	cookies := make([]*http.Cookie, 0)
+	var body io.Reader
+	if auth.TokenExchange == nil {
+		form.Set("grant_type", "authorization_code")
+		form.Set("client_id", auth.ClientID)
+		form.Set("code", code)
+		form.Set("redirect_uri", redirectURI)
+		body = strings.NewReader(form.Encode())
+		requestHeaders.Set("Content-Type", "application/x-www-form-urlencoded")
+	} else {
+		exchange := auth.TokenExchange
+		method = strings.ToUpper(strings.TrimSpace(exchange.Method))
+		if method == "" {
+			method = http.MethodPost
+		}
+		bodyValues := make(map[string]string)
+		query := endpoint.Query()
+		for _, parameter := range exchange.Parameters {
+			value := tokenExchangeSourceValue(parameter, code, state, auth, redirectURI)
+			if strings.TrimSpace(value) == "" {
+				if parameter.Required {
+					return "", 0, fmt.Errorf("OAuth token exchange parameter %q is required", parameter.Name)
+				}
+				continue
+			}
+			switch strings.ToLower(strings.TrimSpace(parameter.In)) {
+			case "body":
+				bodyValues[parameter.Name] = value
+			case "query":
+				query.Set(parameter.Name, value)
+			case "header":
+				requestHeaders.Set(parameter.Name, value)
+			case "cookie":
+				cookies = append(cookies, &http.Cookie{Name: parameter.Name, Value: value})
+			}
+		}
+		endpoint.RawQuery = query.Encode()
+		switch strings.ToLower(strings.TrimSpace(exchange.BodyFormat)) {
+		case "json":
+			payload, marshalErr := json.Marshal(bodyValues)
+			if marshalErr != nil {
+				return "", 0, fmt.Errorf("encode OAuth token exchange request: %w", marshalErr)
+			}
+			body = bytes.NewReader(payload)
+			requestHeaders.Set("Content-Type", "application/json")
+		case "form":
+			for name, value := range bodyValues {
+				form.Set(name, value)
+			}
+			body = strings.NewReader(form.Encode())
+			requestHeaders.Set("Content-Type", "application/x-www-form-urlencoded")
+		}
+	}
+	req, err := http.NewRequest(method, endpoint.String(), body)
 	if err != nil {
 		return "", 0, fmt.Errorf("build OAuth token request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header = requestHeaders
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	format := "form"
+	if auth.TokenExchange != nil && strings.TrimSpace(auth.TokenExchange.BodyFormat) != "" {
+		format = strings.ToLower(strings.TrimSpace(auth.TokenExchange.BodyFormat))
+	}
+	httpx.Tracef("[opencli][oauth] token_exchange\n  method: %s\n  url: %s://%s%s\n  format: %s", method, endpoint.Scheme, endpoint.Host, endpoint.Path, format)
 	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	if err != nil {
 		return "", 0, fmt.Errorf("request business login endpoint: %w", err)
 	}
 	defer resp.Body.Close()
+	httpx.Tracef("[opencli][oauth] token_exchange_response\n  status: %d", resp.StatusCode)
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return "", 0, fmt.Errorf("business login endpoint returned %s", resp.Status)
+		errorBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if readErr != nil || strings.TrimSpace(string(errorBytes)) == "" {
+			return "", 0, fmt.Errorf("business login endpoint returned %s", resp.Status)
+		}
+		return "", 0, fmt.Errorf("business login endpoint returned %s: %s", resp.Status, strings.TrimSpace(string(errorBytes)))
 	}
-	var result struct {
-		AccessToken string `json:"access_token"`
-		TokenType   string `json:"token_type"`
-		ExpiresIn   int64  `json:"expires_in"`
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", 0, fmt.Errorf("read business token response: %w", err)
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
+	var bodyValue any
+	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
+	decoder.UseNumber()
+	if err := decoder.Decode(&bodyValue); err != nil {
 		return "", 0, fmt.Errorf("decode business token response: %w", err)
 	}
-	if strings.TrimSpace(result.AccessToken) == "" {
+	accessMapping := exchangeResultMapping(auth.TokenExchange, "access_token")
+	tokenTypeMapping := exchangeResultMapping(auth.TokenExchange, "token_type")
+	expiresMapping := exchangeResultMapping(auth.TokenExchange, "expires_in")
+	accessToken := strings.TrimSpace(exchangeResponseString(resp.Header, bodyValue, accessMapping))
+	tokenType := strings.TrimSpace(exchangeResponseString(resp.Header, bodyValue, tokenTypeMapping))
+	expiresIn, err := exchangeResponseInt64(resp.Header, bodyValue, expiresMapping)
+	if err != nil {
+		return "", 0, err
+	}
+	if accessToken == "" {
 		return "", 0, fmt.Errorf("business token response is missing access_token")
 	}
-	if result.TokenType != "" && !strings.EqualFold(strings.TrimSpace(result.TokenType), "bearer") {
-		return "", 0, fmt.Errorf("unsupported business token_type %q", result.TokenType)
+	if tokenType != "" && !strings.EqualFold(tokenType, "bearer") {
+		return "", 0, fmt.Errorf("unsupported business token_type %q", tokenType)
 	}
-	return strings.TrimSpace(result.AccessToken), result.ExpiresIn, nil
+	return accessToken, expiresIn, nil
+}
+
+func tokenExchangeSourceValue(parameter config.OAuthTokenExchangeParameter, code, state string, auth config.OAuthAuthorizationConfig, redirectURI string) string {
+	switch strings.ToLower(strings.TrimSpace(parameter.Source)) {
+	case "code":
+		return code
+	case "state":
+		return state
+	case "client_id":
+		return auth.ClientID
+	case "redirect_uri":
+		return redirectURI
+	case "scope":
+		return strings.Join(auth.Scopes, " ")
+	case "grant_type":
+		return "authorization_code"
+	case "literal":
+		return parameter.Value
+	default:
+		return ""
+	}
+}
+
+func exchangeResultMapping(exchange *config.OAuthTokenExchangeConfig, name string) config.OAuthTokenExchangeResult {
+	result := config.OAuthTokenExchangeResult{In: "body", Path: name}
+	if exchange == nil || exchange.Response == nil {
+		return result
+	}
+	var configured *config.OAuthTokenExchangeResult
+	switch name {
+	case "access_token":
+		configured = exchange.Response.AccessToken
+	case "token_type":
+		configured = exchange.Response.TokenType
+	case "expires_in":
+		configured = exchange.Response.ExpiresIn
+	}
+	if configured != nil {
+		return *configured
+	}
+	return result
+}
+
+func exchangeResponseValue(headers http.Header, body any, mapping config.OAuthTokenExchangeResult) any {
+	if strings.EqualFold(strings.TrimSpace(mapping.In), "header") {
+		return headers.Get(strings.TrimSpace(mapping.Path))
+	}
+	value := body
+	for _, part := range strings.Split(strings.TrimSpace(mapping.Path), ".") {
+		object, ok := value.(map[string]any)
+		if !ok {
+			return nil
+		}
+		value = object[part]
+	}
+	return value
+}
+
+func exchangeResponseString(headers http.Header, body any, mapping config.OAuthTokenExchangeResult) string {
+	value := exchangeResponseValue(headers, body, mapping)
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case json.Number:
+		return typed.String()
+	default:
+		return ""
+	}
+}
+
+func exchangeResponseInt64(headers http.Header, body any, mapping config.OAuthTokenExchangeResult) (int64, error) {
+	value := exchangeResponseValue(headers, body, mapping)
+	if value == nil || value == "" {
+		return 0, nil
+	}
+	var raw string
+	switch typed := value.(type) {
+	case string:
+		raw = typed
+	case json.Number:
+		raw = typed.String()
+	default:
+		return 0, fmt.Errorf("business token response expires_in must be an integer")
+	}
+	parsed, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || parsed < 0 {
+		return 0, fmt.Errorf("business token response expires_in must be an integer")
+	}
+	return parsed, nil
 }
 
 func randomValue(size int) (string, error) {

@@ -76,7 +76,7 @@ metadata:
 {{- else if appUsesOAuth2 .App }}
 {{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
 - 受保护操作使用 OAuth 2.0 Authorization Code
-- 调用受保护业务命令前执行 `{{ .App.Name }} auth login`
+- 调用受保护业务命令前执行 `{{ .App.Name }} login`
 - CLI 只保存并注入业务 Access Token，不配置 IAM 凭据
 {{- else }}
 - 受保护操作由 CLI 自动执行 OAuth 2.0 Client Credentials

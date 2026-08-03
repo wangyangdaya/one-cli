@@ -10,6 +10,9 @@
 
 | Skill | 命令数 | 说明 |
 | --- | ---: | --- |
+{{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
+| `cli-auth` | 2 | [CLI 登录与会话管理](cli-auth/SKILL.md) |
+{{- end }}
 {{- range .App.Groups }}
 | `{{ skillName . }}` | {{ len .Operations }} | [`SKILL.md`]({{ skillName . }}/SKILL.md) |
 {{- end }}

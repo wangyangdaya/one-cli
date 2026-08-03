@@ -168,9 +168,6 @@ func RunGenerate(opts GenerateOptions) error {
 		if err != nil {
 			return err
 		}
-		if bundle.OAuth2GrantType == "authorization_code" && !strings.EqualFold(strings.TrimSpace(opts.Target), "go") && strings.TrimSpace(opts.Target) != "" {
-			return fmt.Errorf("oauth2 authorization_code currently supports target go")
-		}
 		runtimeBundle = &bundle
 	}
 	plan := planner.Build(doc, cfg)

@@ -46,6 +46,12 @@ func SetTraceLogger(logger *log.Logger) {
 	traceLogger.Store(logger)
 }
 
+// Tracef writes a caller-provided message when HTTP tracing is enabled. Callers
+// must pass only redacted metadata and never credentials or request bodies.
+func Tracef(format string, args ...any) {
+	logf(format, args...)
+}
+
 func Do(client *http.Client, req *http.Request) (*http.Response, []byte, error) {
 	logRequest(req)
 

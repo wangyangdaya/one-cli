@@ -41,7 +41,34 @@ type runtimeAuth struct {
 	ClientID       string            `yaml:"client_id,omitempty"`
 	ClientAuth     runtimeClientAuth `yaml:"client_auth,omitempty"`
 	Scopes         []string          `yaml:"scopes,omitempty"`
+	TokenExchange  *OAuthTokenExchangeConfig `yaml:"token_exchange,omitempty"`
 	EncryptedValue string            `yaml:"encrypted_value,omitempty"`
+}
+
+type OAuthTokenExchangeConfig struct {
+	Method     string                        `yaml:"method,omitempty"`
+	BodyFormat string                        `yaml:"body_format,omitempty"`
+	Parameters []OAuthTokenExchangeParameter `yaml:"parameters,omitempty"`
+	Response   *OAuthTokenExchangeResponse   `yaml:"response,omitempty"`
+}
+
+type OAuthTokenExchangeParameter struct {
+	Source   string `yaml:"source"`
+	Name     string `yaml:"name"`
+	In       string `yaml:"in"`
+	Required bool   `yaml:"required,omitempty"`
+	Value    string `yaml:"value,omitempty"`
+}
+
+type OAuthTokenExchangeResponse struct {
+	AccessToken *OAuthTokenExchangeResult `yaml:"access_token,omitempty"`
+	TokenType   *OAuthTokenExchangeResult `yaml:"token_type,omitempty"`
+	ExpiresIn   *OAuthTokenExchangeResult `yaml:"expires_in,omitempty"`
+}
+
+type OAuthTokenExchangeResult struct {
+	In   string `yaml:"in"`
+	Path string `yaml:"path"`
 }
 
 type runtimeClientAuth struct {
@@ -183,6 +210,7 @@ type OAuthAuthorizationConfig struct {
 	TokenURL         string
 	ClientID         string
 	Scopes           []string
+	TokenExchange    *OAuthTokenExchangeConfig
 }
 
 func LoadOAuthAuthorizationConfig(appName string) (OAuthAuthorizationConfig, error) {
@@ -205,6 +233,7 @@ func LoadOAuthAuthorizationConfig(appName string) (OAuthAuthorizationConfig, err
 		TokenURL:         strings.TrimSpace(auth.TokenURL),
 		ClientID:         strings.TrimSpace(auth.ClientID),
 		Scopes:           append([]string(nil), auth.Scopes...),
+		TokenExchange:    auth.TokenExchange,
 	}, nil
 }
 
@@ -270,7 +299,7 @@ func loadOAuthAuthorizationToken(appName string) (string, time.Time, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", time.Time{}, fmt.Errorf("login_required: run %s auth login", appName)
+			return "", time.Time{}, fmt.Errorf("login_required: run %s login", appName)
 		}
 		return "", time.Time{}, fmt.Errorf("read OAuth session: %w", err)
 	}
@@ -279,7 +308,7 @@ func loadOAuthAuthorizationToken(appName string) (string, time.Time, error) {
 		return "", time.Time{}, fmt.Errorf("decode OAuth session: %w", err)
 	}
 	if strings.TrimSpace(token.AccessToken) == "" || !token.ExpiresAt.After(time.Now()) {
-		return "", time.Time{}, fmt.Errorf("login_required: run %s auth login", appName)
+		return "", time.Time{}, fmt.Errorf("login_required: run %s login", appName)
 	}
 	return strings.TrimSpace(token.AccessToken), token.ExpiresAt, nil
 }

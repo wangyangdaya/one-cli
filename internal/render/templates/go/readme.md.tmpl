@@ -86,7 +86,7 @@ The `supplier_edi` profile uses the supplier `sha512Hex` canonical string: `meth
 {{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
 Mode: `oauth2` (`authorization_code`)
 
-Run `./bin/{{ .App.Name }} auth login` to authenticate in the IAM browser flow. The CLI sends the returned authorization code to the configured business `token_url`, stores the business access token locally, and injects `Authorization: Bearer <access_token>` for protected operations. Run `./bin/{{ .App.Name }} auth logout` to delete the local session.
+Run `./bin/{{ .App.Name }} login` to authenticate in the IAM browser flow. The CLI sends the returned authorization code to the configured business `token_url`, stores the business access token locally, and injects `Authorization: Bearer <access_token>` for protected operations. Run `./bin/{{ .App.Name }} logout` to delete the local session.
 {{- else }}
 Mode: `oauth2` (`client_credentials`)
 

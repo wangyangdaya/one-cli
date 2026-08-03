@@ -17,6 +17,9 @@ Before acting:
 1. Pick the matching command-group skill from the index.
 2. Read that group's `SKILL.md`.
 3. Use this router only for navigation; do not treat it as the complete operating guide.
+{{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
+4. When a protected command lacks a session or returns `login_required`, read `cli-auth/SKILL.md` first; do not confuse a business `auth login` command with CLI login.
+{{- end }}
 
 ```bash
 {{ .App.Name }} skills list
@@ -26,6 +29,9 @@ Before acting:
 
 | Skill | Commands | Guide |
 | --- | ---: | --- |
+{{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
+| `cli-auth` | 2 | [`cli-auth/SKILL.md`](cli-auth/SKILL.md); CLI login and session management |
+{{- end }}
 {{- range .App.Groups }}
 | `{{ skillName . }}` | {{ len .Operations }} | [`{{ skillName . }}/SKILL.md`]({{ skillName . }}/SKILL.md) |
 {{- end }}

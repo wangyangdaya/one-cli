@@ -1,0 +1,313 @@
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use serde_json::Value;
+use std::collections::BTreeMap;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::process::Command;
+use std::time::{Duration, Instant};
+
+use crate::runtime_config::OAuthAuthorizationConfig;
+use crate::trace::trace_log;
+use crate::types::AppResult;
+
+const CALLBACK_PATH: &str = "/oauth/callback";
+
+struct TokenResponse {
+    access_token: String,
+    token_type: String,
+    expires_in: u64,
+}
+
+pub async fn login(app_name: &str, no_browser: bool) -> AppResult<()> {
+    let auth = crate::runtime_config::load_oauth_authorization_config(app_name)?;
+    let listener = TcpListener::bind("127.0.0.1:0").map_err(|err| format!("start OAuth callback listener: {err}"))?;
+    listener.set_nonblocking(true).map_err(|err| format!("configure OAuth callback listener: {err}"))?;
+    let redirect_uri = format!("http://{}{}", listener.local_addr().map_err(|err| err.to_string())?, CALLBACK_PATH);
+    let state = random_state()?;
+    let authorize_url = build_authorize_url(&auth, &redirect_uri, &state)?;
+
+    println!("{authorize_url}");
+    std::io::stdout().flush().map_err(|err| err.to_string())?;
+    if !no_browser {
+        open_browser(&authorize_url)?;
+    }
+
+    let code = wait_for_callback(&listener, &state)?;
+    let token = exchange_authorization_code(&auth, &code, &state, &redirect_uri).await?;
+    crate::runtime_config::save_oauth_authorization_token(app_name, &token.access_token, token.expires_in)?;
+    println!("login successful");
+    Ok(())
+}
+
+pub fn logout(app_name: &str) -> AppResult<()> {
+    crate::runtime_config::clear_oauth_authorization_token(app_name)?;
+    println!("logged out");
+    Ok(())
+}
+
+fn build_authorize_url(auth: &OAuthAuthorizationConfig, redirect_uri: &str, state: &str) -> AppResult<String> {
+    let mut endpoint = reqwest::Url::parse(&auth.authorization_url).map_err(|_| "invalid OAuth authorization_url".to_string())?;
+    if endpoint.host_str().is_none() {
+        return Err("invalid OAuth authorization_url".to_string());
+    }
+    {
+        let mut query = endpoint.query_pairs_mut();
+        query.append_pair("client_id", &auth.client_id);
+        query.append_pair("redirect_uri", redirect_uri);
+        query.append_pair("response_type", "code");
+        query.append_pair("state", state);
+        if !auth.scopes.is_empty() {
+            query.append_pair("scope", &auth.scopes.join(" "));
+        }
+    }
+    Ok(endpoint.to_string())
+}
+
+fn wait_for_callback(listener: &TcpListener, expected_state: &str) -> AppResult<String> {
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        match listener.accept() {
+            Ok((mut stream, _)) => return read_callback(&mut stream, expected_state),
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    return Err("OAuth login timed out".to_string());
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Err(err) => return Err(format!("accept OAuth callback: {err}")),
+        }
+    }
+}
+
+fn read_callback(stream: &mut TcpStream, expected_state: &str) -> AppResult<String> {
+    stream.set_read_timeout(Some(Duration::from_secs(5))).map_err(|err| err.to_string())?;
+    let mut buffer = [0u8; 8192];
+    let size = stream.read(&mut buffer).map_err(|err| format!("read OAuth callback: {err}"))?;
+    let request = std::str::from_utf8(&buffer[..size]).map_err(|_| "invalid OAuth callback request".to_string())?;
+    let target = request.lines().next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .ok_or_else(|| "invalid OAuth callback request".to_string())?;
+    let callback = reqwest::Url::parse(&format!("http://127.0.0.1{target}"))
+        .map_err(|_| "invalid OAuth callback request".to_string())?;
+    if callback.path() != CALLBACK_PATH {
+        write_callback_response(stream, "404 Not Found", "Not found")?;
+        return Err("invalid OAuth callback path".to_string());
+    }
+    let mut code = String::new();
+    let mut state = String::new();
+    let mut oauth_error = String::new();
+    for (name, value) in callback.query_pairs() {
+        match name.as_ref() {
+            "code" => code = value.into_owned(),
+            "state" => state = value.into_owned(),
+            "error" => oauth_error = value.into_owned(),
+            _ => {}
+        }
+    }
+    if state != expected_state {
+        write_callback_response(stream, "400 Bad Request", "Invalid OAuth state")?;
+        return Err("OAuth callback state mismatch".to_string());
+    }
+    if !oauth_error.trim().is_empty() {
+        write_callback_response(stream, "400 Bad Request", "OAuth login failed")?;
+        return Err(format!("OAuth authorization failed: {oauth_error}"));
+    }
+    if code.trim().is_empty() {
+        write_callback_response(stream, "400 Bad Request", "Missing authorization code")?;
+        return Err("OAuth callback is missing code".to_string());
+    }
+    write_callback_response(stream, "200 OK", "Login completed. You may close this window.")?;
+    Ok(code.trim().to_string())
+}
+
+fn write_callback_response(stream: &mut TcpStream, status: &str, body: &str) -> AppResult<()> {
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(response.as_bytes()).map_err(|err| format!("write OAuth callback response: {err}"))
+}
+
+async fn exchange_authorization_code(auth: &OAuthAuthorizationConfig, code: &str, state: &str, redirect_uri: &str) -> AppResult<TokenResponse> {
+    let mut endpoint = reqwest::Url::parse(&auth.token_url).map_err(|_| "invalid OAuth token_url".to_string())?;
+    if endpoint.host_str().is_none() {
+        return Err("invalid OAuth token_url".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|err| err.to_string())?;
+    let method_label = auth.token_exchange.as_ref()
+        .map(|exchange| exchange.method.trim())
+        .filter(|method| !method.is_empty())
+        .unwrap_or("POST");
+    let format_label = auth.token_exchange.as_ref()
+        .map(|exchange| exchange.body_format.trim())
+        .filter(|format| !format.is_empty())
+        .unwrap_or("form");
+    let mut request = if let Some(exchange) = &auth.token_exchange {
+        let method = exchange.method.trim().parse::<reqwest::Method>().map_err(|_| "invalid OAuth token_exchange method".to_string())?;
+        let mut body_values = BTreeMap::new();
+        let mut headers = Vec::new();
+        let mut cookies = Vec::new();
+        {
+            let mut query = endpoint.query_pairs_mut();
+            for parameter in &exchange.parameters {
+                let value = token_exchange_source_value(parameter, code, state, auth, redirect_uri);
+                if value.trim().is_empty() {
+                    if parameter.required {
+                        return Err(format!("OAuth token exchange parameter {:?} is required", parameter.name));
+                    }
+                    continue;
+                }
+                match parameter.location.trim() {
+                    "body" => { body_values.insert(parameter.name.clone(), value); }
+                    "query" => { query.append_pair(&parameter.name, &value); }
+                    "header" => headers.push((parameter.name.clone(), value)),
+                    "cookie" => cookies.push(format!("{}={}", parameter.name, value)),
+                    _ => {}
+                }
+            }
+        }
+        let mut builder = client.request(method, endpoint.clone());
+        for (name, value) in headers {
+            builder = builder.header(name, value);
+        }
+        if !cookies.is_empty() {
+            builder = builder.header("Cookie", cookies.join("; "));
+        }
+        match exchange.body_format.trim() {
+            "json" => builder.json(&body_values),
+            "form" => builder.form(&body_values),
+            _ => builder,
+        }
+    } else {
+        let form = [
+            ("grant_type", "authorization_code"),
+            ("client_id", auth.client_id.as_str()),
+            ("code", code),
+            ("redirect_uri", redirect_uri),
+        ];
+        client.post(endpoint.clone()).form(&form)
+    };
+    request = request.header("Accept", "application/json");
+    trace_log!("[opencli][oauth] token_exchange\n  method: {method_label}\n  url: {}://{}{}\n  format: {format_label}",
+        endpoint.scheme(), endpoint.host_str().unwrap_or(""), endpoint.path());
+    let response = request
+        .send()
+        .await
+        .map_err(|err| format!("request business login endpoint: {err}"))?;
+    trace_log!("[opencli][oauth] token_exchange_response\n  status: {}", response.status().as_u16());
+    if !response.status().is_success() {
+        let status = response.status();
+        let response_body = response.text().await.unwrap_or_default();
+        let response_body = response_body.trim().chars().take(4096).collect::<String>();
+        if response_body.is_empty() {
+            return Err(format!("business login endpoint returned {}", status));
+        }
+        return Err(format!("business login endpoint returned {}: {}", status, response_body));
+    }
+    let response_headers = response.headers().clone();
+    let body: Value = response.json().await.map_err(|err| format!("decode business token response: {err}"))?;
+    let access_token = token_exchange_response_string(auth, &response_headers, &body, "access_token");
+    let token_type = token_exchange_response_string(auth, &response_headers, &body, "token_type");
+    let expires_in = token_exchange_response_u64(auth, &response_headers, &body, "expires_in")?;
+    let token = TokenResponse { access_token, token_type, expires_in };
+    if token.access_token.trim().is_empty() {
+        return Err("business token response is missing access_token".to_string());
+    }
+    if !token.token_type.trim().is_empty() && !token.token_type.eq_ignore_ascii_case("bearer") {
+        return Err(format!("unsupported business token_type {:?}", token.token_type));
+    }
+    Ok(token)
+}
+
+fn token_exchange_source_value(
+    parameter: &crate::runtime_config::OAuthTokenExchangeParameter,
+    code: &str,
+    state: &str,
+    auth: &OAuthAuthorizationConfig,
+    redirect_uri: &str,
+) -> String {
+    match parameter.source.trim() {
+        "code" => code.to_string(),
+        "state" => state.to_string(),
+        "client_id" => auth.client_id.clone(),
+        "redirect_uri" => redirect_uri.to_string(),
+        "scope" => auth.scopes.join(" "),
+        "grant_type" => "authorization_code".to_string(),
+        "literal" => parameter.value.clone(),
+        _ => String::new(),
+    }
+}
+
+fn token_exchange_result(auth: &OAuthAuthorizationConfig, name: &str) -> (String, String) {
+    let configured = auth.token_exchange.as_ref()
+        .and_then(|exchange| exchange.response.as_ref())
+        .and_then(|response| match name {
+            "access_token" => response.access_token.as_ref(),
+            "token_type" => response.token_type.as_ref(),
+            _ => response.expires_in.as_ref(),
+        });
+    match configured {
+        Some(result) => (result.location.clone(), result.path.clone()),
+        None => ("body".to_string(), name.to_string()),
+    }
+}
+
+fn token_exchange_response_string(
+    auth: &OAuthAuthorizationConfig,
+    headers: &reqwest::header::HeaderMap,
+    body: &Value,
+    name: &str,
+) -> String {
+    let (location, path) = token_exchange_result(auth, name);
+    if location == "header" {
+        return headers.get(path.as_str()).and_then(|value| value.to_str().ok()).unwrap_or_default().to_string();
+    }
+    token_exchange_body_value(body, &path)
+        .and_then(|value| value.as_str().map(str::to_string).or_else(|| value.as_i64().map(|number| number.to_string())))
+        .unwrap_or_default()
+}
+
+fn token_exchange_response_u64(
+    auth: &OAuthAuthorizationConfig,
+    headers: &reqwest::header::HeaderMap,
+    body: &Value,
+    name: &str,
+) -> AppResult<u64> {
+    let raw = token_exchange_response_string(auth, headers, body, name);
+    if raw.trim().is_empty() {
+        return Ok(0);
+    }
+    raw.trim().parse::<u64>().map_err(|_| "business token response expires_in must be an integer".to_string())
+}
+
+fn token_exchange_body_value<'a>(body: &'a Value, path: &str) -> Option<&'a Value> {
+    let mut value = body;
+    for part in path.split('.') {
+        value = value.as_object()?.get(part)?;
+    }
+    Some(value)
+}
+
+fn random_state() -> AppResult<String> {
+    let mut bytes = [0u8; 32];
+    getrandom::getrandom(&mut bytes).map_err(|err| format!("generate OAuth state: {err}"))?;
+    Ok(URL_SAFE_NO_PAD.encode(bytes))
+}
+
+fn open_browser(target: &str) -> AppResult<()> {
+    let mut command = if cfg!(target_os = "macos") {
+        Command::new("open")
+    } else if cfg!(target_os = "windows") {
+        let mut command = Command::new("rundll32");
+        command.arg("url.dll,FileProtocolHandler");
+        command
+    } else {
+        Command::new("xdg-open")
+    };
+    command.arg(target).spawn().map_err(|err| format!("open browser: {err}"))?;
+    Ok(())
+}

@@ -4,7 +4,7 @@ use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -38,6 +38,8 @@ struct RuntimeAuth {
     #[serde(default)]
     scheme: String,
     #[serde(default)]
+    authorization_url: String,
+    #[serde(default)]
     token_url: String,
     #[serde(default)]
     client_id: String,
@@ -45,8 +47,46 @@ struct RuntimeAuth {
     client_auth: RuntimeClientAuth,
     #[serde(default)]
     scopes: Vec<String>,
+    token_exchange: Option<OAuthTokenExchangeConfig>,
     #[serde(default)]
     encrypted_value: String,
+}
+
+#[derive(Deserialize)]
+pub struct OAuthTokenExchangeConfig {
+    #[serde(default)]
+    pub method: String,
+    #[serde(default)]
+    pub body_format: String,
+    #[serde(default)]
+    pub parameters: Vec<OAuthTokenExchangeParameter>,
+    pub response: Option<OAuthTokenExchangeResponse>,
+}
+
+#[derive(Deserialize)]
+pub struct OAuthTokenExchangeParameter {
+    pub source: String,
+    pub name: String,
+    #[serde(rename = "in")]
+    pub location: String,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub value: String,
+}
+
+#[derive(Deserialize)]
+pub struct OAuthTokenExchangeResponse {
+    pub access_token: Option<OAuthTokenExchangeResult>,
+    pub token_type: Option<OAuthTokenExchangeResult>,
+    pub expires_in: Option<OAuthTokenExchangeResult>,
+}
+
+#[derive(Deserialize)]
+pub struct OAuthTokenExchangeResult {
+    #[serde(rename = "in")]
+    pub location: String,
+    pub path: String,
 }
 
 #[derive(Default, Deserialize)]
@@ -63,6 +103,22 @@ struct OAuthTokenResponse {
     access_token: String,
     #[serde(default)]
     token_type: String,
+    #[serde(default)]
+    expires_in: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct OAuthAuthorizationToken {
+    access_token: String,
+    expires_at: u64,
+}
+
+pub struct OAuthAuthorizationConfig {
+    pub authorization_url: String,
+    pub token_url: String,
+    pub client_id: String,
+    pub scopes: Vec<String>,
+    pub token_exchange: Option<OAuthTokenExchangeConfig>,
 }
 
 pub fn resolve_base_url(app_name: &str, fallback: &str) -> AppResult<String> {
@@ -134,8 +190,14 @@ pub async fn resolve_oauth_token(app_name: &str) -> AppResult<String> {
     let Some(auth) = config.auth else {
         return Err("missing OAuth runtime config".to_string());
     };
-    if auth.auth_type.trim() != "oauth2" || auth.grant_type.trim() != "client_credentials" {
-        return Err("runtime auth must be oauth2 client_credentials".to_string());
+    if auth.auth_type.trim() != "oauth2" {
+        return Err("runtime auth must be oauth2".to_string());
+    }
+    if auth.grant_type.trim() == "authorization_code" {
+        return load_oauth_authorization_token(app_name);
+    }
+    if auth.grant_type.trim() != "client_credentials" {
+        return Err(format!("unsupported OAuth grant_type {:?}", auth.grant_type));
     }
     if auth.client_id.trim().is_empty() || auth.token_url.trim().is_empty() {
         return Err("OAuth runtime config requires client_id and token_url".to_string());
@@ -197,6 +259,107 @@ pub async fn resolve_oauth_token(app_name: &str) -> AppResult<String> {
     Ok(token.access_token.trim().to_string())
 }
 
+pub fn load_oauth_authorization_config(app_name: &str) -> AppResult<OAuthAuthorizationConfig> {
+    let Some((config, _)) = load_runtime_file(app_name)? else {
+        return Err("missing OAuth runtime config".to_string());
+    };
+    let Some(auth) = config.auth else {
+        return Err("missing OAuth runtime config".to_string());
+    };
+    if auth.auth_type.trim() != "oauth2" || auth.grant_type.trim() != "authorization_code" {
+        return Err("runtime auth must be oauth2 authorization_code".to_string());
+    }
+    if auth.authorization_url.trim().is_empty() || auth.token_url.trim().is_empty() || auth.client_id.trim().is_empty() {
+        return Err("OAuth authorization_code requires authorization_url, token_url, and client_id".to_string());
+    }
+    Ok(OAuthAuthorizationConfig {
+        authorization_url: auth.authorization_url.trim().to_string(),
+        token_url: auth.token_url.trim().to_string(),
+        client_id: auth.client_id.trim().to_string(),
+        scopes: auth.scopes,
+        token_exchange: auth.token_exchange,
+    })
+}
+
+pub fn save_oauth_authorization_token(app_name: &str, access_token: &str, expires_in: u64) -> AppResult<()> {
+    let access_token = access_token.trim();
+    if access_token.is_empty() {
+        return Err("OAuth token response is missing access_token".to_string());
+    }
+    let lifetime = if expires_in > 0 { expires_in } else { 300 };
+    let token = OAuthAuthorizationToken {
+        access_token: access_token.to_string(),
+        expires_at: unix_seconds().saturating_add(lifetime),
+    };
+    let path = oauth_authorization_token_path(app_name)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|err| format!("create OAuth session directory: {err}"))?;
+    }
+    let payload = serde_json::to_vec(&token).map_err(|err| format!("encode OAuth session: {err}"))?;
+    fs::write(&path, payload).map_err(|err| format!("write OAuth session: {err}"))?;
+    protect_oauth_token_file(&path)?;
+    Ok(())
+}
+
+pub fn clear_oauth_authorization_token(app_name: &str) -> AppResult<()> {
+    let path = oauth_authorization_token_path(app_name)?;
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(format!("remove OAuth session: {err}")),
+    }
+}
+
+fn load_oauth_authorization_token(app_name: &str) -> AppResult<String> {
+    let path = oauth_authorization_token_path(app_name)?;
+    let raw = fs::read(&path).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            format!("login_required: run {app_name} login")
+        } else {
+            format!("read OAuth session: {err}")
+        }
+    })?;
+    let token: OAuthAuthorizationToken = serde_json::from_slice(&raw).map_err(|err| format!("decode OAuth session: {err}"))?;
+    if token.access_token.trim().is_empty() || token.expires_at <= unix_seconds() {
+        return Err(format!("login_required: run {app_name} login"));
+    }
+    Ok(token.access_token.trim().to_string())
+}
+
+fn oauth_authorization_token_path(app_name: &str) -> AppResult<PathBuf> {
+    if let Some(path) = env_value("OPENCLI_OAUTH_TOKEN_FILE") {
+        return Ok(PathBuf::from(path));
+    }
+    if let Some(root) = env_value("XDG_CONFIG_HOME") {
+        return Ok(PathBuf::from(root).join(app_name).join("oauth-token.json"));
+    }
+    if let Some(root) = env_value("APPDATA") {
+        return Ok(PathBuf::from(root).join(app_name).join("oauth-token.json"));
+    }
+    if let Some(home) = env_value("HOME").or_else(|| env_value("USERPROFILE")) {
+        return Ok(PathBuf::from(home).join(".config").join(app_name).join("oauth-token.json"));
+    }
+    Err("resolve OAuth session directory: home directory is unavailable".to_string())
+}
+
+#[cfg(unix)]
+fn protect_oauth_token_file(path: &Path) -> AppResult<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|err| format!("protect OAuth session: {err}"))
+}
+
+#[cfg(not(unix))]
+fn protect_oauth_token_file(_path: &Path) -> AppResult<()> {
+    Ok(())
+}
+
+fn unix_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 fn oauth2_aad_context(auth: &RuntimeAuth) -> String {
     [
         auth.grant_type.trim(),
@@ -239,6 +402,16 @@ fn load_runtime_file(app_name: &str) -> AppResult<Option<(RuntimeFile, PathBuf)>
 		if let Some(bin_dir) = executable.parent() {
 			if let Some(bundle_root) = bin_dir.parent() {
 				candidates.push(bundle_root.join("config").join("runtime.yaml"));
+			}
+			let profile = bin_dir.file_name().and_then(|value| value.to_str());
+			if matches!(profile, Some("debug" | "release")) {
+				if let Some(target_dir) = bin_dir.parent() {
+					if target_dir.file_name().and_then(|value| value.to_str()) == Some("target") {
+						if let Some(project_root) = target_dir.parent() {
+							candidates.push(project_root.join("config").join("runtime.yaml"));
+						}
+					}
+				}
 			}
 		}
 	}

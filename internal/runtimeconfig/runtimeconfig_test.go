@@ -229,6 +229,94 @@ auth:
 	}
 }
 
+func TestLoadAndSealOAuth2AuthorizationCodeCustomTokenExchange(t *testing.T) {
+	path := writeRuntimeSource(t, `
+base_url: https://business-api.example.com
+auth:
+  type: oauth2
+  grant_type: authorization_code
+  client_id: business-cli
+  authorization_url: https://iam.example.com/authorize
+  token_url: https://business.example.com/oidc/exchange
+  token_exchange:
+    method: POST
+    body_format: json
+    parameters:
+      - source: code
+        name: authorizationCode
+        in: body
+        required: true
+      - source: state
+        name: X-OIDC-State
+        in: header
+        required: true
+      - source: literal
+        name: channel
+        in: body
+        value: cli
+    response:
+      access_token: {in: body, path: data.gatewayToken}
+      token_type: {in: header, path: X-Token-Type}
+      expires_in: {in: body, path: data.expireSeconds}
+`)
+
+	bundle, err := LoadAndSeal(path, SealOptions{AuthMode: "oauth2"})
+	if err != nil {
+		t.Fatalf("LoadAndSeal: %v", err)
+	}
+	for _, want := range []string{
+		"token_exchange:",
+		"body_format: json",
+		"source: code",
+		"name: authorizationCode",
+		"source: state",
+		"in: header",
+		"source: literal",
+		"value: cli",
+		"path: data.gatewayToken",
+		"path: X-Token-Type",
+		"path: data.expireSeconds",
+	} {
+		if !bytes.Contains(bundle.YAML, []byte(want)) {
+			t.Fatalf("generated YAML is missing %q:\n%s", want, bundle.YAML)
+		}
+	}
+}
+
+func TestLoadAndSealRejectsInvalidCustomTokenExchange(t *testing.T) {
+	tests := []struct {
+		name     string
+		exchange string
+		want     string
+	}{
+		{name: "unsupported method", exchange: "method: GET", want: "method"},
+		{name: "missing body format", exchange: "method: POST\n    parameters:\n      - {source: code, name: code, in: body}", want: "body_format"},
+		{name: "unsupported source", exchange: "method: POST\n    parameters:\n      - {source: client_secret, name: secret, in: header}", want: "source"},
+		{name: "unsupported location", exchange: "method: POST\n    parameters:\n      - {source: code, name: code, in: path}", want: "location"},
+		{name: "literal missing value", exchange: "method: POST\n    parameters:\n      - {source: literal, name: channel, in: header}", want: "value"},
+		{name: "missing code binding", exchange: "method: POST\n    parameters:\n      - {source: state, name: state, in: header}", want: "code"},
+		{name: "invalid response location", exchange: "method: POST\n    parameters:\n      - {source: code, name: code, in: header}\n    response:\n      access_token: {in: cookie, path: token}", want: "response"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeRuntimeSource(t, `
+auth:
+  type: oauth2
+  grant_type: authorization_code
+  client_id: business-cli
+  authorization_url: https://iam.example.com/authorize
+  token_url: https://business.example.com/exchange
+  token_exchange:
+    `+tt.exchange)
+			_, err := LoadAndSeal(path, SealOptions{AuthMode: "oauth2"})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadAndSealRejectsInvalidSources(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -1,0 +1,32 @@
+---
+name: cli-auth
+version: 1.0.0
+description: "CLI login and session management for {{ .App.Name }}. Use before protected API calls, on login_required, or when the user requests logout."
+metadata:
+  requires:
+    bins: ["{{ .App.Name }}"]
+  cliHelp: "{{ .App.Name }} login --help"
+---
+
+# CLI Login and Session Management
+
+These are built-in CLI authentication commands, not operations from the business API `auth` group.
+
+## Routing Rules
+
+- Run `{{ .App.Name }} login` when a protected business command requires a session.
+- In a headless or remote terminal, run `{{ .App.Name }} login --no-browser` and give the printed authorization URL to the user.
+- On `login_required`, log in once and retry the original business command.
+- On HTTP 401, check the session and retry at most once after login; never create a login loop.
+- Run `{{ .App.Name }} logout` only when the user explicitly asks to sign out or clear the local session.
+- Do not substitute the business command `{{ .App.Name }} auth login`; that command is generated from the OpenAPI business interface.
+
+## Commands
+
+```bash
+{{ .App.Name }} login
+{{ .App.Name }} login --no-browser
+{{ .App.Name }} logout
+```
+
+CLI login opens the IAM authorization page, receives the authorization code, exchanges it with the business login endpoint for a business token, and injects that token into later protected requests. Credentials are entered only on the IAM page and are never stored in CLI configuration or this Skill.

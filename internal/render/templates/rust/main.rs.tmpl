@@ -1,6 +1,9 @@
 {{- if appUsesAKSK .App }}
 mod auth;
 {{- end }}
+{{- if and (appUsesOAuth2 .App) .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
+mod oauth_auth;
+{{- end }}
 mod cli;
 mod client;
 mod commands;

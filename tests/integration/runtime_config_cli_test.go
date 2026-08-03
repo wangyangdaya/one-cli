@@ -3,6 +3,7 @@ package integration_test
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -214,6 +215,18 @@ components:
 }
 
 func TestGeneratedGoOAuth2AuthorizationCode(t *testing.T) {
+	for _, customExchange := range []bool{false, true} {
+		name := "standard form"
+		if customExchange {
+			name = "custom JSON"
+		}
+		t.Run(name, func(t *testing.T) {
+			testGeneratedGoOAuth2AuthorizationCode(t, customExchange)
+		})
+	}
+}
+
+func testGeneratedGoOAuth2AuthorizationCode(t *testing.T, customExchange bool) {
 	const (
 		clientID    = "business-cli"
 		accessToken = "business-access-token"
@@ -234,20 +247,32 @@ func TestGeneratedGoOAuth2AuthorizationCode(t *testing.T) {
 			http.Redirect(w, r, redirectURI+"?code=iam-code&state="+url.QueryEscape(state), http.StatusFound)
 		case "/cli-auth/login":
 			loginRequests.Add(1)
-			if err := r.ParseForm(); err != nil {
-				t.Errorf("parse login form: %v", err)
-			}
-			if got := r.Form.Get("grant_type"); got != "authorization_code" {
-				t.Errorf("grant_type = %q, want authorization_code", got)
-			}
-			if got := r.Form.Get("code"); got != "iam-code" {
-				t.Errorf("code = %q, want iam-code", got)
-			}
-			if got := r.Form.Get("client_id"); got != clientID {
-				t.Errorf("login client_id = %q, want %q", got, clientID)
+			if customExchange {
+				var request struct {
+					Code  string `json:"authorizationCode"`
+					State string `json:"oidcState"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Errorf("decode custom token request: %v", err)
+				}
+				if request.Code != "iam-code" || request.State == "" {
+					t.Errorf("custom token request = %+v", request)
+				}
+			} else {
+				if err := r.ParseForm(); err != nil {
+					t.Errorf("parse login form: %v", err)
+				}
+				if r.Form.Get("grant_type") != "authorization_code" || r.Form.Get("code") != "iam-code" || r.Form.Get("client_id") != clientID {
+					t.Errorf("standard token form = %v", r.Form)
+				}
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"access_token":"` + accessToken + `","token_type":"bearer","expires_in":3600}`))
+			if customExchange {
+				w.Header().Set("X-Token-Type", "bearer")
+				_, _ = w.Write([]byte(`{"data":{"gatewayToken":"` + accessToken + `","expireSeconds":"3600"}}`))
+			} else {
+				_, _ = w.Write([]byte(`{"access_token":"` + accessToken + `","token_type":"bearer","expires_in":3600}`))
+			}
 		case "/items":
 			businessRequests.Add(1)
 			if got := r.Header.Get("Authorization"); got != "Bearer "+accessToken {
@@ -304,6 +329,19 @@ auth:
   authorization_url: %s/idp/oauth2/authorize
   token_url: %s/cli-auth/login
 `, server.URL, clientID, server.URL, server.URL)
+	if customExchange {
+		runtimeYAML += `  token_exchange:
+    method: POST
+    body_format: json
+    parameters:
+      - {source: code, name: authorizationCode, in: body, required: true}
+      - {source: state, name: oidcState, in: body, required: true}
+    response:
+      access_token: {in: body, path: data.gatewayToken}
+      token_type: {in: header, path: X-Token-Type}
+      expires_in: {in: body, path: data.expireSeconds}
+`
+	}
 	if err := os.WriteFile(runtimeSource, []byte(runtimeYAML), 0o600); err != nil {
 		t.Fatalf("write OAuth runtime source: %v", err)
 	}
@@ -321,7 +359,7 @@ auth:
 	}
 
 	tokenFile := filepath.Join(t.TempDir(), "oauth-token.json")
-	login := exec.Command("go", "run", "./cmd/oauthcli", "auth", "login", "--no-browser")
+	login := exec.Command("go", "run", "./cmd/oauthcli", "--trace", "login", "--no-browser")
 	login.Dir = dir
 	login.Env = append(runtimeTestEnv(dir),
 		"OPENCLI_CONFIG="+filepath.Join(dir, "config", "runtime.yaml"),
@@ -352,6 +390,12 @@ auth:
 	if err := login.Wait(); err != nil {
 		t.Fatalf("login failed: %v; stderr=%s", err, stderr.String())
 	}
+	if trace := stderr.String(); !strings.Contains(trace, "[opencli][oauth] token_exchange") ||
+		!strings.Contains(trace, "method: POST") || !strings.Contains(trace, "status: 200") {
+		t.Fatalf("OAuth trace is missing safe exchange metadata: %s", trace)
+	} else if strings.Contains(trace, "iam-code") || strings.Contains(trace, accessToken) {
+		t.Fatalf("OAuth trace leaked code or token: %s", trace)
+	}
 	if info, err := os.Stat(tokenFile); err != nil {
 		t.Fatalf("stat OAuth token file: %v", err)
 	} else if info.Mode().Perm() != 0o600 {
@@ -374,9 +418,42 @@ auth:
 	if loginRequests.Load() != 1 || businessRequests.Load() != 1 {
 		t.Fatalf("requests: login=%d business=%d, want 1 each", loginRequests.Load(), businessRequests.Load())
 	}
+
 }
 
-func TestOAuth2AuthorizationCodeRejectsRustTarget(t *testing.T) {
+func TestOAuth2AuthorizationCodeGeneratesRustTarget(t *testing.T) {
+	specPath := filepath.Join(t.TempDir(), "oauth-with-business-auth.yaml")
+	if err := os.WriteFile(specPath, []byte(`
+openapi: 3.0.3
+info: {title: OAuth API, version: 1.0.0}
+paths:
+  /api/login:
+    post:
+      tags: [auth]
+      operationId: businessLogin
+      security: []
+      responses:
+        "200": {description: ok}
+  /items:
+    get:
+      tags: [items]
+      operationId: listItems
+      security:
+        - userOAuth: []
+      responses:
+        "200": {description: ok}
+components:
+  securitySchemes:
+    userOAuth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://iam.example.com/idp/oauth2/authorize
+          tokenUrl: https://business.example.com/cli-auth/login
+          scopes: {}
+`), 0o600); err != nil {
+		t.Fatalf("write OAuth spec: %v", err)
+	}
 	runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
 	if err := os.WriteFile(runtimeSource, []byte(`
 base_url: https://business-api.example.com
@@ -389,17 +466,301 @@ auth:
 `), 0o600); err != nil {
 		t.Fatalf("write OAuth runtime source: %v", err)
 	}
+	dir := t.TempDir()
 	err := app.RunGenerate(app.GenerateOptions{
-		Input:             filepath.Join("..", "..", "examples", "petstore.yaml"),
-		Output:            t.TempDir(),
+		Input:             specPath,
+		Output:            dir,
 		Module:            "github.com/acme/generated",
 		AppName:           "oauthcli",
 		Auth:              "oauth2",
 		Target:            "rust",
+		SkillLang:         "zh",
 		RuntimeConfigPath: runtimeSource,
 	})
-	if err == nil || !strings.Contains(err.Error(), "authorization_code currently supports target go") {
-		t.Fatalf("error = %v, want Go-only authorization_code error", err)
+	if err != nil {
+		t.Fatalf("generate Rust authorization_code CLI: %v", err)
+	}
+	for _, rel := range []string{"src/oauth_auth.rs", "src/cli.rs", "src/runtime_config.rs", "skills/cli-auth/SKILL.md"} {
+		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
+			t.Fatalf("missing generated %s: %v", rel, err)
+		}
+	}
+	cliSource, err := os.ReadFile(filepath.Join(dir, "src", "cli.rs"))
+	if err != nil {
+		t.Fatalf("read generated Rust cli.rs: %v", err)
+	}
+	cliText := string(cliSource)
+	if !strings.Contains(cliText, `#[command(name = "login")]`) ||
+		!strings.Contains(cliText, `#[command(name = "logout")]`) ||
+		!strings.Contains(cliText, "GroupCommand::Login") ||
+		!strings.Contains(cliText, "GroupCommand::Logout") {
+		t.Fatalf("generated Rust CLI is missing built-in top-level login/logout commands:\n%s", cliSource)
+	}
+	if got := strings.Count(cliText, `#[command(name = "auth")]`); got != 1 {
+		t.Fatalf("generated Rust CLI has %d auth root commands, want only the business auth group:\n%s", got, cliSource)
+	}
+	readmeSource, err := os.ReadFile(filepath.Join(dir, "README.md"))
+	if err != nil {
+		t.Fatalf("read generated Rust README.md: %v", err)
+	}
+	for _, want := range []string{"oauthcli login", "oauthcli logout", "authorization_code"} {
+		if !strings.Contains(string(readmeSource), want) {
+			t.Fatalf("generated Rust README is missing %q:\n%s", want, readmeSource)
+		}
+	}
+	loginSkill, err := os.ReadFile(filepath.Join(dir, "skills", "cli-auth", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated cli-auth skill: %v", err)
+	}
+	for _, want := range []string{"oauthcli login", "oauthcli login --no-browser", "oauthcli logout", "login_required"} {
+		if !strings.Contains(string(loginSkill), want) {
+			t.Fatalf("generated cli-auth skill is missing %q:\n%s", want, loginSkill)
+		}
+	}
+	businessSkill, err := os.ReadFile(filepath.Join(dir, "skills", "auth", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated business auth skill: %v", err)
+	}
+	if !strings.Contains(string(businessSkill), "oauthcli login") {
+		t.Fatalf("business auth skill does not declare the CLI login prerequisite:\n%s", businessSkill)
+	}
+	routerSkill, err := os.ReadFile(filepath.Join(dir, "skills", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read generated root skill router: %v", err)
+	}
+	for _, want := range []string{"cli-auth/SKILL.md", "login_required", "不要把业务 `auth login` 当作 CLI 登录"} {
+		if !strings.Contains(string(routerSkill), want) {
+			t.Fatalf("generated root skill router is missing %q:\n%s", want, routerSkill)
+		}
+	}
+}
+
+func TestGeneratedRustOAuth2AuthorizationCode(t *testing.T) {
+	for _, customExchange := range []bool{false, true} {
+		name := "standard form"
+		if customExchange {
+			name = "custom JSON"
+		}
+		t.Run(name, func(t *testing.T) {
+			testGeneratedRustOAuth2AuthorizationCode(t, customExchange)
+		})
+	}
+}
+
+func testGeneratedRustOAuth2AuthorizationCode(t *testing.T, customExchange bool) {
+	if _, err := exec.LookPath("cargo"); err != nil {
+		t.Skip("cargo not installed")
+	}
+	const (
+		clientID    = "business-cli"
+		accessToken = "rust-business-access-token"
+	)
+	var loginRequests atomic.Int32
+	var businessRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/idp/oauth2/authorize":
+			if got := r.URL.Query().Get("client_id"); got != clientID {
+				t.Errorf("authorize client_id = %q, want %q", got, clientID)
+			}
+			if got := r.URL.Query().Get("response_type"); got != "code" {
+				t.Errorf("response_type = %q, want code", got)
+			}
+			redirectURI := r.URL.Query().Get("redirect_uri")
+			state := r.URL.Query().Get("state")
+			http.Redirect(w, r, redirectURI+"?code=iam-code&state="+url.QueryEscape(state), http.StatusFound)
+		case "/cli-auth/login":
+			loginRequests.Add(1)
+			if customExchange {
+				var request struct {
+					Code  string `json:"authorizationCode"`
+					State string `json:"oidcState"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Errorf("decode custom token request: %v", err)
+				}
+				if request.Code != "iam-code" || request.State == "" {
+					t.Errorf("custom token request = %+v", request)
+				}
+			} else {
+				if err := r.ParseForm(); err != nil {
+					t.Errorf("parse login form: %v", err)
+				}
+				if got := r.Form.Get("grant_type"); got != "authorization_code" {
+					t.Errorf("grant_type = %q, want authorization_code", got)
+				}
+				if got := r.Form.Get("code"); got != "iam-code" {
+					t.Errorf("code = %q, want iam-code", got)
+				}
+				if got := r.Form.Get("client_id"); got != clientID {
+					t.Errorf("login client_id = %q, want %q", got, clientID)
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if customExchange {
+				w.Header().Set("X-Token-Type", "bearer")
+				_, _ = w.Write([]byte(`{"data":{"gatewayToken":"` + accessToken + `","expireSeconds":"3600"}}`))
+			} else {
+				_, _ = w.Write([]byte(`{"access_token":"` + accessToken + `","token_type":"bearer","expires_in":3600}`))
+			}
+		case "/items":
+			businessRequests.Add(1)
+			if got := r.Header.Get("Authorization"); got != "Bearer "+accessToken {
+				t.Errorf("business Authorization = %q, want Bearer token", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"message":"ok"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	specPath := filepath.Join(t.TempDir(), "oauth.yaml")
+	spec := fmt.Sprintf(`
+openapi: 3.0.3
+info: {title: OAuth API, version: 1.0.0}
+paths:
+  /cli-auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      security: []
+      responses:
+        "200": {description: ok}
+  /items:
+    get:
+      tags: [items]
+      operationId: listItems
+      security:
+        - userOAuth: []
+      responses:
+        "200": {description: ok}
+components:
+  securitySchemes:
+    userOAuth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: %s/idp/oauth2/authorize
+          tokenUrl: %s/cli-auth/login
+          scopes: {}
+`, server.URL, server.URL)
+	if err := os.WriteFile(specPath, []byte(spec), 0o600); err != nil {
+		t.Fatalf("write OAuth spec: %v", err)
+	}
+	runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
+	runtimeYAML := fmt.Sprintf(`
+base_url: %s
+auth:
+  type: oauth2
+  grant_type: authorization_code
+  client_id: %s
+  authorization_url: %s/idp/oauth2/authorize
+  token_url: %s/cli-auth/login
+`, server.URL, clientID, server.URL, server.URL)
+	if customExchange {
+		runtimeYAML += `  token_exchange:
+    method: POST
+    body_format: json
+    parameters:
+      - {source: code, name: authorizationCode, in: body, required: true}
+      - {source: state, name: oidcState, in: body, required: true}
+    response:
+      access_token: {in: body, path: data.gatewayToken}
+      token_type: {in: header, path: X-Token-Type}
+      expires_in: {in: body, path: data.expireSeconds}
+`
+	}
+	if err := os.WriteFile(runtimeSource, []byte(runtimeYAML), 0o600); err != nil {
+		t.Fatalf("write OAuth runtime source: %v", err)
+	}
+	dir := t.TempDir()
+	if err := app.RunGenerate(app.GenerateOptions{
+		Input:             specPath,
+		Output:            dir,
+		Module:            "oauthcli",
+		AppName:           "oauthcli",
+		Auth:              "oauth2",
+		Target:            "rust",
+		RuntimeConfigPath: runtimeSource,
+	}); err != nil {
+		t.Fatalf("generate Rust OAuth CLI: %v", err)
+	}
+
+	tokenFile := filepath.Join(t.TempDir(), "oauth-token.json")
+	login := exec.Command("cargo", "run", "--quiet", "--", "--trace", "login", "--no-browser")
+	login.Dir = dir
+	login.Env = append(runtimeTestEnv(dir),
+		"OPENCLI_OAUTH_TOKEN_FILE="+tokenFile,
+	)
+	stdout, err := login.StdoutPipe()
+	if err != nil {
+		t.Fatalf("login stdout: %v", err)
+	}
+	var stderr bytes.Buffer
+	login.Stderr = &stderr
+	if err := login.Start(); err != nil {
+		t.Fatalf("start login: %v", err)
+	}
+	reader := bufio.NewReader(stdout)
+	authorizeURL, readErr := reader.ReadString('\n')
+	if readErr != nil {
+		_ = login.Wait()
+		output := stderr.String()
+		if strings.Contains(output, "Could not resolve host") || strings.Contains(output, "failed to download from") {
+			t.Skipf("cargo run skipped due to dependency network restriction:\n%s", output)
+		}
+		t.Fatalf("read authorize URL: %v; stderr=%s", readErr, output)
+	}
+	authorizeURL = strings.TrimSpace(authorizeURL)
+	browserResponse, err := http.Get(authorizeURL)
+	if err != nil {
+		_ = login.Process.Kill()
+		t.Fatalf("complete browser login: %v", err)
+	}
+	_ = browserResponse.Body.Close()
+	if err := login.Wait(); err != nil {
+		t.Fatalf("login failed: %v; stderr=%s", err, stderr.String())
+	}
+	if trace := stderr.String(); !strings.Contains(trace, "[opencli][oauth] token_exchange") ||
+		!strings.Contains(trace, "method: POST") || !strings.Contains(trace, "status: 200") {
+		t.Fatalf("Rust OAuth trace is missing safe exchange metadata: %s", trace)
+	} else if strings.Contains(trace, "iam-code") || strings.Contains(trace, accessToken) {
+		t.Fatalf("Rust OAuth trace leaked code or token: %s", trace)
+	}
+	if info, err := os.Stat(tokenFile); err != nil {
+		t.Fatalf("stat OAuth token file: %v", err)
+	} else if info.Mode().Perm() != 0o600 {
+		t.Fatalf("OAuth token file mode = %o, want 600", info.Mode().Perm())
+	}
+
+	call := exec.Command("cargo", "run", "--quiet", "--", "items", "list")
+	call.Dir = dir
+	call.Env = append(runtimeTestEnv(dir),
+		"OPENCLI_OAUTH_TOKEN_FILE="+tokenFile,
+	)
+	out, err := call.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run generated Rust OAuth CLI: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "ok") {
+		t.Fatalf("generated Rust OAuth CLI output = %s", out)
+	}
+	if loginRequests.Load() != 1 || businessRequests.Load() != 1 {
+		t.Fatalf("requests: login=%d business=%d, want 1 each", loginRequests.Load(), businessRequests.Load())
+	}
+
+	logout := exec.Command("cargo", "run", "--quiet", "--", "logout")
+	logout.Dir = dir
+	logout.Env = append(runtimeTestEnv(dir),
+		"OPENCLI_OAUTH_TOKEN_FILE="+tokenFile,
+	)
+	if out, err := logout.CombinedOutput(); err != nil {
+		t.Fatalf("logout generated Rust OAuth CLI: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(tokenFile); !os.IsNotExist(err) {
+		t.Fatalf("OAuth token file still exists after logout: %v", err)
 	}
 }
 
@@ -651,7 +1012,7 @@ func runtimeTestEnv(dir string) []string {
 	for _, value := range os.Environ() {
 		name, _, _ := strings.Cut(value, "=")
 		switch name {
-		case "OPENCLI_BASE_URL", "OPENCLI_AUTH_TOKEN", "OPENCLI_API_KEY", "OPENCLI_OAUTH_CLIENT_SECRET", "OPENCLI_CONFIG":
+		case "OPENCLI_BASE_URL", "OPENCLI_AUTH_TOKEN", "OPENCLI_API_KEY", "OPENCLI_OAUTH_CLIENT_SECRET", "OPENCLI_OAUTH_TOKEN_FILE", "OPENCLI_CONFIG":
 			continue
 		}
 		env = append(env, value)

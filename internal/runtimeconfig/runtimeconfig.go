@@ -59,6 +59,33 @@ type sourceAuth struct {
 	ClientID         string           `yaml:"client_id,omitempty"`
 	ClientAuth       sourceClientAuth `yaml:"client_auth,omitempty"`
 	Scopes           []string         `yaml:"scopes,omitempty"`
+	TokenExchange    *tokenExchange   `yaml:"token_exchange,omitempty"`
+}
+
+type tokenExchange struct {
+	Method     string                   `yaml:"method,omitempty"`
+	BodyFormat string                   `yaml:"body_format,omitempty"`
+	Parameters []tokenExchangeParameter `yaml:"parameters,omitempty"`
+	Response   *tokenExchangeResponse   `yaml:"response,omitempty"`
+}
+
+type tokenExchangeParameter struct {
+	Source   string `yaml:"source"`
+	Name     string `yaml:"name"`
+	In       string `yaml:"in"`
+	Required bool   `yaml:"required,omitempty"`
+	Value    string `yaml:"value,omitempty"`
+}
+
+type tokenExchangeResponse struct {
+	AccessToken *tokenExchangeResult `yaml:"access_token,omitempty"`
+	TokenType   *tokenExchangeResult `yaml:"token_type,omitempty"`
+	ExpiresIn   *tokenExchangeResult `yaml:"expires_in,omitempty"`
+}
+
+type tokenExchangeResult struct {
+	In   string `yaml:"in"`
+	Path string `yaml:"path"`
 }
 
 type sourceClientAuth struct {
@@ -82,6 +109,7 @@ type sealedAuth struct {
 	ClientID         string           `yaml:"client_id,omitempty"`
 	ClientAuth       sourceClientAuth `yaml:"client_auth,omitempty"`
 	Scopes           []string         `yaml:"scopes,omitempty"`
+	TokenExchange    *tokenExchange   `yaml:"token_exchange,omitempty"`
 	EncryptedValue   string           `yaml:"encrypted_value,omitempty"`
 }
 
@@ -224,6 +252,9 @@ func validateSource(source sourceConfig, authMode string) error {
 			return fmt.Errorf("api_key auth requires header")
 		}
 	case "oauth2":
+		if source.Auth.TokenExchange != nil && strings.TrimSpace(source.Auth.GrantType) != "authorization_code" {
+			return fmt.Errorf("oauth2 token_exchange is only supported for authorization_code")
+		}
 		switch strings.TrimSpace(source.Auth.GrantType) {
 		case "authorization_code":
 			if strings.TrimSpace(source.Auth.AuthorizationURL) == "" {
@@ -237,6 +268,9 @@ func validateSource(source sourceConfig, authMode string) error {
 			}
 			if strings.TrimSpace(source.Auth.ClientAuth.Method) != "" || strings.TrimSpace(source.Auth.ClientAuth.Placement) != "" {
 				return fmt.Errorf("oauth2 authorization_code must not define client_auth")
+			}
+			if err := validateTokenExchange(source.Auth.TokenExchange); err != nil {
+				return err
 			}
 			return nil
 		case "client_credentials":
@@ -259,6 +293,85 @@ func validateSource(source sourceConfig, authMode string) error {
 		}
 	default:
 		return fmt.Errorf("unsupported runtime auth type %q", authType)
+	}
+	return nil
+}
+
+func validateTokenExchange(exchange *tokenExchange) error {
+	if exchange == nil {
+		return nil
+	}
+	method := strings.ToUpper(strings.TrimSpace(exchange.Method))
+	if method == "" {
+		method = "POST"
+	}
+	switch method {
+	case "POST", "PUT", "PATCH":
+	default:
+		return fmt.Errorf("oauth2 token_exchange method must be POST, PUT, or PATCH")
+	}
+	bodyFormat := strings.ToLower(strings.TrimSpace(exchange.BodyFormat))
+	if bodyFormat != "" && bodyFormat != "form" && bodyFormat != "json" {
+		return fmt.Errorf("oauth2 token_exchange body_format must be form or json")
+	}
+	hasBody := false
+	hasCode := false
+	for i, parameter := range exchange.Parameters {
+		source := strings.ToLower(strings.TrimSpace(parameter.Source))
+		name := strings.TrimSpace(parameter.Name)
+		location := strings.ToLower(strings.TrimSpace(parameter.In))
+		if name == "" {
+			return fmt.Errorf("oauth2 token_exchange parameter %d requires name", i+1)
+		}
+		switch source {
+		case "code":
+			hasCode = true
+		case "state", "client_id", "redirect_uri", "scope", "grant_type":
+		case "literal":
+			if strings.TrimSpace(parameter.Value) == "" {
+				return fmt.Errorf("oauth2 token_exchange literal parameter %q requires value", name)
+			}
+		default:
+			return fmt.Errorf("oauth2 token_exchange parameter %q has unsupported source %q", name, parameter.Source)
+		}
+		switch location {
+		case "body":
+			hasBody = true
+		case "query", "header", "cookie":
+		default:
+			return fmt.Errorf("oauth2 token_exchange parameter %q has unsupported location %q", name, parameter.In)
+		}
+	}
+	if !hasCode {
+		return fmt.Errorf("oauth2 token_exchange requires one code parameter")
+	}
+	if hasBody && bodyFormat == "" {
+		return fmt.Errorf("oauth2 token_exchange body_format is required for body parameters")
+	}
+	if exchange.Response != nil {
+		for name, result := range map[string]*tokenExchangeResult{
+			"access_token": exchange.Response.AccessToken,
+			"token_type":   exchange.Response.TokenType,
+			"expires_in":   exchange.Response.ExpiresIn,
+		} {
+			if err := validateTokenExchangeResult(name, result); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateTokenExchangeResult(name string, result *tokenExchangeResult) error {
+	if result == nil {
+		return nil
+	}
+	location := strings.ToLower(strings.TrimSpace(result.In))
+	if location != "body" && location != "header" {
+		return fmt.Errorf("oauth2 token_exchange response %s location must be body or header", name)
+	}
+	if strings.TrimSpace(result.Path) == "" {
+		return fmt.Errorf("oauth2 token_exchange response %s requires path", name)
 	}
 	return nil
 }
@@ -303,8 +416,33 @@ func sealedAuthFromSource(auth sourceAuth) *sealedAuth {
 			Method:    strings.TrimSpace(auth.ClientAuth.Method),
 			Placement: strings.TrimSpace(auth.ClientAuth.Placement),
 		},
-		Scopes: append([]string(nil), auth.Scopes...),
+		Scopes:        append([]string(nil), auth.Scopes...),
+		TokenExchange: normalizeTokenExchange(auth.TokenExchange),
 	}
+}
+
+func normalizeTokenExchange(exchange *tokenExchange) *tokenExchange {
+	if exchange == nil {
+		return nil
+	}
+	result := &tokenExchange{
+		Method:     strings.ToUpper(strings.TrimSpace(exchange.Method)),
+		BodyFormat: strings.ToLower(strings.TrimSpace(exchange.BodyFormat)),
+		Response:   exchange.Response,
+	}
+	if result.Method == "" {
+		result.Method = "POST"
+	}
+	for _, parameter := range exchange.Parameters {
+		result.Parameters = append(result.Parameters, tokenExchangeParameter{
+			Source:   strings.ToLower(strings.TrimSpace(parameter.Source)),
+			Name:     strings.TrimSpace(parameter.Name),
+			In:       strings.ToLower(strings.TrimSpace(parameter.In)),
+			Required: parameter.Required,
+			Value:    parameter.Value,
+		})
+	}
+	return result
 }
 
 func oauth2AADContext(auth sourceAuth) string {

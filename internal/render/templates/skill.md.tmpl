@@ -76,7 +76,7 @@ This is a generated OpenCLI skill package. It contains API-derived facts and man
 {{- else if appUsesOAuth2 .App }}
 {{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
 - OAuth 2.0 Authorization Code is used for protected operations
-- Run `{{ .App.Name }} auth login` before invoking protected business commands
+- Run `{{ .App.Name }} login` before invoking protected business commands
 - The CLI stores and injects the business access token; IAM credentials are not configured in the CLI
 {{- else }}
 - OAuth 2.0 Client Credentials is handled automatically for protected operations

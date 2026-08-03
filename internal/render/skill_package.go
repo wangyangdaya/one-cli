@@ -19,3 +19,15 @@ func skillPackageFiles(groupDir string, data templateData) []generatedFile {
 		{Path: filepath.Join(base, "generation-report.md"), Template: prefix + "/generation-report.md.tmpl", Data: data},
 	}
 }
+
+func oauthLoginSkillFile(data templateData) generatedFile {
+	template := "oauth_login_skill.md.tmpl"
+	if data.SkillLang == "zh" {
+		template = "oauth_login_skill_zh.md.tmpl"
+	}
+	return generatedFile{
+		Path:     filepath.Join("skills", "cli-auth", "SKILL.md"),
+		Template: template,
+		Data:     data,
+	}
+}

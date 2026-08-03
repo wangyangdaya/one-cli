@@ -21,14 +21,16 @@ func writeGoProject(outputDir, module string, app model.App, skillLang string, r
 		{Path: filepath.Join("bin", app.Name+".cmd"), Template: "go/bin_launcher.cmd.tmpl", Data: data, Mode: 0o644},
 		{Path: filepath.Join("internal", "config", "runtime_config.go"), Template: "go/runtime_config.go.tmpl", Data: runtimeData},
 	}
-	if len(app.Groups) > 1 {
+	hasOAuthLoginSkill := appUsesOAuth2(app) && runtimeBundle != nil && runtimeBundle.OAuth2GrantType == "authorization_code"
+	if len(app.Groups) > 1 || (len(app.Groups) > 0 && hasOAuthLoginSkill) {
 		files = append(files, generatedFile{Path: filepath.Join("skills", "SKILL.md"), Template: skillRouterTemplate(skillLang), Data: data})
 	}
 	if appUsesAKSK(app) {
 		files = append(files, generatedFile{Path: filepath.Join("internal", "auth", "aksk.go"), Template: "go/auth_aksk.go.tmpl", Data: data})
 	}
-	if appUsesOAuth2(app) && runtimeBundle != nil && runtimeBundle.OAuth2GrantType == "authorization_code" {
+	if hasOAuthLoginSkill {
 		files = append(files, generatedFile{Path: filepath.Join("internal", "auth", "oauth2.go"), Template: "go/auth_oauth2.go.tmpl", Data: data})
+		files = append(files, oauthLoginSkillFile(data))
 	}
 	for _, group := range app.Groups {
 		groupData := data
