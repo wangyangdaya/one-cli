@@ -232,11 +232,11 @@ func withoutOAuthTokenOperation(doc openapi.Document, tokenURL string) openapi.D
 
 func matchesOAuthTokenOperation(operation openapi.Operation, tokenURL string) bool {
 	parsedTokenURL, err := url.Parse(strings.TrimSpace(tokenURL))
-	if err != nil || strings.TrimSpace(parsedTokenURL.Path) == "" || !strings.EqualFold(operation.Method, "POST") || operation.Path != parsedTokenURL.Path {
+	if err != nil || strings.TrimSpace(parsedTokenURL.Path) == "" || !strings.EqualFold(operation.Method, "POST") {
 		return false
 	}
 	if !parsedTokenURL.IsAbs() || strings.TrimSpace(parsedTokenURL.Host) == "" {
-		return true
+		return operation.Path == parsedTokenURL.Path
 	}
 
 	hasAbsoluteServer := false
@@ -246,11 +246,14 @@ func matchesOAuthTokenOperation(operation openapi.Operation, tokenURL string) bo
 			continue
 		}
 		hasAbsoluteServer = true
-		if strings.EqualFold(server.Scheme, parsedTokenURL.Scheme) && strings.EqualFold(server.Host, parsedTokenURL.Host) {
+		operationPath := strings.TrimRight(server.Path, "/") + "/" + strings.TrimLeft(operation.Path, "/")
+		if strings.EqualFold(server.Scheme, parsedTokenURL.Scheme) &&
+			strings.EqualFold(server.Host, parsedTokenURL.Host) &&
+			operationPath == parsedTokenURL.Path {
 			return true
 		}
 	}
-	return !hasAbsoluteServer
+	return !hasAbsoluteServer && operation.Path == parsedTokenURL.Path
 }
 
 func oauth2Defaults(doc openapi.Document) runtimeconfig.OAuth2Defaults {

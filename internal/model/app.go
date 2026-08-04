@@ -88,6 +88,7 @@ type Group struct {
 type Operation struct {
 	Method           string
 	Path             string
+	Servers          []string
 	CommandName      string
 	RemoteName       string
 	Summary          string

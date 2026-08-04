@@ -965,6 +965,65 @@ components:
 	}
 }
 
+func TestGenerateCommandMatchesOAuthTokenOperationWithServerPathPrefix(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(t.TempDir(), "oauth.yaml")
+	spec := `
+openapi: 3.0.3
+info: {title: OAuth Server Path, version: 1.0.0}
+servers:
+  - url: https://api.example.com/v1
+paths:
+  /oauth/token:
+    post:
+      tags: [oauth]
+      operationId: getToken
+      security: []
+      parameters:
+        - {name: client_id, in: query, required: true, schema: {type: string}}
+        - {name: client_secret, in: query, required: true, schema: {type: string}}
+      responses:
+        "200": {description: ok}
+components:
+  securitySchemes:
+    serviceOAuth:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://api.example.com/v1/oauth/token
+          scopes: {}
+`
+	if err := os.WriteFile(specPath, []byte(spec), 0o600); err != nil {
+		t.Fatalf("write OpenAPI spec: %v", err)
+	}
+	runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
+	if err := os.WriteFile(runtimeSource, []byte("base_url: https://api.example.com/v1\nauth:\n  type: oauth2\n  client_id: example-opencli\n"), 0o600); err != nil {
+		t.Fatalf("write runtime source: %v", err)
+	}
+	t.Setenv("OPENCLI_OAUTH_CLIENT_SECRET", "command-test-oauth-secret")
+
+	if err := app.RunGenerate(app.GenerateOptions{
+		Input:             specPath,
+		Output:            dir,
+		Module:            "github.com/acme/generated",
+		AppName:           "oauth-prefix",
+		Auth:              "oauth2",
+		RuntimeConfigPath: runtimeSource,
+	}); err != nil {
+		t.Fatalf("generate OAuth CLI: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "internal", "oauth")); !os.IsNotExist(err) {
+		t.Fatalf("OAuth token operation with a server path prefix was exposed: %v", err)
+	}
+	runtimeConfig, err := os.ReadFile(filepath.Join(dir, "config", "runtime.yaml"))
+	if err != nil {
+		t.Fatalf("read generated runtime config: %v", err)
+	}
+	if !bytes.Contains(runtimeConfig, []byte("placement: query")) {
+		t.Fatalf("OAuth token operation with a server path prefix did not drive placement inference:\n%s", runtimeConfig)
+	}
+}
+
 func TestGenerateCommandAPIKeyRequiresRuntimeConfig(t *testing.T) {
 	err := app.RunGenerate(app.GenerateOptions{
 		Input:   filepath.Join("..", "..", "examples", "petstore.yaml"),

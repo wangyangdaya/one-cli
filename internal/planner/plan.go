@@ -45,6 +45,7 @@ func Build(doc openapi.Document, cfg configgen.Config) Plan {
 		plannedOp := model.Operation{
 			Method:           strings.ToUpper(strings.TrimSpace(op.Method)),
 			Path:             strings.TrimSpace(op.Path),
+			Servers:          append([]string(nil), op.Servers...),
 			CommandName:      commandName,
 			RemoteName:       strings.TrimSpace(op.OperationID),
 			Summary:          strings.TrimSpace(op.Summary),
