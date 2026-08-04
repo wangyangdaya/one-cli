@@ -311,6 +311,7 @@ var reservedGroupNames = map[string]string{
 	"config":     "config-api",
 	"login":      "login-api",
 	"logout":     "logout-api",
+	"status":     "status-api",
 }
 
 func reserveGroupName(name string) (string, string) {

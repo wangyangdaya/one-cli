@@ -635,15 +635,16 @@ func TestBuildRenamesReservedGroupName(t *testing.T) {
 			{Method: "GET", Path: "/config", Tag: "config", OperationID: "getConfig"},
 			{Method: "POST", Path: "/login", Tag: "login", OperationID: "businessLogin"},
 			{Method: "POST", Path: "/logout", Tag: "logout", OperationID: "businessLogout"},
+			{Method: "GET", Path: "/status", Tag: "status", OperationID: "businessStatus"},
 			{Method: "GET", Path: "/orders", Tag: "orders", OperationID: "listOrders"},
 		},
 	}
 
 	plan := planner.Build(doc, configgen.Config{})
-	if len(plan.Groups) != 5 {
-		t.Fatalf("groups = %d want 5", len(plan.Groups))
+	if len(plan.Groups) != 6 {
+		t.Fatalf("groups = %d want 6", len(plan.Groups))
 	}
-	var skillsGroup, configGroup, loginGroup, logoutGroup model.Group
+	var skillsGroup, configGroup, loginGroup, logoutGroup, statusGroup model.Group
 	for _, g := range plan.Groups {
 		switch g.RenamedFrom {
 		case "skills":
@@ -654,6 +655,8 @@ func TestBuildRenamesReservedGroupName(t *testing.T) {
 			loginGroup = g
 		case "logout":
 			logoutGroup = g
+		case "status":
+			statusGroup = g
 		}
 	}
 	if skillsGroup.Name != "skills-api" {
@@ -673,5 +676,8 @@ func TestBuildRenamesReservedGroupName(t *testing.T) {
 	}
 	if logoutGroup.Name != "logout-api" || logoutGroup.PackageName != "logout_api" {
 		t.Fatalf("logout group = %+v want logout-api/logout_api", logoutGroup)
+	}
+	if statusGroup.Name != "status-api" || statusGroup.PackageName != "status_api" {
+		t.Fatalf("status group = %+v want status-api/status_api", statusGroup)
 	}
 }
