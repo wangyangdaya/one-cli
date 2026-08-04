@@ -287,6 +287,7 @@ func exchangeAuthorizationCode(auth config.OAuthAuthorizationConfig, code, state
 			requestHeaders.Set("Content-Type", "application/x-www-form-urlencoded")
 		}
 	}
+	requestHeaders.Set("Accept", "application/json")
 	req, err := http.NewRequest(method, endpoint.String(), body)
 	if err != nil {
 		return config.OAuthTokenResponse{}, fmt.Errorf("build OAuth token request: %w", err)
@@ -346,7 +347,10 @@ func exchangeAuthorizationCode(auth config.OAuthAuthorizationConfig, code, state
 	if accessToken == "" {
 		return config.OAuthTokenResponse{}, fmt.Errorf("business token response is missing access_token")
 	}
-	if tokenType != "" && !strings.EqualFold(tokenType, "bearer") {
+	if tokenType == "" {
+		return config.OAuthTokenResponse{}, fmt.Errorf("business token response is missing token_type")
+	}
+	if !strings.EqualFold(tokenType, "bearer") {
 		return config.OAuthTokenResponse{}, fmt.Errorf("unsupported business token_type %q", tokenType)
 	}
 	return config.OAuthTokenResponse{

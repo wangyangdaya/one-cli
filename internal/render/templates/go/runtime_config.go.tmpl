@@ -198,12 +198,12 @@ func ResolveOAuthToken(appName string) (string, error) {
 			oauthTokenCache.Unlock()
 			return stored.AccessToken, nil
 		case "needs_refresh":
-			response, err := requestOAuthRefreshToken(*auth, stored.RefreshToken)
+			response, err := requestOAuthRefreshToken(appName, *auth, stored.RefreshToken)
 			if err != nil {
-				return "", fmt.Errorf("refresh OAuth session: %w; run %s login", err, appName)
+				return "", err
 			}
 			if err := SaveOAuthAuthorizationToken(appName, response); err != nil {
-				return "", err
+				return "", fmt.Errorf("refresh_failed: %w", err)
 			}
 			return strings.TrimSpace(response.AccessToken), nil
 		default:
@@ -356,7 +356,7 @@ func SaveOAuthAuthorizationToken(appName string, response OAuthTokenResponse) er
 		return fmt.Errorf("OAuth token response is missing access_token")
 	}
 	if response.TokenType == "" {
-		response.TokenType = "Bearer"
+		return fmt.Errorf("OAuth token response is missing token_type")
 	}
 	if !strings.EqualFold(response.TokenType, "Bearer") {
 		return fmt.Errorf("unsupported OAuth token_type %q", response.TokenType)
@@ -494,7 +494,7 @@ type oauthTokenEndpointResponse struct {
 	RefreshTokenExpiresIn int64  `json:"refresh_token_expires_in"`
 }
 
-func requestOAuthRefreshToken(auth runtimeAuth, refreshToken string) (OAuthTokenResponse, error) {
+func requestOAuthRefreshToken(appName string, auth runtimeAuth, refreshToken string) (OAuthTokenResponse, error) {
 	endpoint, err := url.Parse(strings.TrimSpace(auth.TokenURL))
 	if err != nil || endpoint.Scheme == "" || endpoint.Host == "" {
 		return OAuthTokenResponse{}, fmt.Errorf("invalid OAuth token_url")
@@ -509,14 +509,18 @@ func requestOAuthRefreshToken(auth runtimeAuth, refreshToken string) (OAuthToken
 		return OAuthTokenResponse{}, fmt.Errorf("build OAuth refresh request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
 	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	if err != nil {
-		return OAuthTokenResponse{}, fmt.Errorf("request OAuth token endpoint: %w", err)
+		return OAuthTokenResponse{}, fmt.Errorf("refresh_failed: request OAuth token endpoint: %w", err)
 	}
 	defer resp.Body.Close()
 	var body oauthTokenEndpointResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
-		return OAuthTokenResponse{}, fmt.Errorf("decode OAuth refresh response: %w", err)
+		return OAuthTokenResponse{}, fmt.Errorf("refresh_failed: decode OAuth refresh response: %w", err)
+	}
+	if strings.EqualFold(strings.TrimSpace(body.Error), "invalid_grant") {
+		return OAuthTokenResponse{}, fmt.Errorf("login_required: run %s login", appName)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices || body.Code != 0 || body.Error != "" {
 		description := strings.TrimSpace(body.ErrorDescription)
@@ -526,10 +530,13 @@ func requestOAuthRefreshToken(auth runtimeAuth, refreshToken string) (OAuthToken
 		if description == "" {
 			description = resp.Status
 		}
-		return OAuthTokenResponse{}, fmt.Errorf("token endpoint rejected refresh: %s", description)
+		return OAuthTokenResponse{}, fmt.Errorf("refresh_failed: token endpoint rejected refresh: %s", description)
 	}
 	if strings.TrimSpace(body.AccessToken) == "" || strings.TrimSpace(body.RefreshToken) == "" {
-		return OAuthTokenResponse{}, fmt.Errorf("token endpoint response is missing rotated tokens")
+		return OAuthTokenResponse{}, fmt.Errorf("refresh_failed: token endpoint response is missing rotated tokens")
+	}
+	if strings.TrimSpace(body.TokenType) == "" {
+		return OAuthTokenResponse{}, fmt.Errorf("refresh_failed: OAuth token response is missing token_type")
 	}
 	return OAuthTokenResponse{
 		AccessToken:           body.AccessToken,

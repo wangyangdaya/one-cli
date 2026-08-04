@@ -222,6 +222,80 @@ func TestRenderedOAuth2LoginIncludesOptionalPKCEAndOIDC(t *testing.T) {
 	}
 }
 
+func TestRenderedOAuth2TokenRequestsAcceptJSON(t *testing.T) {
+	for _, target := range []string{"go", "rust"} {
+		t.Run(target, func(t *testing.T) {
+			auth, runtime := renderOAuthAuthorizationCodeSources(t, target)
+			loginAccept := `requestHeaders.Set("Accept", "application/json")`
+			refreshAccept := `req.Header.Set("Accept", "application/json")`
+			if target == "rust" {
+				loginAccept = `request = request.header("Accept", "application/json")`
+				refreshAccept = `.header("Accept", "application/json")`
+			}
+			if !strings.Contains(auth, loginAccept) {
+				t.Errorf("generated %s login token request does not accept JSON", target)
+			}
+			if !strings.Contains(runtime, refreshAccept) {
+				t.Errorf("generated %s refresh token request does not accept JSON", target)
+			}
+		})
+	}
+}
+
+func TestRenderedOAuth2RefreshClassifiesFailures(t *testing.T) {
+	for _, target := range []string{"go", "rust"} {
+		t.Run(target, func(t *testing.T) {
+			_, runtime := renderOAuthAuthorizationCodeSources(t, target)
+			for _, want := range []string{"invalid_grant", "login_required: run", "refresh_failed:"} {
+				if !strings.Contains(runtime, want) {
+					t.Errorf("generated %s OAuth refresh flow missing %q", target, want)
+				}
+			}
+		})
+	}
+}
+
+func TestRenderedOAuth2RequiresTokenType(t *testing.T) {
+	for _, target := range []string{"go", "rust"} {
+		t.Run(target, func(t *testing.T) {
+			auth, runtime := renderOAuthAuthorizationCodeSources(t, target)
+			if !strings.Contains(auth, "business token response is missing token_type") {
+				t.Errorf("generated %s OAuth login accepts a response without token_type", target)
+			}
+			if !strings.Contains(runtime, "OAuth token response is missing token_type") {
+				t.Errorf("generated %s OAuth runtime accepts a response without token_type", target)
+			}
+		})
+	}
+}
+
+func renderOAuthAuthorizationCodeSources(t *testing.T, target string) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	app := model.App{Name: "businesscli", Auth: model.Auth{Type: model.AuthTypeOAuth2}}
+	if err := render.ProjectWithOptions(dir, "github.com/acme/businesscli", app, render.ProjectOptions{
+		Target:        target,
+		RuntimeBundle: &runtimeconfig.Bundle{OAuth2GrantType: "authorization_code"},
+	}); err != nil {
+		t.Fatalf("render %s: %v", target, err)
+	}
+	authPath := filepath.Join(dir, "src", "oauth_auth.rs")
+	runtimePath := filepath.Join(dir, "src", "runtime_config.rs")
+	if target == "go" {
+		authPath = filepath.Join(dir, "internal", "auth", "oauth2.go")
+		runtimePath = filepath.Join(dir, "internal", "config", "runtime_config.go")
+	}
+	auth, err := os.ReadFile(authPath)
+	if err != nil {
+		t.Fatalf("read generated %s OAuth login: %v", target, err)
+	}
+	runtime, err := os.ReadFile(runtimePath)
+	if err != nil {
+		t.Fatalf("read generated %s OAuth runtime: %v", target, err)
+	}
+	return string(auth), string(runtime)
+}
+
 func TestRenderedOAuth2RuntimeValidatesSecuritySensitiveURLs(t *testing.T) {
 	app := model.App{Name: "businesscli", Auth: model.Auth{Type: model.AuthTypeOAuth2}}
 	for _, target := range []string{"go", "rust"} {

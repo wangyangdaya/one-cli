@@ -272,7 +272,10 @@ async fn exchange_authorization_code(auth: &OAuthAuthorizationConfig, code: &str
     if token.access_token.trim().is_empty() {
         return Err("business token response is missing access_token".to_string());
     }
-    if !token.token_type.trim().is_empty() && !token.token_type.eq_ignore_ascii_case("bearer") {
+    if token.token_type.trim().is_empty() {
+        return Err("business token response is missing token_type".to_string());
+    }
+    if !token.token_type.eq_ignore_ascii_case("bearer") {
         return Err(format!("unsupported business token_type {:?}", token.token_type));
     }
     Ok(token)

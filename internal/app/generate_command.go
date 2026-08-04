@@ -170,14 +170,14 @@ func RunGenerate(opts GenerateOptions) error {
 		}
 		runtimeBundle = &bundle
 	}
-	plan := planner.Build(doc, cfg)
 	if auth == model.AuthTypeOAuth2 {
 		tokenURL := oauth2RuntimeDefaults.TokenURL
 		if runtimeBundle != nil && strings.TrimSpace(runtimeBundle.OAuth2TokenURL) != "" {
 			tokenURL = runtimeBundle.OAuth2TokenURL
 		}
-		plan = withoutOAuthTokenOperation(plan, tokenURL)
+		doc = withoutOAuthTokenOperation(doc, tokenURL)
 	}
+	plan := planner.Build(doc, cfg)
 	plan.Name = strings.TrimSpace(opts.AppName)
 	plan.Auth.Type = auth
 	plan.Auth.SignerProfile = signerConfig.Profile
@@ -218,28 +218,39 @@ func validateAuthAndSigner(auth, signer string) error {
 	return nil
 }
 
-func withoutOAuthTokenOperation(plan model.App, tokenURL string) model.App {
-	parsed, err := url.Parse(strings.TrimSpace(tokenURL))
-	if err != nil || strings.TrimSpace(parsed.Path) == "" {
-		return plan
-	}
-	groups := make([]model.Group, 0, len(plan.Groups))
-	for _, group := range plan.Groups {
-		operations := make([]model.Operation, 0, len(group.Operations))
-		for _, operation := range group.Operations {
-			if strings.EqualFold(operation.Method, "POST") && operation.Path == parsed.Path {
-				continue
-			}
-			operations = append(operations, operation)
-		}
-		if len(operations) == 0 {
+func withoutOAuthTokenOperation(doc openapi.Document, tokenURL string) openapi.Document {
+	operations := make([]openapi.Operation, 0, len(doc.Operations))
+	for _, operation := range doc.Operations {
+		if matchesOAuthTokenOperation(operation, tokenURL) {
 			continue
 		}
-		group.Operations = operations
-		groups = append(groups, group)
+		operations = append(operations, operation)
 	}
-	plan.Groups = groups
-	return plan
+	doc.Operations = operations
+	return doc
+}
+
+func matchesOAuthTokenOperation(operation openapi.Operation, tokenURL string) bool {
+	parsedTokenURL, err := url.Parse(strings.TrimSpace(tokenURL))
+	if err != nil || strings.TrimSpace(parsedTokenURL.Path) == "" || !strings.EqualFold(operation.Method, "POST") || operation.Path != parsedTokenURL.Path {
+		return false
+	}
+	if !parsedTokenURL.IsAbs() || strings.TrimSpace(parsedTokenURL.Host) == "" {
+		return true
+	}
+
+	hasAbsoluteServer := false
+	for _, rawServer := range operation.Servers {
+		server, err := url.Parse(strings.TrimSpace(rawServer))
+		if err != nil || !server.IsAbs() || strings.TrimSpace(server.Host) == "" {
+			continue
+		}
+		hasAbsoluteServer = true
+		if strings.EqualFold(server.Scheme, parsedTokenURL.Scheme) && strings.EqualFold(server.Host, parsedTokenURL.Host) {
+			return true
+		}
+	}
+	return !hasAbsoluteServer
 }
 
 func oauth2Defaults(doc openapi.Document) runtimeconfig.OAuth2Defaults {
@@ -260,12 +271,8 @@ func oauth2Defaults(doc openapi.Document) runtimeconfig.OAuth2Defaults {
 		Placement: "basic",
 		Scopes:    append([]string(nil), selected.ClientCredentialsScopes...),
 	}
-	tokenURL, err := url.Parse(defaults.TokenURL)
-	if err != nil {
-		return defaults
-	}
 	for _, operation := range doc.Operations {
-		if !strings.EqualFold(operation.Method, "POST") || operation.Path != tokenURL.Path {
+		if !matchesOAuthTokenOperation(operation, defaults.TokenURL) {
 			continue
 		}
 		queryFields := make(map[string]bool)

@@ -23,6 +23,7 @@ type Tag struct {
 type Operation struct {
 	Method      string
 	Path        string
+	Servers     []string
 	Tag         string
 	OperationID string
 	Summary     string

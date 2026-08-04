@@ -133,6 +133,7 @@ struct RuntimeClientAuth {
 
 #[derive(Deserialize)]
 struct OAuthTokenResponse {
+    #[serde(default)]
     access_token: String,
     #[serde(default)]
     refresh_token: String,
@@ -146,6 +147,10 @@ struct OAuthTokenResponse {
     refresh_token_expires_in: u64,
     #[serde(default)]
     id_token: String,
+    #[serde(default)]
+    error: String,
+    #[serde(default)]
+    error_description: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -408,7 +413,10 @@ pub fn save_oauth_authorization_token(
         return Err("OAuth token response is missing access_token".to_string());
     }
     let lifetime = if expires_in > 0 { expires_in } else { 300 };
-    let token_type = if token_type.trim().is_empty() { "Bearer" } else { token_type.trim() };
+    let token_type = token_type.trim();
+    if token_type.is_empty() {
+        return Err("OAuth token response is missing token_type".to_string());
+    }
     if !token_type.eq_ignore_ascii_case("bearer") {
         return Err(format!("unsupported OAuth token_type {token_type:?}"));
     }
@@ -522,14 +530,27 @@ async fn refresh_oauth_authorization_token(app_name: &str, auth: &RuntimeAuth, r
         .build()
         .map_err(|err| err.to_string())?
         .post(endpoint)
+        .header("Accept", "application/json")
         .form(&form)
         .send()
         .await
-        .map_err(|err| format!("refresh OAuth session: {err}; run {app_name} login"))?;
+        .map_err(|err| format!("refresh_failed: request OAuth token endpoint: {err}"))?;
     let status = response.status();
-    let token: OAuthTokenResponse = response.json().await.map_err(|err| format!("decode OAuth refresh response: {err}"))?;
-    if !status.is_success() || token.access_token.trim().is_empty() || token.refresh_token.trim().is_empty() {
-        return Err(format!("refresh OAuth session was rejected; run {app_name} login"));
+    let response_body = response.bytes().await.map_err(|err| format!("refresh_failed: read OAuth refresh response: {err}"))?;
+    let token: OAuthTokenResponse = serde_json::from_slice(&response_body)
+        .map_err(|err| format!("refresh_failed: decode OAuth refresh response: {err}"))?;
+    if token.error.trim().eq_ignore_ascii_case("invalid_grant") {
+        return Err(format!("login_required: run {app_name} login"));
+    }
+    if !status.is_success() || !token.error.trim().is_empty() {
+        let description = if token.error_description.trim().is_empty() { status.to_string() } else { token.error_description.trim().to_string() };
+        return Err(format!("refresh_failed: token endpoint rejected refresh: {description}"));
+    }
+    if token.access_token.trim().is_empty() || token.refresh_token.trim().is_empty() {
+        return Err("refresh_failed: token endpoint response is missing rotated tokens".to_string());
+    }
+    if token.token_type.trim().is_empty() {
+        return Err("refresh_failed: OAuth token response is missing token_type".to_string());
     }
     save_oauth_authorization_token(
         app_name,
@@ -539,7 +560,7 @@ async fn refresh_oauth_authorization_token(app_name: &str, auth: &RuntimeAuth, r
         &token.scope,
         token.expires_in,
         token.refresh_token_expires_in,
-    )?;
+    ).map_err(|err| format!("refresh_failed: {err}"))?;
     Ok(token.access_token.trim().to_string())
 }
 

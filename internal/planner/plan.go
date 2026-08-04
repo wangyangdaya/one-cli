@@ -383,10 +383,9 @@ func pathResourceGroupName(path string) string {
 	return strings.Join(candidates[0], "-")
 }
 
-// pathGroupSkipSegments lists path segments that are treated as transport noise
-// when deriving a group name from the URL path. "api" is a generic version prefix;
-// "les" is a legacy internal gateway prefix. Add new entries here when needed.
-var pathGroupSkipSegments = []string{"api", "les"}
+// pathGroupSkipSegments lists generic path segments that are treated as
+// transport noise when deriving a group name from the URL path.
+var pathGroupSkipSegments = []string{"api"}
 
 func isPathGroupSkipSegment(segment string) bool {
 	trimmed := strings.TrimSpace(segment)

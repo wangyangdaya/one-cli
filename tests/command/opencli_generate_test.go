@@ -917,6 +917,54 @@ func TestGenerateCommandAcceptsOAuth2ClientCredentials(t *testing.T) {
 	}
 }
 
+func TestGenerateCommandKeepsSamePathOperationOnDifferentServer(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(t.TempDir(), "oauth.yaml")
+	spec := `
+openapi: 3.0.3
+info: {title: OAuth Host Matching, version: 1.0.0}
+servers:
+  - url: https://api.example.com
+paths:
+  /oauth/token:
+    post:
+      tags: [business]
+      operationId: createBusinessToken
+      responses:
+        "200": {description: ok}
+components:
+  securitySchemes:
+    serviceOAuth:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://identity.example.com/oauth/token
+          scopes: {}
+`
+	if err := os.WriteFile(specPath, []byte(spec), 0o600); err != nil {
+		t.Fatalf("write OpenAPI spec: %v", err)
+	}
+	runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
+	if err := os.WriteFile(runtimeSource, []byte("base_url: https://api.example.com\nauth:\n  type: oauth2\n  client_id: example-opencli\n"), 0o600); err != nil {
+		t.Fatalf("write runtime source: %v", err)
+	}
+	t.Setenv("OPENCLI_OAUTH_CLIENT_SECRET", "command-test-oauth-secret")
+
+	if err := app.RunGenerate(app.GenerateOptions{
+		Input:             specPath,
+		Output:            dir,
+		Module:            "github.com/acme/generated",
+		AppName:           "oauth-hosts",
+		Auth:              "oauth2",
+		RuntimeConfigPath: runtimeSource,
+	}); err != nil {
+		t.Fatalf("generate OAuth CLI: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "internal", "business", "command.go")); err != nil {
+		t.Fatalf("business operation sharing the token path on another host was removed: %v", err)
+	}
+}
+
 func TestGenerateCommandAPIKeyRequiresRuntimeConfig(t *testing.T) {
 	err := app.RunGenerate(app.GenerateOptions{
 		Input:   filepath.Join("..", "..", "examples", "petstore.yaml"),

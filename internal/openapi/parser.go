@@ -254,8 +254,21 @@ func convertDocument(doc *openapi3.T) Document {
 	}
 	d.Tags = convertTags(doc.Tags)
 	d.SecuritySchemes = convertSecuritySchemes(doc.Components)
-	d.Operations = convertOperations(doc.Paths, doc.Components, securityRequirementNames(doc.Security))
+	d.Operations = convertOperations(doc.Paths, doc.Components, securityRequirementNames(doc.Security), serverURLs(doc.Servers))
 	return d
+}
+
+func serverURLs(servers openapi3.Servers) []string {
+	result := make([]string, 0, len(servers))
+	for _, server := range servers {
+		if server == nil {
+			continue
+		}
+		if value := strings.TrimSpace(server.URL); value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func convertSecuritySchemes(components *openapi3.Components) []SecurityScheme {
@@ -312,7 +325,7 @@ func convertTags(tags openapi3.Tags) []Tag {
 
 // convertOperations iterates paths in sorted order and methods in a fixed order,
 // producing a deterministic list of Operations.
-func convertOperations(paths *openapi3.Paths, components *openapi3.Components, documentSecurity []string) []Operation {
+func convertOperations(paths *openapi3.Paths, components *openapi3.Components, documentSecurity, documentServers []string) []Operation {
 	if paths == nil {
 		return nil
 	}
@@ -320,6 +333,10 @@ func convertOperations(paths *openapi3.Paths, components *openapi3.Components, d
 	pathMap := paths.Map()
 	for _, path := range slices.Sorted(maps.Keys(pathMap)) {
 		item := pathMap[path]
+		pathServers := documentServers
+		if len(item.Servers) > 0 {
+			pathServers = serverURLs(item.Servers)
+		}
 		methods := []struct {
 			name string
 			op   *openapi3.Operation
@@ -337,14 +354,18 @@ func convertOperations(paths *openapi3.Paths, components *openapi3.Components, d
 			if m.op == nil {
 				continue
 			}
-			ops = append(ops, convertOperation(path, m.name, m.op, components, documentSecurity))
+			operationServers := pathServers
+			if m.op.Servers != nil && len(*m.op.Servers) > 0 {
+				operationServers = serverURLs(*m.op.Servers)
+			}
+			ops = append(ops, convertOperation(path, m.name, m.op, components, documentSecurity, operationServers))
 		}
 	}
 	return ops
 }
 
 // convertOperation maps a single kin-openapi Operation to our internal Operation.
-func convertOperation(path, method string, op *openapi3.Operation, components *openapi3.Components, documentSecurity []string) Operation {
+func convertOperation(path, method string, op *openapi3.Operation, components *openapi3.Components, documentSecurity, servers []string) Operation {
 	security := append([]string(nil), documentSecurity...)
 	if op.Security != nil {
 		security = securityRequirementNames(*op.Security)
@@ -352,6 +373,7 @@ func convertOperation(path, method string, op *openapi3.Operation, components *o
 	result := Operation{
 		Method:      strings.TrimSpace(method),
 		Path:        strings.TrimSpace(path),
+		Servers:     append([]string(nil), servers...),
 		OperationID: strings.TrimSpace(op.OperationID),
 		Summary:     strings.TrimSpace(op.Summary),
 		Security:    security,
