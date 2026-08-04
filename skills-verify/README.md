@@ -81,7 +81,7 @@ For AK/SK generated CLIs such as supplier:
 ```bash
 SKILLS_VERIFY_APP_DIR=tmp/supplier-cli
 ALLOWED_EXECUTABLES=supplier-cli
-OPENCLI_BASE_URL=https://ediuat.mychery.com/prod-api
+OPENCLI_BASE_URL=https://supplier.example.com/prod-api
 OPENCLI_AK=your-access-key
 OPENCLI_SK=your-secret-key
 ```

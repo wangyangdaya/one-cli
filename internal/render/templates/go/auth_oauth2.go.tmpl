@@ -3,11 +3,15 @@ package auth
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -95,7 +99,24 @@ func loginAuthorizationCode(cmd *cobra.Command, appName string, noBrowser bool) 
 	if err != nil {
 		return err
 	}
-	authorizeURL, err := buildAuthorizeURL(auth, redirectURI, state)
+	codeVerifier := ""
+	codeChallenge := ""
+	if auth.PKCEEnabled {
+		codeVerifier, err = randomValue(32)
+		if err != nil {
+			return err
+		}
+		digest := sha256.Sum256([]byte(codeVerifier))
+		codeChallenge = base64.RawURLEncoding.EncodeToString(digest[:])
+	}
+	nonce := ""
+	if auth.OIDCEnabled {
+		nonce, err = randomValue(32)
+		if err != nil {
+			return err
+		}
+	}
+	authorizeURL, err := buildAuthorizeURL(auth, redirectURI, state, codeChallenge, nonce)
 	if err != nil {
 		return err
 	}
@@ -162,9 +183,14 @@ func loginAuthorizationCode(cmd *cobra.Command, appName string, noBrowser bool) 
 	if callback.err != nil {
 		return callback.err
 	}
-	token, err := exchangeAuthorizationCode(auth, callback.code, state, redirectURI)
+	token, err := exchangeAuthorizationCode(auth, callback.code, state, redirectURI, codeVerifier)
 	if err != nil {
 		return err
+	}
+	if auth.OIDCEnabled {
+		if err := validateOIDCIDToken(auth, token.IDToken, nonce); err != nil {
+			return err
+		}
 	}
 	if err := config.SaveOAuthAuthorizationToken(appName, token); err != nil {
 		return err
@@ -173,7 +199,7 @@ func loginAuthorizationCode(cmd *cobra.Command, appName string, noBrowser bool) 
 	return err
 }
 
-func buildAuthorizeURL(auth config.OAuthAuthorizationConfig, redirectURI, state string) (string, error) {
+func buildAuthorizeURL(auth config.OAuthAuthorizationConfig, redirectURI, state, codeChallenge, nonce string) (string, error) {
 	endpoint, err := url.Parse(auth.AuthorizationURL)
 	if err != nil || endpoint.Scheme == "" || endpoint.Host == "" {
 		return "", fmt.Errorf("invalid OAuth authorization_url")
@@ -186,11 +212,18 @@ func buildAuthorizeURL(auth config.OAuthAuthorizationConfig, redirectURI, state 
 	if len(auth.Scopes) > 0 {
 		query.Set("scope", strings.Join(auth.Scopes, " "))
 	}
+	if auth.PKCEEnabled {
+		query.Set("code_challenge", codeChallenge)
+		query.Set("code_challenge_method", "S256")
+	}
+	if auth.OIDCEnabled {
+		query.Set("nonce", nonce)
+	}
 	endpoint.RawQuery = query.Encode()
 	return endpoint.String(), nil
 }
 
-func exchangeAuthorizationCode(auth config.OAuthAuthorizationConfig, code, state, redirectURI string) (config.OAuthTokenResponse, error) {
+func exchangeAuthorizationCode(auth config.OAuthAuthorizationConfig, code, state, redirectURI, codeVerifier string) (config.OAuthTokenResponse, error) {
 	method := http.MethodPost
 	endpoint, err := url.Parse(auth.TokenURL)
 	if err != nil || endpoint.Scheme == "" || endpoint.Host == "" {
@@ -205,6 +238,9 @@ func exchangeAuthorizationCode(auth config.OAuthAuthorizationConfig, code, state
 		form.Set("client_id", auth.ClientID)
 		form.Set("code", code)
 		form.Set("redirect_uri", redirectURI)
+		if auth.PKCEEnabled {
+			form.Set("code_verifier", codeVerifier)
+		}
 		body = strings.NewReader(form.Encode())
 		requestHeaders.Set("Content-Type", "application/x-www-form-urlencoded")
 	} else {
@@ -216,7 +252,7 @@ func exchangeAuthorizationCode(auth config.OAuthAuthorizationConfig, code, state
 		bodyValues := make(map[string]string)
 		query := endpoint.Query()
 		for _, parameter := range exchange.Parameters {
-			value := tokenExchangeSourceValue(parameter, code, state, auth, redirectURI)
+			value := tokenExchangeSourceValue(parameter, code, state, auth, redirectURI, codeVerifier)
 			if strings.TrimSpace(value) == "" {
 				if parameter.Required {
 					return config.OAuthTokenResponse{}, fmt.Errorf("OAuth token exchange parameter %q is required", parameter.Name)
@@ -293,10 +329,12 @@ func exchangeAuthorizationCode(auth config.OAuthAuthorizationConfig, code, state
 	refreshMapping := exchangeResultMapping(auth.TokenExchange, "refresh_token")
 	refreshExpiresMapping := exchangeResultMapping(auth.TokenExchange, "refresh_token_expires_in")
 	scopeMapping := exchangeResultMapping(auth.TokenExchange, "scope")
+	idTokenMapping := exchangeResultMapping(auth.TokenExchange, "id_token")
 	accessToken := strings.TrimSpace(exchangeResponseString(resp.Header, bodyValue, accessMapping))
 	refreshToken := strings.TrimSpace(exchangeResponseString(resp.Header, bodyValue, refreshMapping))
 	tokenType := strings.TrimSpace(exchangeResponseString(resp.Header, bodyValue, tokenTypeMapping))
 	scope := strings.TrimSpace(exchangeResponseString(resp.Header, bodyValue, scopeMapping))
+	idToken := strings.TrimSpace(exchangeResponseString(resp.Header, bodyValue, idTokenMapping))
 	expiresIn, err := exchangeResponseInt64(resp.Header, bodyValue, expiresMapping)
 	if err != nil {
 		return config.OAuthTokenResponse{}, err
@@ -314,15 +352,18 @@ func exchangeAuthorizationCode(auth config.OAuthAuthorizationConfig, code, state
 	return config.OAuthTokenResponse{
 		AccessToken: accessToken, RefreshToken: refreshToken, TokenType: tokenType,
 		Scope: scope, ExpiresIn: expiresIn, RefreshTokenExpiresIn: refreshExpiresIn,
+		IDToken: idToken,
 	}, nil
 }
 
-func tokenExchangeSourceValue(parameter config.OAuthTokenExchangeParameter, code, state string, auth config.OAuthAuthorizationConfig, redirectURI string) string {
+func tokenExchangeSourceValue(parameter config.OAuthTokenExchangeParameter, code, state string, auth config.OAuthAuthorizationConfig, redirectURI, codeVerifier string) string {
 	switch strings.ToLower(strings.TrimSpace(parameter.Source)) {
 	case "code":
 		return code
 	case "state":
 		return state
+	case "code_verifier":
+		return codeVerifier
 	case "client_id":
 		return auth.ClientID
 	case "redirect_uri":
@@ -357,6 +398,8 @@ func exchangeResultMapping(exchange *config.OAuthTokenExchangeConfig, name strin
 		configured = exchange.Response.RefreshTokenExpiresIn
 	case "scope":
 		configured = exchange.Response.Scope
+	case "id_token":
+		configured = exchange.Response.IDToken
 	}
 	if configured != nil {
 		return *configured
@@ -418,6 +461,207 @@ func randomValue(size int) (string, error) {
 		return "", fmt.Errorf("generate OAuth state: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(value), nil
+}
+
+type oidcDiscovery struct {
+	Issuer  string `json:"issuer"`
+	JWKSURI string `json:"jwks_uri"`
+}
+
+type oidcJWKSet struct {
+	Keys []oidcJWK `json:"keys"`
+}
+
+type oidcJWK struct {
+	KeyID string `json:"kid"`
+	Type  string `json:"kty"`
+	Use   string `json:"use"`
+	Alg   string `json:"alg"`
+	N     string `json:"n"`
+	E     string `json:"e"`
+}
+
+type oidcJWTHeader struct {
+	Alg   string `json:"alg"`
+	KeyID string `json:"kid"`
+}
+
+type oidcAudience []string
+
+func (audience *oidcAudience) UnmarshalJSON(raw []byte) error {
+	var single string
+	if err := json.Unmarshal(raw, &single); err == nil {
+		*audience = []string{single}
+		return nil
+	}
+	var multiple []string
+	if err := json.Unmarshal(raw, &multiple); err != nil {
+		return fmt.Errorf("OIDC id_token aud must be a string or array")
+	}
+	*audience = multiple
+	return nil
+}
+
+type oidcClaims struct {
+	Issuer   string       `json:"iss"`
+	Audience oidcAudience `json:"aud"`
+	Expires  int64        `json:"exp"`
+	IssuedAt int64        `json:"iat"`
+	Nonce    string       `json:"nonce"`
+	AZP      string       `json:"azp"`
+}
+
+func validateOIDCIDToken(auth config.OAuthAuthorizationConfig, rawToken, expectedNonce string) error {
+	if strings.TrimSpace(rawToken) == "" {
+		return fmt.Errorf("OIDC token response is missing id_token")
+	}
+	issuer := strings.TrimRight(strings.TrimSpace(auth.OIDCIssuer), "/")
+	discoveryURL := issuer + "/.well-known/openid-configuration"
+	var discovery oidcDiscovery
+	if err := fetchOIDCJSON(discoveryURL, &discovery); err != nil {
+		return fmt.Errorf("load OIDC discovery: %w", err)
+	}
+	if discovery.Issuer != auth.OIDCIssuer {
+		return fmt.Errorf("OIDC discovery issuer mismatch")
+	}
+	if strings.TrimSpace(discovery.JWKSURI) == "" {
+		return fmt.Errorf("OIDC discovery is missing jwks_uri")
+	}
+	var keys oidcJWKSet
+	if err := fetchOIDCJSON(discovery.JWKSURI, &keys); err != nil {
+		return fmt.Errorf("load OIDC JWKS: %w", err)
+	}
+	parts := strings.Split(rawToken, ".")
+	if len(parts) != 3 {
+		return fmt.Errorf("invalid OIDC id_token")
+	}
+	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return fmt.Errorf("decode OIDC id_token header: %w", err)
+	}
+	var header oidcJWTHeader
+	if err := json.Unmarshal(headerBytes, &header); err != nil {
+		return fmt.Errorf("decode OIDC id_token header: %w", err)
+	}
+	if header.Alg != "RS256" {
+		return fmt.Errorf("OIDC id_token algorithm must be RS256")
+	}
+	key, err := selectOIDCRSAKey(keys.Keys, header.KeyID)
+	if err != nil {
+		return err
+	}
+	modulus, err := base64.RawURLEncoding.DecodeString(key.N)
+	if err != nil {
+		return fmt.Errorf("decode OIDC RSA modulus: %w", err)
+	}
+	exponentBytes, err := base64.RawURLEncoding.DecodeString(key.E)
+	if err != nil || len(exponentBytes) == 0 || len(exponentBytes) > 4 || len(modulus) == 0 {
+		return fmt.Errorf("decode OIDC RSA exponent")
+	}
+	exponent := 0
+	for _, value := range exponentBytes {
+		exponent = exponent<<8 | int(value)
+	}
+	if exponent < 2 {
+		return fmt.Errorf("decode OIDC RSA exponent")
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return fmt.Errorf("decode OIDC id_token signature: %w", err)
+	}
+	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
+	publicKey := &rsa.PublicKey{N: new(big.Int).SetBytes(modulus), E: exponent}
+	if err := rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, digest[:], signature); err != nil {
+		return fmt.Errorf("verify OIDC id_token signature: %w", err)
+	}
+	claimsBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return fmt.Errorf("decode OIDC id_token claims: %w", err)
+	}
+	var claims oidcClaims
+	if err := json.Unmarshal(claimsBytes, &claims); err != nil {
+		return fmt.Errorf("decode OIDC id_token claims: %w", err)
+	}
+	if claims.Issuer != auth.OIDCIssuer {
+		return fmt.Errorf("OIDC id_token issuer mismatch")
+	}
+	audienceMatches := false
+	for _, audience := range claims.Audience {
+		if audience == auth.ClientID {
+			audienceMatches = true
+		}
+	}
+	if !audienceMatches {
+		return fmt.Errorf("OIDC id_token audience mismatch")
+	}
+	if (len(claims.Audience) > 1 || claims.AZP != "") && claims.AZP != auth.ClientID {
+		return fmt.Errorf("OIDC id_token authorized party mismatch")
+	}
+	now := time.Now().Unix()
+	if claims.Expires == 0 || claims.Expires < now-60 {
+		return fmt.Errorf("OIDC id_token is expired")
+	}
+	if claims.IssuedAt == 0 || claims.IssuedAt > now+60 {
+		return fmt.Errorf("OIDC id_token issued-at time is invalid")
+	}
+	if claims.Nonce != expectedNonce {
+		return fmt.Errorf("OIDC id_token nonce mismatch")
+	}
+	return nil
+}
+
+func fetchOIDCJSON(target string, destination any) error {
+	endpoint, err := validateOIDCEndpoint(target)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("endpoint returned %s", resp.Status)
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(destination); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateOIDCEndpoint(target string) (*url.URL, error) {
+	endpoint, err := url.Parse(target)
+	if err != nil || endpoint.Host == "" || endpoint.User != nil || endpoint.Fragment != "" || (endpoint.Scheme != "https" && !(endpoint.Scheme == "http" && (endpoint.Hostname() == "127.0.0.1" || endpoint.Hostname() == "localhost"))) {
+		return nil, fmt.Errorf("OIDC endpoint must use HTTPS except for loopback development")
+	}
+	return endpoint, nil
+}
+
+func selectOIDCRSAKey(keys []oidcJWK, keyID string) (oidcJWK, error) {
+	var matches []oidcJWK
+	for _, key := range keys {
+		if key.Type != "RSA" || (key.Use != "" && key.Use != "sig") || (key.Alg != "" && key.Alg != "RS256") {
+			continue
+		}
+		if keyID == "" || key.KeyID == keyID {
+			matches = append(matches, key)
+		}
+	}
+	if len(matches) != 1 {
+		return oidcJWK{}, fmt.Errorf("OIDC JWKS does not contain one matching RS256 key")
+	}
+	return matches[0], nil
 }
 
 func openBrowser(target string) error {

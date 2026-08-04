@@ -8,14 +8,18 @@ clap = { version = "4", features = ["derive"] }
 aes-gcm = "0.10"
 base64 = "0.22"
 {{- if and (appUsesOAuth2 .App) .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
+dirs = "6"
 getrandom = "0.2"
+{{- end }}
+{{- if and (appUsesOAuth2 .App) .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
+jsonwebtoken = "9"
 {{- end }}
 reqwest = { version = "0.12", features = ["json", "multipart"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_urlencoded = "0.7"
 serde_yaml = "0.9"
-{{- if appUsesAKSK .App }}
+{{- if or (appUsesAKSK .App) (and (appUsesOAuth2 .App) .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code")) }}
 sha2 = "0.10"
 {{- end }}
 tokio = { version = "1", features = ["macros", "rt-multi-thread"{{ if appHasMCPStdio .App }}, "process", "io-util"{{ end }}] }

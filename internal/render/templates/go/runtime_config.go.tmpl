@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -42,8 +43,20 @@ type runtimeAuth struct {
 	RedirectURI    string            `yaml:"redirect_uri,omitempty"`
 	ClientAuth     runtimeClientAuth `yaml:"client_auth,omitempty"`
 	Scopes         []string          `yaml:"scopes,omitempty"`
+	PKCE           *runtimePKCE      `yaml:"pkce,omitempty"`
+	OIDC           *runtimeOIDC      `yaml:"oidc,omitempty"`
 	TokenExchange  *OAuthTokenExchangeConfig `yaml:"token_exchange,omitempty"`
 	EncryptedValue string            `yaml:"encrypted_value,omitempty"`
+}
+
+type runtimePKCE struct {
+	Enabled bool   `yaml:"enabled,omitempty"`
+	Method  string `yaml:"method,omitempty"`
+}
+
+type runtimeOIDC struct {
+	Enabled bool   `yaml:"enabled,omitempty"`
+	Issuer  string `yaml:"issuer,omitempty"`
 }
 
 type OAuthTokenExchangeConfig struct {
@@ -68,6 +81,7 @@ type OAuthTokenExchangeResponse struct {
 	Scope                 *OAuthTokenExchangeResult `yaml:"scope,omitempty"`
 	ExpiresIn             *OAuthTokenExchangeResult `yaml:"expires_in,omitempty"`
 	RefreshTokenExpiresIn *OAuthTokenExchangeResult `yaml:"refresh_token_expires_in,omitempty"`
+	IDToken               *OAuthTokenExchangeResult `yaml:"id_token,omitempty"`
 }
 
 type OAuthTokenExchangeResult struct {
@@ -234,6 +248,10 @@ type OAuthAuthorizationConfig struct {
 	ClientID         string
 	RedirectURI      string
 	Scopes           []string
+	PKCEEnabled      bool
+	PKCEMethod       string
+	OIDCEnabled      bool
+	OIDCIssuer       string
 	TokenExchange    *OAuthTokenExchangeConfig
 }
 
@@ -252,14 +270,63 @@ func LoadOAuthAuthorizationConfig(appName string) (OAuthAuthorizationConfig, err
 	if strings.TrimSpace(auth.AuthorizationURL) == "" || strings.TrimSpace(auth.TokenURL) == "" || strings.TrimSpace(auth.ClientID) == "" {
 		return OAuthAuthorizationConfig{}, fmt.Errorf("OAuth authorization_code requires authorization_url, token_url, and client_id")
 	}
+	if redirectURI := strings.TrimSpace(auth.RedirectURI); redirectURI != "" {
+		if err := validateOAuthLoopbackRedirectURI(redirectURI); err != nil {
+			return OAuthAuthorizationConfig{}, err
+		}
+	}
+	pkceEnabled := auth.PKCE != nil && auth.PKCE.Enabled
+	pkceMethod := ""
+	if auth.PKCE != nil {
+		pkceMethod = strings.TrimSpace(auth.PKCE.Method)
+	}
+	if pkceEnabled && pkceMethod != "" && !strings.EqualFold(pkceMethod, "S256") {
+		return OAuthAuthorizationConfig{}, fmt.Errorf("OAuth PKCE method must be S256")
+	}
+	oidcEnabled := auth.OIDC != nil && auth.OIDC.Enabled
+	oidcIssuer := ""
+	if auth.OIDC != nil {
+		oidcIssuer = strings.TrimSpace(auth.OIDC.Issuer)
+	}
+	if oidcEnabled {
+		if err := validateOAuthOIDCIssuer(oidcIssuer, auth.Scopes); err != nil {
+			return OAuthAuthorizationConfig{}, err
+		}
+	}
 	return OAuthAuthorizationConfig{
 		AuthorizationURL: strings.TrimSpace(auth.AuthorizationURL),
 		TokenURL:         strings.TrimSpace(auth.TokenURL),
 		ClientID:         strings.TrimSpace(auth.ClientID),
 		RedirectURI:      strings.TrimSpace(auth.RedirectURI),
 		Scopes:           append([]string(nil), auth.Scopes...),
+		PKCEEnabled:      pkceEnabled,
+		PKCEMethod:       pkceMethod,
+		OIDCEnabled:      oidcEnabled,
+		OIDCIssuer:       oidcIssuer,
 		TokenExchange:    auth.TokenExchange,
 	}, nil
+}
+
+func validateOAuthLoopbackRedirectURI(value string) error {
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme != "http" || parsed.Hostname() != "127.0.0.1" || parsed.Port() == "" || parsed.Path == "" || parsed.Path == "/" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
+		return fmt.Errorf("invalid OAuth redirect_uri: must be HTTP 127.0.0.1 with a port and callback path")
+	}
+	return nil
+}
+
+func validateOAuthOIDCIssuer(issuer string, scopes []string) error {
+	parsed, err := url.Parse(issuer)
+	loopbackHTTP := err == nil && parsed.Scheme == "http" && (parsed.Hostname() == "127.0.0.1" || parsed.Hostname() == "localhost")
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Scheme != "https" && !loopbackHTTP) {
+		return fmt.Errorf("invalid OAuth oidc_issuer: must use HTTPS except for loopback development")
+	}
+	for _, scope := range scopes {
+		if strings.TrimSpace(scope) == "openid" {
+			return nil
+		}
+	}
+	return fmt.Errorf("OAuth OIDC requires the openid scope")
 }
 
 type OAuthTokenResponse struct {
@@ -269,6 +336,7 @@ type OAuthTokenResponse struct {
 	Scope                 string
 	ExpiresIn             int64
 	RefreshTokenExpiresIn int64
+	IDToken               string
 }
 
 type OAuthAuthorizationToken struct {
@@ -477,11 +545,17 @@ func oauthAuthorizationTokenPath(appName string) (string, error) {
 	if explicit := strings.TrimSpace(os.Getenv("OPENCLI_OAUTH_TOKEN_FILE")); explicit != "" {
 		return explicit, nil
 	}
-	root, err := os.UserConfigDir()
+	auth, err := LoadOAuthAuthorizationConfig(appName)
+	if err != nil {
+		return "", err
+	}
+	identity := strings.Join([]string{auth.ClientID, auth.AuthorizationURL, auth.TokenURL}, "\n")
+	namespace := fmt.Sprintf("%x", sha256.Sum256([]byte(identity)))
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve OAuth session directory: %w", err)
 	}
-	return filepath.Join(root, appName, "oauth-token.json"), nil
+	return filepath.Join(home, ".opencli", "oauth2", namespace, "oauth-token.json"), nil
 }
 
 func requestClientCredentialsToken(auth runtimeAuth, secret string) (string, int64, error) {

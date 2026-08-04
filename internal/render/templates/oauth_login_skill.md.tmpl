@@ -10,17 +10,51 @@ metadata:
 
 # CLI Login and Session Management
 
+> **Base path:** Every relative path in this Skill is resolved from the Skill root directory containing this `SKILL.md`. Before running a command, locate and enter that directory or resolve the path to an absolute path. Never infer the binary location from the Agent's current working directory.
+
 These are built-in CLI authentication commands, not operations from the business API `auth` group.
 
-## Routing Rules
+## Status-Driven Flow
 
-- Run `{{ .App.Name }} login` when a protected business command requires a session.
-- In a headless or remote terminal, run `{{ .App.Name }} login --no-browser` and give the printed authorization URL to the user.
-- On `login_required`, log in once and retry the original business command.
-- Run `{{ .App.Name }} status` to inspect the local session without making a network request. Protected commands refresh `needs_refresh` sessions automatically.
-- On HTTP 401, check the session and retry at most once after login; never create a login loop.
-- Run `{{ .App.Name }} logout` only when the user explicitly asks to sign out or clear the local session.
-- Do not substitute the business command `{{ .App.Name }} auth login`; that command is generated from the OpenAPI business interface.
+Run `{{ .App.Name }} status` before a protected business command and handle the result exactly as follows:
+
+| Status | Action |
+| --- | --- |
+| `valid` | Run the business command. |
+| `needs_refresh` | Run the business command; the CLI refreshes before the request. `status` itself never refreshes. |
+| `expired` | Run the login flow. |
+| `not_logged_in` | Run the login flow. |
+
+If `status` fails, report the error summary. Do not inspect, repair, or print the token file.
+
+## Agent Login Flow
+
+1. Resolve `{{ .App.Name }}` from the Skill root to an absolute path.
+2. When the Agent has a persistent terminal capability that keeps a process alive across tool calls, start `<absolute-cli-path> login --no-browser` with the Skill root as `cwd`. Save the returned terminal session identifier (for example, `terminal_id`).
+3. Use that terminal's read operation on the same session until the CLI prints the authorization URL. Relay the URL immediately and say authorization is still being awaited. Do not ask the user to reply after approving.
+4. Keep the current task active and, after short waits, continue reading the same terminal session for at most 120 seconds. Do not call `close` and do not start a second `login`; only one process can own a fixed callback port.
+5. The URL must be opened on the same machine that runs the CLI. A `127.0.0.1` callback opened on a phone or another computer reaches the wrong device.
+6. After the terminal prints `login successful`, reaches `exited`, and reports exit code `0`, run `{{ .App.Name }} status` immediately.
+7. Login is complete only when `status` prints `valid`; then retry the original business command once. On a nonzero terminal exit, report the original error summary. `OAuth login timed out` means the URL expired.
+
+If the runtime has no persistent `terminal`, use a regular shell only when it both exposes live output before command completion and keeps the process alive while the user authorizes. If either capability is missing, do not generate repeated dead links: ask the user to run the absolute-path `login` command once in a local terminal, then let the Agent verify with `status`.
+
+A human in an interactive terminal may run `{{ .App.Name }} login` to open the system browser. Agents always use `--no-browser`.
+
+## Recovery and Logout
+
+- On `login_required`, log in once and retry the original command once.
+- On HTTP 401, the server may have revoked a locally `valid` token; log in once and retry once.
+- If login or the retry fails again, report the error and stop. Never create a login loop.
+- Run `{{ .App.Name }} logout` only when the user explicitly requests sign-out or session removal, then verify that `{{ .App.Name }} status` prints `not_logged_in`.
+- Do not substitute the business command `{{ .App.Name }} auth login`; it belongs to the generated OpenAPI business interface.
+
+## Session Storage and Safety
+
+- The default token file is under the user's `.opencli/oauth2/<configuration-hash>/oauth-token.json`; `OPENCLI_OAUTH_TOKEN_FILE` explicitly overrides it.
+- Before a business request, the CLI refreshes when the access token has at most five minutes remaining and the refresh token is valid, then stores the rotated tokens.
+- Never read, print, copy, or return access tokens, refresh tokens, or token-file contents.
+- Credentials are entered only on the authorization page and are never stored in CLI configuration or this Skill.
 
 ## Commands
 
@@ -31,4 +65,4 @@ These are built-in CLI authentication commands, not operations from the business
 {{ .App.Name }} logout
 ```
 
-CLI login opens the authorization page, receives the authorization code, exchanges it through the configured token endpoint, and stores access and refresh tokens for later protected requests. Credentials are entered only on the authorization page and are never stored in CLI configuration or this Skill.
+CLI login receives the authorization code, exchanges it through the configured token endpoint, and injects the access token into later protected requests.

@@ -40,10 +40,10 @@ func TestBuildGroupsOperationsAndNamesCommands(t *testing.T) {
 func TestBuildUsesSemanticSubjectsForCollidingGenericCommands(t *testing.T) {
 	doc := openapi.Document{
 		Operations: []openapi.Operation{
-			{Method: "GET", Path: "/cheryGlobal/aiAgent/mis", Tag: "全球一块屏-ai agent", OperationID: "getMis"},
-			{Method: "GET", Path: "/cheryGlobal/aiAgent/qulity", Tag: "全球一块屏-ai agent", OperationID: "getQuality"},
-			{Method: "GET", Path: "/cheryGlobal/aiAgent/sale", Tag: "全球一块屏-ai agent", OperationID: "getSale"},
-			{Method: "GET", Path: "/cheryGlobal/aiAgent/send", Tag: "全球一块屏-ai agent", OperationID: "getSend"},
+			{Method: "GET", Path: "/analytics/aiAgent/mis", Tag: "analytics-ai-agent", OperationID: "getMis"},
+			{Method: "GET", Path: "/analytics/aiAgent/quality", Tag: "analytics-ai-agent", OperationID: "getQuality"},
+			{Method: "GET", Path: "/analytics/aiAgent/sale", Tag: "analytics-ai-agent", OperationID: "getSale"},
+			{Method: "GET", Path: "/analytics/aiAgent/send", Tag: "analytics-ai-agent", OperationID: "getSend"},
 		},
 	}
 

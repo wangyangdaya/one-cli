@@ -80,6 +80,8 @@ The `supplier_edi` profile uses the supplier `sha512Hex` canonical string: `meth
 Mode: `oauth2` (`authorization_code`)
 
 Run `target/release/{{ .App.Name }} login` to authenticate in the browser flow. The CLI sends the returned authorization code to the configured `token_url`, stores the access and refresh tokens locally, and injects `Authorization: Bearer <access_token>` for protected operations. Run `target/release/{{ .App.Name }} status` to inspect the local session; protected commands refresh it automatically when needed. Run `target/release/{{ .App.Name }} logout` to delete the local session.
+{{- if .RuntimeBundle.OAuth2PKCEEnabled }} PKCE is enabled with `S256`; the verifier exists only for the current login and is sent during code exchange.{{- end }}
+{{- if .RuntimeBundle.OIDCEnabled }} OIDC is enabled; login validates the returned ID Token through issuer discovery and JWKS before storing the OAuth session.{{- end }}
 {{- else }}
 Mode: `oauth2` (`client_credentials`)
 

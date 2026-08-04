@@ -139,6 +139,21 @@ func TestPackageCreatesRootRouterForSingleGroupProject(t *testing.T) {
 	}
 }
 
+func TestPackageAllowsBuiltInCLIAuthSkillWithoutCommandReference(t *testing.T) {
+	project := t.TempDir()
+	output := filepath.Join(t.TempDir(), "auth-skills")
+	binary := filepath.Join(t.TempDir(), "auth-cli")
+	writeFixture(t, project, "bin/auth-cli", "launcher\n", 0o755)
+	writeFixture(t, project, "skills/README.md", "# Auth skills\n", 0o644)
+	writeFixture(t, project, "skills/cli-auth/SKILL.md", "auth-cli login\nauth-cli status\nauth-cli logout\n", 0o644)
+	writeFixture(t, filepath.Dir(binary), filepath.Base(binary), "binary\n", 0o755)
+
+	if _, err := Package(Options{ProjectDir: project, OutputDir: output, BinaryPath: binary}); err != nil {
+		t.Fatalf("package OAuth CLI: %v", err)
+	}
+	assertFileContent(t, output, "cli-auth/SKILL.md", "../bin/auth-cli login\n../bin/auth-cli status\n../bin/auth-cli logout\n")
+}
+
 func TestResolveBinaryBuildsGoProject(t *testing.T) {
 	project := t.TempDir()
 	writeFixture(t, project, "go.mod", "module example.test/vehicle\n", 0o644)

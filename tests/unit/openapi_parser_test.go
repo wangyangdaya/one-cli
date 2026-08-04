@@ -542,10 +542,10 @@ func TestParseDocumentResolvesReferencedResponseSchemas(t *testing.T) {
 	doc, err := openapi.Parse([]byte(`
 openapi: 3.0.0
 info:
-  title: Chery Global API
+  title: Analytics API
   version: "1.0"
 paths:
-  /cheryGlobal/aiAgent/qulity:
+  /analytics/aiAgent/quality:
     get:
       operationId: getQuality
       responses:

@@ -10,17 +10,51 @@ metadata:
 
 # CLI 登录与会话管理
 
+> **基准路径**：本 Skill 的所有相对路径均相对于本 `SKILL.md` 所在的 Skill 根目录解析。执行命令前必须先定位该目录并切换过去，或将相对路径解析为绝对路径；不得使用 Agent 当前工作目录猜测二进制位置。
+
 这是 CLI 内置认证命令，不是业务 API 的 `auth` 命令组。
 
-## 路由规则
+## 状态驱动流程
 
-- 调用受保护业务命令前若没有登录态，执行 `{{ .App.Name }} login`。
-- 无浏览器或远程终端环境执行 `{{ .App.Name }} login --no-browser`，把输出的授权链接交给用户打开并确认。
-- 命令返回 `login_required` 时，执行一次登录后重试原业务命令。
-- 使用 `{{ .App.Name }} status` 离线查看本地会话状态；业务命令会自动刷新 `needs_refresh` 会话。
-- 收到 HTTP 401 时可以先检查登录态；重新登录后最多重试一次，避免循环登录。
-- `{{ .App.Name }} logout` 会删除本地业务 Token，只能在用户明确要求退出或清除会话时执行。
+调用受保护业务命令前先执行 `{{ .App.Name }} status`，严格按状态处理：
+
+| 状态 | 处理 |
+| --- | --- |
+| `valid` | 直接执行业务命令。 |
+| `needs_refresh` | 直接执行业务命令，由 CLI 在请求前自动刷新；`status` 本身不会刷新。 |
+| `expired` | 执行登录流程。 |
+| `not_logged_in` | 执行登录流程。 |
+
+若 `status` 自身报错，返回错误摘要，不读取 token 文件修复，也不输出文件内容。
+
+## Agent 登录流程
+
+1. 先把相对于 Skill 根目录的 `{{ .App.Name }}` 解析为绝对路径。
+2. 若 Agent 提供能跨多次工具调用保留进程的持久终端能力，以 Skill 根目录为 `cwd`，启动 `<CLI绝对路径> login --no-browser`，并保存返回的终端会话标识（例如 `terminal_id`）。
+3. 使用该终端的读取操作持续读取同一个会话，直到获得 CLI 输出的授权链接。立即把链接交给用户并说明“请在浏览器完成授权，我正在等待授权结果”；不要要求用户授权后再回复。
+4. 保持当前任务继续运行，间隔短暂等待后重复读取同一个终端会话，最长 120 秒。不要 `close`，不要启动第二个 `login`；固定回调端口同时只能由一个登录进程监听。
+5. 用户必须在运行 CLI 的同一台机器上打开链接；`127.0.0.1` 在手机或另一台电脑上指向错误设备。
+6. 终端输出 `login successful`、状态变为 `exited` 且退出码为 `0` 后，立即执行 `{{ .App.Name }} status`。
+7. `status` 输出 `valid` 后，登录才算完成；随后重试原业务命令一次。终端非零退出时返回原始错误摘要；`OAuth login timed out` 表示链接已失效。
+
+若运行时没有持久 `terminal`，仅当普通 shell 能在命令结束前向用户展示实时输出、并在用户操作期间保留进程时，才可用它执行同一流程。两项能力任一缺失时，不要反复生成无效链接；让用户在本机终端执行一次绝对路径的 `login`，然后由 Agent 执行 `status` 继续验证。
+
+人在交互式终端主动登录时可执行 `{{ .App.Name }} login` 自动打开系统浏览器；Agent 始终使用 `--no-browser`。
+
+## 错误恢复与退出
+
+- 业务命令返回 `login_required`：登录一次，成功后重试原命令一次。
+- 业务接口返回 HTTP 401：即使本地状态为 `valid`，也可能是服务端撤销；重新登录一次并重试一次。
+- 登录或重试再次失败：返回错误，不创建登录循环。
+- 只有用户明确要求退出或清除登录态时才执行 `{{ .App.Name }} logout`，随后用 `{{ .App.Name }} status` 确认 `not_logged_in`。
 - 不要使用业务命令 `{{ .App.Name }} auth login` 代替 CLI 登录；它属于 OpenAPI 业务接口。
+
+## 登录态与安全
+
+- 默认 token 文件位于用户目录的 `.opencli/oauth2/<配置哈希>/oauth-token.json`；`OPENCLI_OAUTH_TOKEN_FILE` 可显式覆盖。
+- CLI 会在 access token 剩余不超过 5 分钟且 refresh token 有效时，于业务请求前自动续期并保存轮换后的 token。
+- 不得读取、打印、复制或返回 access token、refresh token 及 token 文件内容。
+- 账号和密码只在授权页面输入，不写入 CLI 配置或 Skill。
 
 ## 命令
 
@@ -31,4 +65,4 @@ metadata:
 {{ .App.Name }} logout
 ```
 
-CLI 登录会打开 IAM 授权页、接收授权码、向业务系统登录接口换取业务 Token，并在后续受保护请求中自动注入该 Token。账号密码只在 IAM 页面输入，不写入 CLI 配置或 Skill。
+CLI 登录会接收授权码、通过配置的 token endpoint 换取 token，并在后续受保护请求中自动注入 access token。

@@ -30,7 +30,7 @@ Before acting:
 | Skill | Commands | Guide |
 | --- | ---: | --- |
 {{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
-| `cli-auth` | 2 | [`cli-auth/SKILL.md`](cli-auth/SKILL.md); CLI login and session management |
+| `cli-auth` | 3 | [`cli-auth/SKILL.md`](cli-auth/SKILL.md); CLI login and session management |
 {{- end }}
 {{- range .App.Groups }}
 | `{{ skillName . }}` | {{ len .Operations }} | [`{{ skillName . }}/SKILL.md`]({{ skillName . }}/SKILL.md) |

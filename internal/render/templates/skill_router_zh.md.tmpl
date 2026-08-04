@@ -30,7 +30,7 @@ metadata:
 | Skill | 命令数 | 说明 |
 | --- | ---: | --- |
 {{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
-| `cli-auth` | 2 | [`cli-auth/SKILL.md`](cli-auth/SKILL.md)；CLI 登录与会话管理 |
+| `cli-auth` | 3 | [`cli-auth/SKILL.md`](cli-auth/SKILL.md)；CLI 登录与会话管理 |
 {{- end }}
 {{- range .App.Groups }}
 | `{{ skillName . }}` | {{ len .Operations }} | [`{{ skillName . }}/SKILL.md`]({{ skillName . }}/SKILL.md) |

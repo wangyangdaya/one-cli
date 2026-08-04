@@ -41,7 +41,7 @@ sql-mcp-server/
 需要 Python 3.11+、uv 和可访问的 PostgreSQL：
 
 ```bash
-cd /Users/chery-90507455/Documents/workspace/one-cli/sql-mcp-server
+cd /path/to/one-cli/sql-mcp-server
 UV_CACHE_DIR=/tmp/sql-mcp-uv-cache uv sync
 cp .env.example .env
 ```
@@ -96,7 +96,7 @@ stdio 客户端配置示例：
       "command": "uv",
       "args": [
         "--directory",
-        "/Users/chery-90507455/Documents/workspace/one-cli/sql-mcp-server",
+        "/path/to/one-cli/sql-mcp-server",
         "run",
         "sql-mcp-server",
         "--transport",

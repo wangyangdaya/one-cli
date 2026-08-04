@@ -395,12 +395,12 @@ func TestGeneratedSkillDocumentsResponseSchemas(t *testing.T) {
 		Name: "analysis-cli",
 		Groups: []model.Group{
 			{
-				Name: "chery-global",
+				Name: "global-analytics",
 				Operations: []model.Operation{
 					{
 						CommandName: "quality",
 						Method:      "GET",
-						Path:        "/cheryGlobal/aiAgent/qulity",
+						Path:        "/analytics/aiAgent/quality",
 						Summary:     "质量",
 						Responses: []model.Response{
 							{
@@ -436,14 +436,14 @@ func TestGeneratedSkillDocumentsResponseSchemas(t *testing.T) {
 	if err := render.Project(dir, "github.com/acme/analysis-cli", app, "go", "zh"); err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "chery-global", "SKILL.md"))
+	skillContent, err := os.ReadFile(filepath.Join(dir, "skills", "global-analytics", "SKILL.md"))
 	if err != nil {
 		t.Fatalf("read generated skill: %v", err)
 	}
 	skillText := string(skillContent)
 	for _, want := range []string{
-		"name: chery-global",
-		"analysis-cli skills read chery-global",
+		"name: global-analytics",
+		"analysis-cli skills read global-analytics",
 		"状态码：`200`",
 		"内容类型：`*/*`",
 		"`ResultAiQualityVO`",
@@ -455,7 +455,7 @@ func TestGeneratedSkillDocumentsResponseSchemas(t *testing.T) {
 			t.Fatalf("generated skill missing response documentation %q:\n%s", want, skillText)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, "skills", "chery_global")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, "skills", "global_analytics")); !os.IsNotExist(err) {
 		t.Fatalf("legacy underscore skill directory should not exist, got err: %v", err)
 	}
 }

@@ -231,6 +231,79 @@ auth:
 	}
 }
 
+func TestLoadAndSealOAuth2AuthorizationCodeWithPKCEAndOIDC(t *testing.T) {
+	path := writeRuntimeSource(t, `
+base_url: https://business-api.example.com
+auth:
+  type: oauth2
+  grant_type: authorization_code
+  client_id: business-cli
+  authorization_url: https://identity.example.com/authorize
+  token_url: https://identity.example.com/token
+  scopes: [openid, profile]
+  pkce:
+    enabled: true
+  oidc:
+    enabled: true
+    issuer: https://identity.example.com
+  token_exchange:
+    method: POST
+    body_format: form
+    parameters:
+      - {source: code, name: code, in: body, required: true}
+      - {source: code_verifier, name: code_verifier, in: body, required: true}
+    response:
+      access_token: {in: body, path: data.access_token}
+      id_token: {in: body, path: data.id_token}
+`)
+
+	bundle, err := LoadAndSeal(path, SealOptions{AuthMode: "oauth2"})
+	if err != nil {
+		t.Fatalf("LoadAndSeal: %v", err)
+	}
+	if !bundle.OAuth2PKCEEnabled || !bundle.OIDCEnabled {
+		t.Fatalf("bundle feature flags = PKCE %v, OIDC %v", bundle.OAuth2PKCEEnabled, bundle.OIDCEnabled)
+	}
+	for _, want := range []string{
+		"pkce:", "enabled: true", "method: S256", "oidc:",
+		"issuer: https://identity.example.com", "source: code_verifier", "id_token:",
+	} {
+		if !bytes.Contains(bundle.YAML, []byte(want)) {
+			t.Fatalf("generated YAML is missing %q:\n%s", want, bundle.YAML)
+		}
+	}
+}
+
+func TestLoadAndSealRejectsInvalidPKCEAndOIDC(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra string
+		want  string
+	}{
+		{name: "PKCE plain", extra: "pkce:\n    enabled: true\n    method: plain", want: "S256"},
+		{name: "OIDC missing issuer", extra: "scopes: [openid]\n  oidc:\n    enabled: true", want: "issuer"},
+		{name: "OIDC missing openid", extra: "oidc:\n    enabled: true\n    issuer: https://identity.example.com", want: "openid"},
+		{name: "custom PKCE exchange missing verifier", extra: "pkce:\n    enabled: true\n  token_exchange:\n    method: POST\n    body_format: form\n    parameters:\n      - {source: code, name: code, in: body}", want: "code_verifier"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeRuntimeSource(t, `
+auth:
+  type: oauth2
+  grant_type: authorization_code
+  client_id: business-cli
+  authorization_url: https://identity.example.com/authorize
+  token_url: https://identity.example.com/token
+  `+tt.extra)
+			_, err := LoadAndSeal(path, SealOptions{AuthMode: "oauth2"})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadAndSealOAuth2AuthorizationCodeRejectsNonLoopbackRedirect(t *testing.T) {
 	path := writeRuntimeSource(t, `
 auth:

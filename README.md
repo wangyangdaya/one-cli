@@ -396,9 +396,18 @@ OPENCLI_CONFIG='./config/staging.yaml' ./bin/mycli <group> <command>
 | 只固定 Base URL，不认证 | `runtime.yaml` 只写 `base_url`，并使用 `--auth none` |
 | 固定 Base URL，并把 Token 密封进 CLI | `runtime.yaml` 写 `base_url` 和 `auth.type: bearer`，生成时导出 `OPENCLI_AUTH_TOKEN` |
 
-#### OAuth 2.0 Client Credentials
+#### OAuth 2.0
 
-`--auth oauth2` 当前明确表示 OAuth 2.0 Client Credentials，不是所有 OAuth 2.0 Grant Type 的统称。`--auth` 只选择认证机制，因此不另设只能填写一个值的 Grant Type 参数；生成配置会显式写入 `grant_type: client_credentials`，其他 Grant Type 会被拒绝。生成器从 OpenAPI `components.securitySchemes` 读取唯一的 `clientCredentials.tokenUrl` 和 scopes，并根据 Token 操作中 `client_id`、`client_secret` 参数的位置识别三方兼容方式。当前支持 `basic`、`body` 和 `query` 三种 Client Secret 位置。
+`--auth oauth2` 选择 OAuth2 运行时，具体流程由 `runtime.yaml` 的 `auth.grant_type` 决定。当前支持：
+
+- `client_credentials`：应用身份；生成器可从唯一的 OpenAPI Client Credentials Security Scheme 补齐 Token URL 和 scopes。
+- `authorization_code`：用户浏览器授权；生成顶层 `login`、`status`、`logout`，支持固定或动态 loopback 回调、Refresh Token、可选 PKCE S256 和可选 OIDC ID Token 校验。
+
+不使用独立的 `--auth oidc` 或 `--auth oauth2-pkce` 参数。
+
+##### Client Credentials
+
+生成器根据 Token 操作中 `client_id`、`client_secret` 参数的位置识别三方兼容方式。当前支持 `basic`、`body` 和 `query` 三种 Client Secret 位置。
 
 运行配置中的 `client_id` 是公开标识，不加密；`client_secret` 在生成时从 `OPENCLI_OAUTH_CLIENT_SECRET` 读取并密封到 `encrypted_value`：
 
@@ -441,6 +450,52 @@ opencli generate \
 运行时，CLI 对声明该 OAuth Security Scheme 的受保护操作自动获取 Access Token 并注入 `Authorization: Bearer <access_token>`。当 `--auth oauth2` 启用时，对应的 Token Endpoint operation 不再生成公开命令，避免产生要求用户传入 `--client-secret` 的重复入口。可使用 `OPENCLI_OAUTH_CLIENT_SECRET` 临时覆盖密封的 Client Secret。
 
 `query` 表示三方 Token Endpoint 要求把 `client_id` 和 `client_secret` 放在 URL Query 中。该方式可能被代理或访问日志记录，生成运行时不会在错误信息中输出完整 Token URL；如果三方支持，应优先使用 `basic` 或 `body`。
+
+##### Authorization Code、PKCE 与 OIDC
+
+最小 Authorization Code 配置：
+
+```yaml
+base_url: https://api.example.com
+auth:
+  type: oauth2
+  grant_type: authorization_code
+  client_id: business-cli
+  authorization_url: https://identity.example.com/authorize
+  token_url: https://identity.example.com/token
+  redirect_uri: http://127.0.0.1:18081/oauth/callback # 可选；省略则使用随机空闲端口
+```
+
+开启 PKCE 和 OIDC：
+
+```yaml
+auth:
+  type: oauth2
+  grant_type: authorization_code
+  client_id: business-cli
+  authorization_url: https://identity.example.com/authorize
+  token_url: https://identity.example.com/token
+  scopes: [openid, profile]
+  pkce:
+    enabled: true
+    method: S256
+  oidc:
+    enabled: true
+    issuer: https://identity.example.com
+```
+
+PKCE 只支持 `S256`。OIDC 开启时要求 `openid` scope，通过 Discovery/JWKS 校验 RS256 ID Token 的签名、`iss`、`aud`、`azp`、`exp`、`iat` 和 `nonce`，校验成功后才保存 OAuth 会话。ID Token 不作为业务 API Bearer Token，也不写入本地 token 文件。
+
+```bash
+./bin/business-cli login
+./bin/business-cli login --no-browser
+./bin/business-cli status
+./bin/business-cli logout
+```
+
+默认会话文件位于 `$HOME/.opencli/oauth2/<配置哈希>/oauth-token.json`；可用 `OPENCLI_OAUTH_TOKEN_FILE` 显式覆盖。受保护业务命令会在 Access Token 距离到期不足 5 分钟时使用 Refresh Token 续期，`status` 本身不发起刷新。
+
+详细配置、业务 Token 接口映射与安全边界见 [`docs/design/oauth2-authorization-code-runtime.md`](docs/design/oauth2-authorization-code-runtime.md) 和 [`oauth2/OAUTH2_AUTHORIZATION_CODE_CONTRACT.md`](oauth2/OAUTH2_AUTHORIZATION_CODE_CONTRACT.md)。
 
 ### `opencli package`
 

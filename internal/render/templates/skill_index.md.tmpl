@@ -11,7 +11,7 @@ Use this file as a lightweight index. Read the per-group `SKILL.md` before actin
 | Skill | Commands | Guide |
 | --- | ---: | --- |
 {{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
-| `cli-auth` | 2 | [CLI login and session management](cli-auth/SKILL.md) |
+| `cli-auth` | 3 | [CLI login and session management](cli-auth/SKILL.md) |
 {{- end }}
 {{- range .App.Groups }}
 | `{{ skillName . }}` | {{ len .Operations }} | [`SKILL.md`]({{ skillName . }}/SKILL.md) |

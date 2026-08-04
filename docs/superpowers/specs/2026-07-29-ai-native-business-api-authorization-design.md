@@ -4,9 +4,7 @@
 
 > 独立对接指南：[one-cli 用户授权对接与本地验证指南](../../design/oidc-cli-business-integration.md)。
 
-> 实施状态：根目录 `oauth2/` FastAPI 验证服务已经完成。
->
-> one-cli `--auth oidc`、`--auth oauth2-pkce`、PKCE 生成客户端、Keychain 和认证命令尚待实施。本文中的相关 CLI 命令是目标契约，不代表当前版本已经支持。
+> 实施状态（2026-08-04）：one-cli 已通过 `--auth oauth2` + `grant_type: authorization_code` 支持可选 PKCE S256 和可选 OIDC 校验，Go/Rust 均生成顶层 `login`、`status`、`logout`。当前没有独立的 `--auth oidc`、`--auth oauth2-pkce`，也没有 Keychain、`auth check`、`identity current` 或远程 revoke；本文中这些内容仍是后续目标契约。当前准确用法以 [用户授权对接指南](../../design/oidc-cli-business-integration.md) 为准。
 
 ## 1. 文档摘要
 

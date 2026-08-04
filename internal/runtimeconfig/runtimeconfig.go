@@ -36,12 +36,14 @@ type OAuth2Defaults struct {
 }
 
 type Bundle struct {
-	YAML            []byte
-	KeyShareA       [32]byte
-	KeyShareB       [32]byte
-	HasSecret       bool
-	OAuth2GrantType string
-	OAuth2TokenURL  string
+	YAML              []byte
+	KeyShareA         [32]byte
+	KeyShareB         [32]byte
+	HasSecret         bool
+	OAuth2GrantType   string
+	OAuth2TokenURL    string
+	OAuth2PKCEEnabled bool
+	OIDCEnabled       bool
 }
 
 type sourceConfig struct {
@@ -61,7 +63,19 @@ type sourceAuth struct {
 	RedirectURI      string           `yaml:"redirect_uri,omitempty"`
 	ClientAuth       sourceClientAuth `yaml:"client_auth,omitempty"`
 	Scopes           []string         `yaml:"scopes,omitempty"`
+	PKCE             *oauthPKCE       `yaml:"pkce,omitempty"`
+	OIDC             *oidcConfig      `yaml:"oidc,omitempty"`
 	TokenExchange    *tokenExchange   `yaml:"token_exchange,omitempty"`
+}
+
+type oauthPKCE struct {
+	Enabled bool   `yaml:"enabled,omitempty"`
+	Method  string `yaml:"method,omitempty"`
+}
+
+type oidcConfig struct {
+	Enabled bool   `yaml:"enabled,omitempty"`
+	Issuer  string `yaml:"issuer,omitempty"`
 }
 
 type tokenExchange struct {
@@ -86,6 +100,7 @@ type tokenExchangeResponse struct {
 	Scope                 *tokenExchangeResult `yaml:"scope,omitempty"`
 	ExpiresIn             *tokenExchangeResult `yaml:"expires_in,omitempty"`
 	RefreshTokenExpiresIn *tokenExchangeResult `yaml:"refresh_token_expires_in,omitempty"`
+	IDToken               *tokenExchangeResult `yaml:"id_token,omitempty"`
 }
 
 type tokenExchangeResult struct {
@@ -115,6 +130,8 @@ type sealedAuth struct {
 	RedirectURI      string           `yaml:"redirect_uri,omitempty"`
 	ClientAuth       sourceClientAuth `yaml:"client_auth,omitempty"`
 	Scopes           []string         `yaml:"scopes,omitempty"`
+	PKCE             *oauthPKCE       `yaml:"pkce,omitempty"`
+	OIDC             *oidcConfig      `yaml:"oidc,omitempty"`
 	TokenExchange    *tokenExchange   `yaml:"token_exchange,omitempty"`
 	EncryptedValue   string           `yaml:"encrypted_value,omitempty"`
 }
@@ -155,9 +172,11 @@ func LoadAndSeal(path string, opts SealOptions) (Bundle, error) {
 			return Bundle{}, fmt.Errorf("encode runtime config: %w", err)
 		}
 		return Bundle{
-			YAML:            rendered,
-			OAuth2GrantType: "authorization_code",
-			OAuth2TokenURL:  strings.TrimSpace(source.Auth.TokenURL),
+			YAML:              rendered,
+			OAuth2GrantType:   "authorization_code",
+			OAuth2TokenURL:    strings.TrimSpace(source.Auth.TokenURL),
+			OAuth2PKCEEnabled: source.Auth.PKCE != nil && source.Auth.PKCE.Enabled,
+			OIDCEnabled:       source.Auth.OIDC != nil && source.Auth.OIDC.Enabled,
 		}, nil
 	}
 
@@ -258,6 +277,12 @@ func validateSource(source sourceConfig, authMode string) error {
 			return fmt.Errorf("api_key auth requires header")
 		}
 	case "oauth2":
+		if source.Auth.PKCE != nil && source.Auth.PKCE.Enabled && strings.TrimSpace(source.Auth.GrantType) != "authorization_code" {
+			return fmt.Errorf("oauth2 pkce is only supported for authorization_code")
+		}
+		if source.Auth.OIDC != nil && source.Auth.OIDC.Enabled && strings.TrimSpace(source.Auth.GrantType) != "authorization_code" {
+			return fmt.Errorf("oauth2 oidc is only supported for authorization_code")
+		}
 		if source.Auth.TokenExchange != nil && strings.TrimSpace(source.Auth.GrantType) != "authorization_code" {
 			return fmt.Errorf("oauth2 token_exchange is only supported for authorization_code")
 		}
@@ -280,7 +305,19 @@ func validateSource(source sourceConfig, authMode string) error {
 			if strings.TrimSpace(source.Auth.ClientAuth.Method) != "" || strings.TrimSpace(source.Auth.ClientAuth.Placement) != "" {
 				return fmt.Errorf("oauth2 authorization_code must not define client_auth")
 			}
-			if err := validateTokenExchange(source.Auth.TokenExchange); err != nil {
+			pkceEnabled := source.Auth.PKCE != nil && source.Auth.PKCE.Enabled
+			if pkceEnabled {
+				method := strings.TrimSpace(source.Auth.PKCE.Method)
+				if method != "" && !strings.EqualFold(method, "S256") {
+					return fmt.Errorf("oauth2 pkce.method must be S256")
+				}
+			}
+			if source.Auth.OIDC != nil && source.Auth.OIDC.Enabled {
+				if err := validateOIDC(*source.Auth.OIDC, source.Auth.Scopes); err != nil {
+					return err
+				}
+			}
+			if err := validateTokenExchange(source.Auth.TokenExchange, pkceEnabled); err != nil {
 				return err
 			}
 			return nil
@@ -316,7 +353,7 @@ func validateLoopbackRedirectURI(value string) error {
 	return nil
 }
 
-func validateTokenExchange(exchange *tokenExchange) error {
+func validateTokenExchange(exchange *tokenExchange, pkceEnabled bool) error {
 	if exchange == nil {
 		return nil
 	}
@@ -335,6 +372,7 @@ func validateTokenExchange(exchange *tokenExchange) error {
 	}
 	hasBody := false
 	hasCode := false
+	hasCodeVerifier := false
 	for i, parameter := range exchange.Parameters {
 		source := strings.ToLower(strings.TrimSpace(parameter.Source))
 		name := strings.TrimSpace(parameter.Name)
@@ -345,6 +383,8 @@ func validateTokenExchange(exchange *tokenExchange) error {
 		switch source {
 		case "code":
 			hasCode = true
+		case "code_verifier":
+			hasCodeVerifier = true
 		case "state", "client_id", "redirect_uri", "scope", "grant_type":
 		case "literal":
 			if strings.TrimSpace(parameter.Value) == "" {
@@ -364,6 +404,9 @@ func validateTokenExchange(exchange *tokenExchange) error {
 	if !hasCode {
 		return fmt.Errorf("oauth2 token_exchange requires one code parameter")
 	}
+	if pkceEnabled && !hasCodeVerifier {
+		return fmt.Errorf("oauth2 token_exchange with pkce requires one code_verifier parameter")
+	}
 	if hasBody && bodyFormat == "" {
 		return fmt.Errorf("oauth2 token_exchange body_format is required for body parameters")
 	}
@@ -375,6 +418,7 @@ func validateTokenExchange(exchange *tokenExchange) error {
 			"scope":                    exchange.Response.Scope,
 			"expires_in":               exchange.Response.ExpiresIn,
 			"refresh_token_expires_in": exchange.Response.RefreshTokenExpiresIn,
+			"id_token":                 exchange.Response.IDToken,
 		} {
 			if err := validateTokenExchangeResult(name, result); err != nil {
 				return err
@@ -382,6 +426,26 @@ func validateTokenExchange(exchange *tokenExchange) error {
 		}
 	}
 	return nil
+}
+
+func validateOIDC(oidc oidcConfig, scopes []string) error {
+	issuer := strings.TrimSpace(oidc.Issuer)
+	if issuer == "" {
+		return fmt.Errorf("oauth2 oidc requires issuer")
+	}
+	parsed, err := url.Parse(issuer)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
+		return fmt.Errorf("oauth2 oidc.issuer must be an absolute URL without query or fragment")
+	}
+	if parsed.Scheme != "https" && !(parsed.Scheme == "http" && (parsed.Hostname() == "127.0.0.1" || parsed.Hostname() == "localhost")) {
+		return fmt.Errorf("oauth2 oidc.issuer must use HTTPS except for loopback development")
+	}
+	for _, scope := range scopes {
+		if strings.TrimSpace(scope) == "openid" {
+			return nil
+		}
+	}
+	return fmt.Errorf("oauth2 oidc requires the openid scope")
 }
 
 func validateTokenExchangeResult(name string, result *tokenExchangeResult) error {
@@ -440,8 +504,30 @@ func sealedAuthFromSource(auth sourceAuth) *sealedAuth {
 			Placement: strings.TrimSpace(auth.ClientAuth.Placement),
 		},
 		Scopes:        append([]string(nil), auth.Scopes...),
+		PKCE:          normalizePKCE(auth.PKCE),
+		OIDC:          normalizeOIDC(auth.OIDC),
 		TokenExchange: normalizeTokenExchange(auth.TokenExchange),
 	}
+}
+
+func normalizePKCE(pkce *oauthPKCE) *oauthPKCE {
+	if pkce == nil {
+		return nil
+	}
+	result := &oauthPKCE{Enabled: pkce.Enabled, Method: strings.TrimSpace(pkce.Method)}
+	if result.Enabled && result.Method == "" {
+		result.Method = "S256"
+	} else if strings.EqualFold(result.Method, "S256") {
+		result.Method = "S256"
+	}
+	return result
+}
+
+func normalizeOIDC(oidc *oidcConfig) *oidcConfig {
+	if oidc == nil {
+		return nil
+	}
+	return &oidcConfig{Enabled: oidc.Enabled, Issuer: strings.TrimSpace(oidc.Issuer)}
 }
 
 func normalizeTokenExchange(exchange *tokenExchange) *tokenExchange {

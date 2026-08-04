@@ -503,12 +503,12 @@ func TestSupplierSignMatchesGatewayExample(t *testing.T) {
 }
 
 func TestSupplierSignMatchesOfficialDocumentExample(t *testing.T) {
-	body := []byte(` + "`" + `{"batchNo":"fasdfsd202506090084","total":1,"pageSize":1,"pageNum":1,"list":[{"supplierCode":"TS","supplierName":"测试","plantId":"测试1","plantName":"测试2","vendorProductNo":"201034AA","vendorProductName":"电动转向管","cheryProductNo":"20104AA","manufactureNum":"2000.00","manufactureInputNum":1764,"actualBeginTime":"2025-06-06 08:27:05","actualEndTime":""}]}` + "`" + `)
+	body := []byte(` + "`" + `{"batchNo":"fasdfsd202506090084","total":1,"pageSize":1,"pageNum":1,"list":[{"supplierCode":"TS","supplierName":"测试","plantId":"测试1","plantName":"测试2","vendorProductNo":"201034AA","vendorProductName":"示例产品","brandProductNo":"20104AA","manufactureNum":"2000.00","manufactureInputNum":1764,"actualBeginTime":"2025-06-06 08:27:05","actualEndTime":""}]}` + "`" + `)
 	got, err := sign("8e79ac36fcce490", "e1231387b0bd684ac7a27dde792e836785", "POST", "/api-apply/v2/push/supplierProMaterialStock", body, "1747386804000", "1747382356599Hd")
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
-	want := "594b2a0b2583befc29b34017b2371c5dd1b1721b5d87040fcdb3216a4b2319ad8b71d1e27d797b4fb10646abed8b43643b0b2c6a2e836f08d2ef2a6e13757657"
+	want := "b149b3158f721f7ae5e446ba3d459e102b3caefef94c57135a516996ef41880b54eabd3ee3c6c43dbbd13c5700d1f815a203bd6be57404eccb8e5aa23e963d31"
 	if got != want {
 		t.Fatalf("sign mismatch: got %s want %s", got, want)
 	}
@@ -867,7 +867,7 @@ func TestGenerateCommandAcceptsAPIKeyRuntimeConfig(t *testing.T) {
 func TestGenerateCommandAcceptsOAuth2ClientCredentials(t *testing.T) {
 	dir := t.TempDir()
 	runtimeSource := filepath.Join(t.TempDir(), "runtime.yaml")
-	if err := os.WriteFile(runtimeSource, []byte("base_url: https://hfins-uat-gtw.mychery.com\nauth:\n  type: oauth2\n  client_id: fssc-opencli\n"), 0o600); err != nil {
+	if err := os.WriteFile(runtimeSource, []byte("base_url: https://finance.example.com\nauth:\n  type: oauth2\n  client_id: example-opencli\n"), 0o600); err != nil {
 		t.Fatalf("write runtime source: %v", err)
 	}
 	t.Setenv("OPENCLI_OAUTH_CLIENT_SECRET", "command-test-oauth-secret")
@@ -893,7 +893,7 @@ func TestGenerateCommandAcceptsOAuth2ClientCredentials(t *testing.T) {
 		"type: oauth2",
 		"grant_type: client_credentials",
 		"scheme: fsscOAuth",
-		"client_id: fssc-opencli",
+		"client_id: example-opencli",
 		"placement: query",
 		"encrypted_value: ENC[v1:",
 	} {

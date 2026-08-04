@@ -16,6 +16,9 @@ type documentedCommand struct {
 
 func validateDocumentedCommands(project projectInfo) error {
 	for _, groupDir := range project.Groups {
+		if groupDir == "cli-auth" {
+			continue
+		}
 		source := filepath.Join(project.SkillsDir, groupDir)
 		referencePath := filepath.Join(source, "references", "commands.md")
 		reference, err := os.ReadFile(referencePath)

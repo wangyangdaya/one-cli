@@ -1,5 +1,8 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -20,6 +23,7 @@ struct TokenResponse {
     scope: String,
     expires_in: u64,
     refresh_token_expires_in: u64,
+    id_token: String,
 }
 
 pub async fn login(app_name: &str, no_browser: bool) -> AppResult<()> {
@@ -38,7 +42,15 @@ pub async fn login(app_name: &str, no_browser: bool) -> AppResult<()> {
         format!("http://{}{}", listener.local_addr().expect("listener address"), callback_path)
     });
     let state = random_state()?;
-    let authorize_url = build_authorize_url(&auth, &redirect_uri, &state)?;
+    let code_verifier = if auth.pkce_enabled { random_state()? } else { String::new() };
+    let code_challenge = if auth.pkce_enabled {
+        use sha2::{Digest, Sha256};
+        URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()))
+    } else {
+        String::new()
+    };
+    let nonce = if auth.oidc_enabled { random_state()? } else { String::new() };
+    let authorize_url = build_authorize_url(&auth, &redirect_uri, &state, &code_challenge, &nonce)?;
 
     println!("{authorize_url}");
     std::io::stdout().flush().map_err(|err| err.to_string())?;
@@ -47,7 +59,10 @@ pub async fn login(app_name: &str, no_browser: bool) -> AppResult<()> {
     }
 
     let code = wait_for_callback(&listener, &state, &callback_path)?;
-    let token = exchange_authorization_code(&auth, &code, &state, &redirect_uri).await?;
+    let token = exchange_authorization_code(&auth, &code, &state, &redirect_uri, &code_verifier).await?;
+    if auth.oidc_enabled {
+        validate_oidc_id_token(&auth, &token.id_token, &nonce).await?;
+    }
     crate::runtime_config::save_oauth_authorization_token(
         app_name,
         &token.access_token,
@@ -72,7 +87,7 @@ pub fn logout(app_name: &str) -> AppResult<()> {
     Ok(())
 }
 
-fn build_authorize_url(auth: &OAuthAuthorizationConfig, redirect_uri: &str, state: &str) -> AppResult<String> {
+fn build_authorize_url(auth: &OAuthAuthorizationConfig, redirect_uri: &str, state: &str, code_challenge: &str, nonce: &str) -> AppResult<String> {
     let mut endpoint = reqwest::Url::parse(&auth.authorization_url).map_err(|_| "invalid OAuth authorization_url".to_string())?;
     if endpoint.host_str().is_none() {
         return Err("invalid OAuth authorization_url".to_string());
@@ -85,6 +100,13 @@ fn build_authorize_url(auth: &OAuthAuthorizationConfig, redirect_uri: &str, stat
         query.append_pair("state", state);
         if !auth.scopes.is_empty() {
             query.append_pair("scope", &auth.scopes.join(" "));
+        }
+        if auth.pkce_enabled {
+            query.append_pair("code_challenge", code_challenge);
+            query.append_pair("code_challenge_method", "S256");
+        }
+        if auth.oidc_enabled {
+            query.append_pair("nonce", nonce);
         }
     }
     Ok(endpoint.to_string())
@@ -155,7 +177,7 @@ fn write_callback_response(stream: &mut TcpStream, status: &str, body: &str) -> 
     stream.write_all(response.as_bytes()).map_err(|err| format!("write OAuth callback response: {err}"))
 }
 
-async fn exchange_authorization_code(auth: &OAuthAuthorizationConfig, code: &str, state: &str, redirect_uri: &str) -> AppResult<TokenResponse> {
+async fn exchange_authorization_code(auth: &OAuthAuthorizationConfig, code: &str, state: &str, redirect_uri: &str, code_verifier: &str) -> AppResult<TokenResponse> {
     let mut endpoint = reqwest::Url::parse(&auth.token_url).map_err(|_| "invalid OAuth token_url".to_string())?;
     if endpoint.host_str().is_none() {
         return Err("invalid OAuth token_url".to_string());
@@ -180,7 +202,7 @@ async fn exchange_authorization_code(auth: &OAuthAuthorizationConfig, code: &str
         {
             let mut query = endpoint.query_pairs_mut();
             for parameter in &exchange.parameters {
-                let value = token_exchange_source_value(parameter, code, state, auth, redirect_uri);
+                let value = token_exchange_source_value(parameter, code, state, auth, redirect_uri, code_verifier);
                 if value.trim().is_empty() {
                     if parameter.required {
                         return Err(format!("OAuth token exchange parameter {:?} is required", parameter.name));
@@ -209,12 +231,15 @@ async fn exchange_authorization_code(auth: &OAuthAuthorizationConfig, code: &str
             _ => builder,
         }
     } else {
-        let form = [
+        let mut form = vec![
             ("grant_type", "authorization_code"),
             ("client_id", auth.client_id.as_str()),
             ("code", code),
             ("redirect_uri", redirect_uri),
         ];
+        if auth.pkce_enabled {
+            form.push(("code_verifier", code_verifier));
+        }
         client.post(endpoint.clone()).form(&form)
     };
     request = request.header("Accept", "application/json");
@@ -240,9 +265,10 @@ async fn exchange_authorization_code(auth: &OAuthAuthorizationConfig, code: &str
     let refresh_token = token_exchange_response_string(auth, &response_headers, &body, "refresh_token");
     let token_type = token_exchange_response_string(auth, &response_headers, &body, "token_type");
     let scope = token_exchange_response_string(auth, &response_headers, &body, "scope");
+    let id_token = token_exchange_response_string(auth, &response_headers, &body, "id_token");
     let expires_in = token_exchange_response_u64(auth, &response_headers, &body, "expires_in")?;
     let refresh_token_expires_in = token_exchange_response_u64(auth, &response_headers, &body, "refresh_token_expires_in")?;
-    let token = TokenResponse { access_token, refresh_token, token_type, scope, expires_in, refresh_token_expires_in };
+    let token = TokenResponse { access_token, refresh_token, token_type, scope, expires_in, refresh_token_expires_in, id_token };
     if token.access_token.trim().is_empty() {
         return Err("business token response is missing access_token".to_string());
     }
@@ -258,10 +284,12 @@ fn token_exchange_source_value(
     state: &str,
     auth: &OAuthAuthorizationConfig,
     redirect_uri: &str,
+    code_verifier: &str,
 ) -> String {
     match parameter.source.trim() {
         "code" => code.to_string(),
         "state" => state.to_string(),
+        "code_verifier" => code_verifier.to_string(),
         "client_id" => auth.client_id.clone(),
         "redirect_uri" => redirect_uri.to_string(),
         "scope" => auth.scopes.join(" "),
@@ -279,6 +307,7 @@ fn token_exchange_result(auth: &OAuthAuthorizationConfig, name: &str) -> (String
             "refresh_token" => response.refresh_token.as_ref(),
             "token_type" => response.token_type.as_ref(),
             "scope" => response.scope.as_ref(),
+            "id_token" => response.id_token.as_ref(),
             "refresh_token_expires_in" => response.refresh_token_expires_in.as_ref(),
             _ => response.expires_in.as_ref(),
         });
@@ -328,6 +357,149 @@ fn random_state() -> AppResult<String> {
     let mut bytes = [0u8; 32];
     getrandom::getrandom(&mut bytes).map_err(|err| format!("generate OAuth state: {err}"))?;
     Ok(URL_SAFE_NO_PAD.encode(bytes))
+}
+
+#[derive(Deserialize)]
+struct OidcDiscovery {
+    issuer: String,
+    jwks_uri: String,
+}
+
+#[derive(Deserialize)]
+struct OidcJwkSet {
+    keys: Vec<OidcJwk>,
+}
+
+#[derive(Deserialize)]
+struct OidcJwk {
+    #[serde(default)]
+    kid: String,
+    kty: String,
+    #[serde(default, rename = "use")]
+    key_use: String,
+    #[serde(default)]
+    alg: String,
+    n: String,
+    e: String,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum OidcAudience {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl OidcAudience {
+    fn values(&self) -> Vec<&str> {
+        match self {
+            Self::One(value) => vec![value.as_str()],
+            Self::Many(values) => values.iter().map(String::as_str).collect(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct OidcClaims {
+    iss: String,
+    aud: OidcAudience,
+    exp: u64,
+    iat: u64,
+    nonce: String,
+    #[serde(default)]
+    azp: String,
+}
+
+async fn validate_oidc_id_token(auth: &OAuthAuthorizationConfig, raw_token: &str, expected_nonce: &str) -> AppResult<()> {
+    if raw_token.trim().is_empty() {
+        return Err("OIDC token response is missing id_token".to_string());
+    }
+    let discovery_url = format!("{}/.well-known/openid-configuration", auth.oidc_issuer.trim_end_matches('/'));
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|err| err.to_string())?;
+    let discovery_endpoint = validate_oidc_endpoint(&discovery_url)?;
+    let discovery: OidcDiscovery = fetch_oidc_json(&client, discovery_endpoint, "OIDC discovery").await?;
+    if discovery.issuer != auth.oidc_issuer {
+        return Err("OIDC discovery issuer mismatch".to_string());
+    }
+    if discovery.jwks_uri.trim().is_empty() {
+        return Err("OIDC discovery is missing jwks_uri".to_string());
+    }
+    let jwks_endpoint = validate_oidc_endpoint(&discovery.jwks_uri)?;
+    let jwks: OidcJwkSet = fetch_oidc_json(&client, jwks_endpoint, "OIDC JWKS").await?;
+    let header = decode_header(raw_token).map_err(|err| format!("decode OIDC id_token header: {err}"))?;
+    if header.alg != Algorithm::RS256 {
+        return Err("OIDC id_token algorithm must be RS256".to_string());
+    }
+    let key_id = header.kid.as_deref().unwrap_or_default();
+    let matches = jwks.keys.iter().filter(|key| {
+        key.kty == "RSA"
+            && (key.key_use.is_empty() || key.key_use == "sig")
+            && (key.alg.is_empty() || key.alg == "RS256")
+            && (key_id.is_empty() || key.kid == key_id)
+    }).collect::<Vec<_>>();
+    if matches.len() != 1 {
+        return Err("OIDC JWKS does not contain one matching RS256 key".to_string());
+    }
+    let decoding_key = DecodingKey::from_rsa_components(&matches[0].n, &matches[0].e)
+        .map_err(|err| format!("decode OIDC RSA key: {err}"))?;
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.set_issuer(&[auth.oidc_issuer.as_str()]);
+    validation.set_audience(&[auth.client_id.as_str()]);
+    validation.leeway = 60;
+    let token = decode::<OidcClaims>(raw_token, &decoding_key, &validation)
+        .map_err(|err| format!("verify OIDC id_token: {err}"))?;
+    let claims = token.claims;
+    if claims.iss != auth.oidc_issuer {
+        return Err("OIDC id_token issuer mismatch".to_string());
+    }
+    let audiences = claims.aud.values();
+    if !audiences.iter().any(|audience| *audience == auth.client_id) {
+        return Err("OIDC id_token audience mismatch".to_string());
+    }
+    if (audiences.len() > 1 || !claims.azp.is_empty()) && claims.azp != auth.client_id {
+        return Err("OIDC id_token authorized party mismatch".to_string());
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    if claims.exp.saturating_add(60) < now {
+        return Err("OIDC id_token is expired".to_string());
+    }
+    if claims.iat == 0 || claims.iat > now.saturating_add(60) {
+        return Err("OIDC id_token issued-at time is invalid".to_string());
+    }
+    if claims.nonce != expected_nonce {
+        return Err("OIDC id_token nonce mismatch".to_string());
+    }
+    Ok(())
+}
+
+fn validate_oidc_endpoint(target: &str) -> AppResult<reqwest::Url> {
+    let endpoint = reqwest::Url::parse(target).map_err(|_| "invalid OIDC endpoint URL".to_string())?;
+    let loopback_http = endpoint.scheme() == "http"
+        && matches!(endpoint.host_str(), Some("127.0.0.1" | "localhost"));
+    if endpoint.host_str().is_none() || !endpoint.username().is_empty() || endpoint.password().is_some() || endpoint.fragment().is_some()
+        || (endpoint.scheme() != "https" && !loopback_http)
+    {
+        return Err("OIDC endpoint must use HTTPS except for loopback development".to_string());
+    }
+    Ok(endpoint)
+}
+
+async fn fetch_oidc_json<T: DeserializeOwned>(client: &reqwest::Client, endpoint: reqwest::Url, label: &str) -> AppResult<T> {
+    let response = client.get(endpoint).send().await
+        .map_err(|err| format!("load {label}: {err}"))?
+        .error_for_status().map_err(|err| format!("load {label}: {err}"))?;
+    if response.content_length().unwrap_or_default() > 1 << 20 {
+        return Err(format!("{label} response exceeds one MiB"));
+    }
+    let body = response.bytes().await.map_err(|err| format!("read {label}: {err}"))?;
+    if body.len() > 1 << 20 {
+        return Err(format!("{label} response exceeds one MiB"));
+    }
+    serde_json::from_slice(&body).map_err(|err| format!("decode {label}: {err}"))
 }
 
 fn open_browser(target: &str) -> AppResult<()> {

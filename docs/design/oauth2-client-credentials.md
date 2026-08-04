@@ -1,6 +1,6 @@
 # OAuth 2.0 Client Credentials 生成设计
 
-> 本文只描述应用身份的 Client Credentials。个人数据和当前用户授权不得使用本模式，请参见 [one-cli OIDC 用户认证对接与本地验证指南](./oidc-cli-business-integration.md)。
+> 本文只描述应用身份的 Client Credentials。当前用户授权使用同一个 `--auth oauth2` 入口，但必须在 runtime 中明确配置 `grant_type: authorization_code`；参见 [one-cli 用户授权对接与本地验证指南](./oidc-cli-business-integration.md)。
 
 ## 目标
 
@@ -16,7 +16,7 @@
 
 - 未传 `--auth` 时先使用 `opencli.yaml` 的 `auth.type`，两者都为空时默认 `token`。
 - `token`：调用方已经持有 Bearer Token。
-- `oauth2`：CLI 使用 Client Credentials 获取 Access Token。
+- `oauth2`：具体流程由 runtime 的 `grant_type` 决定；本文只覆盖 `client_credentials`。
 - `api_key`：直接注入 API Key。
 - `ak_sk`：每次请求计算签名。
 - `none`：不注入认证信息。
@@ -103,7 +103,7 @@ Authorization: Bearer <access_token>
 - Runtime Config 当前只有一个配置格式，因此不设置无实际用途的顶层 schema version。
 - Bearer、API Key 和 OAuth Client Secret 统一复用 `encrypted_value`。
 - 不指定 `--auth oauth2` 时，不根据 OpenAPI 自动改变现有认证行为。
-- 本阶段不实现 Authorization Code、Device Code、Token Exchange、OIDC、mTLS 或 `private_key_jwt`。
+- Authorization Code、PKCE 和 OIDC 已由 `grant_type: authorization_code` 的运行时支持，但不属于本文范围。当前仍不支持 Device Code、OAuth Token Exchange Grant、mTLS 或 `private_key_jwt`。
 
 ## 验收
 

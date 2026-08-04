@@ -9,7 +9,7 @@
 - 业务命令：自动携带 access token，并在到期前 5 分钟刷新。
 - `logout`：删除本地 token 文件。
 
-该 Demo 不实现账号、登录页、OIDC、JWT、PKCE、多用户或服务端撤销，不应直接部署到生产环境。
+该飞书 Demo 本身不启用 OIDC、JWT、PKCE、多用户或服务端撤销，不应直接部署到生产环境。one-cli 生成器已经支持可选 PKCE S256 和 OIDC；是否启用由 runtime 配置决定，不会根据 scope 自动推断。
 
 ## 1. 飞书应用配置
 
@@ -24,14 +24,14 @@ App ID 同时用于 runtime 和 broker，两处必须一致。App Secret 只配�
 
 ## 2. Runtime 配置
 
-复制示例文件：
+直接编辑本目录中的 runtime 文件：
 
 ```bash
 # 在 one-cli 仓库根目录执行
-cp ./oauth2/opencli.runtime.yaml /tmp/feishu-opencli.runtime.yaml
+vim ./oauth2/opencli.runtime.yaml
 ```
 
-编辑 `/tmp/feishu-opencli.runtime.yaml`，将 `client_id` 替换为真实飞书 App ID：
+将 `oauth2/opencli.runtime.yaml` 中的 `client_id` 替换为真实飞书 App ID：
 
 ```yaml
 base_url: https://open.feishu.cn
@@ -55,10 +55,30 @@ auth:
 | `client_id` | 飞书 App ID，必须与 broker 的 `FEISHU_APP_ID` 一致 |
 | `authorization_url` | 浏览器打开的飞书授权页面 |
 | `token_url` | 本地 broker 的 code/refresh 接口 |
-| `redirect_uri` | CLI 本地回调地址，必须与飞书后台登记值完全一致 |
-| `offline_access` | 要求飞书返回 refresh token |
+| `redirect_uri` | 可选；配置后使用指定的固定回调地址。飞书要求该值与后台登记值完全一致 |
+| `scopes` | 可选；配置后作为授权请求的 `scope` 参数。飞书使用 `offline_access` 获取 refresh token |
 
-`redirect_uri` 使用固定端口 `18081`。启动 `login` 前，需要确保该端口未被其他进程占用。
+### 回调地址模式
+
+生成的 CLI 同时支持两种回调方式：
+
+- **固定回调地址**：配置 `redirect_uri`。适用于飞书等要求精确登记回调地址的授权服务器。本 Demo 固定使用 `http://127.0.0.1:18081/oauth/callback`，执行 `login` 前需确保端口 `18081` 未被占用。
+- **随机端口回调**：省略 `redirect_uri`。CLI 会监听 `127.0.0.1` 的随机空闲端口，并生成 `http://127.0.0.1:<随机端口>/oauth/callback`，授权请求和 code 换 token 请求都会使用该实际地址。仅适用于允许原生应用 loopback 回调使用任意端口的授权服务器。
+
+通用 OAuth 授权服务器如果不要求固定回调，也没有预先约定 scopes，可使用最小配置：
+
+```yaml
+base_url: https://api.example.com
+
+auth:
+  type: oauth2
+  grant_type: authorization_code
+  client_id: example-cli
+  authorization_url: https://idp.example.com/oauth/authorize
+  token_url: https://idp.example.com/oauth/token
+```
+
+省略 `scopes` 时，CLI 不会在授权 URL 中发送 `scope` 参数。如果授权服务器未返回 refresh token，登录和 access token 调用仍可使用，但 access token 到期后不能自动刷新，需要重新执行 `login`。
 
 ## 3. 启动 Token Broker
 
@@ -105,7 +125,7 @@ go run ./cmd/opencli generate \
   --module example.com/feishu-cli \
   --app feishu \
   --auth oauth2 \
-  --runtime-config /tmp/feishu-opencli.runtime.yaml
+  --runtime-config ./oauth2/opencli.runtime.yaml
 ```
 
 生成目录中的 `config/runtime.yaml` 已包含 runtime 配置。优先使用生成的 `bin/feishu` 启动器，它会自动设置 `OPENCLI_CONFIG`。
@@ -129,6 +149,14 @@ cd ./tmp/feishu-cli
 ```bash
 export OPENCLI_OAUTH_TOKEN_FILE=/tmp/feishu-oauth-token.json
 ```
+
+未设置 `OPENCLI_OAUTH_TOKEN_FILE` 时，CLI 默认保存在当前用户目录：
+
+```text
+$HOME/.opencli/oauth2/<配置哈希>/oauth-token.json
+```
+
+Windows 的 `$HOME` 对应 `%USERPROFILE%`。配置哈希由 `client_id`、`authorization_url` 和 `token_url` 计算，同名 CLI 连接不同 OAuth 应用时不会共用登录态。目录由 CLI 在首次登录成功时自动创建。
 
 依次执行：
 

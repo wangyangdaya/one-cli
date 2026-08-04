@@ -1,427 +1,293 @@
 # one-cli 用户授权对接与本地验证指南
 
-## 1. 文档目的
+## 1. 当前实现结论
 
-本文面向业务系统、身份平台和 one-cli 开发团队，说明如何把个人数据 API 接入终端 Agent。
+one-cli 当前通过统一的 `--auth oauth2` 生成 OAuth2 运行时，具体流程由 `runtime.yaml` 的 `auth.grant_type` 决定：
 
-新系统的目标协议是 OIDC + OAuth 2.0 Authorization Code + PKCE。存量系统可使用显式端点的 OAuth 2.0 Authorization Code + PKCE 兼容模式。
+| Runtime 配置 | 主体 | 当前支持 |
+| --- | --- | --- |
+| `grant_type: client_credentials` | 应用 | Client Credentials，支持 Basic、Body、Query 三种 Client Secret 位置 |
+| `grant_type: authorization_code` | 当前用户 | 浏览器授权、loopback 回调、Token 本地保存与自动刷新 |
+| Authorization Code + `pkce.enabled: true` | 当前用户 | PKCE S256 |
+| Authorization Code + `oidc.enabled: true` | 当前用户 | nonce、Discovery/JWKS、RS256 ID Token 校验 |
 
-CLI 属于 Public Client，不持有 `client_secret`，也不接收用户账号密码。
+当前没有独立的 `--auth oidc`、`--auth oauth2-pkce` 或 `--auth iam-code`。OIDC 和 PKCE 是 `oauth2 + authorization_code` 的显式可选能力。
 
-本文可以独立阅读。总体安全架构参见《企业业务系统 AI Native 认证授权架构与开发规范》。
+生成的用户登录命令位于顶层：
 
-## 2. 适用范围
+```bash
+business login
+business login --no-browser
+business status
+business logout
+```
 
-适用于终端电脑上的 Agent 代表当前用户访问个人数据，例如查询本人费用、考勤、审批和提交本人申请。
+当前不生成 `business auth login`、`auth check` 或 `identity current`。
 
-不适用于服务器 Agent、Device Flow、应用权限、工作负载身份、Client Credentials、AK/SK 或 API Key。
-
-业务 API 必须根据 Token 主体完成租户、资源、数据范围和操作权限校验。CLI 不是最终安全边界。
-
-## 3. 三种认证类型
-
-one-cli 中三个名称代表不同协议和主体，不得互相降级：
-
-| Generate 参数 | Runtime `type` | 主体 | 协议 | 用途 |
-| --- | --- | --- | --- | --- |
-| `--auth oidc` | `oidc` | 当前用户 | OIDC + Authorization Code + PKCE | 新系统的个人数据和用户委托 |
-| `--auth oauth2-pkce` | `oauth2_pkce` | 当前用户 | OAuth 2.0 Authorization Code + PKCE | 无 OIDC Discovery/ID Token 的存量系统 |
-| `--auth oauth2` | `oauth2` | 应用 | Client Credentials | 非个人应用调用 |
-
-`--auth oauth2` 是已有能力，仍表示 Client Credentials。
-
-命令行使用短横线 `oauth2-pkce`，YAML 类型使用下划线 `oauth2_pkce`，遵循现有 Runtime Config 命名风格。
-
-`--auth oidc` 和 `--auth oauth2-pkce` 都是用户授权目标契约，但不能互相伪装。没有稳定 issuer 和 ID Token 的服务不得声明为 `oidc`；仅缺少 Discovery 时可以显式配置 OIDC 端点。
-
-用户授权失败后，不得自动改用 `oauth2`、静态 Token、AK/SK 或 API Key。
-
-## 4. 当前实施状态
-
-截至 2026-07-31：
-
-| 能力 | 状态 |
-| --- | --- |
-| 根目录 FastAPI OIDC/OAuth2 验证服务 | 已实现 |
-| Discovery、JWKS、UserInfo、PKCE、Refresh、Revoke | 已实现 |
-| 个人费用 API 和用户数据隔离 | 已实现 |
-| `oauth2/openapi.yaml` 与 runtime 示例 | 已实现 |
-| one-cli `--auth oidc` 参数和生成模板 | 待实施 |
-| one-cli `--auth oauth2-pkce` 兼容模式 | 待实施 |
-| 生成 CLI 的 Keychain 和 `auth` 命令 | 待实施 |
-
-因此，本文中的两种用户授权命令都是目标接口。当前分支需完成用户授权 Provider 后才能执行完整端到端流程。
-
-## 5. CLI Generate 参数
-
-目标命令：
+## 2. 生成命令
 
 ```bash
 opencli generate \
   --input ./business.openapi.yaml \
   --output ./business-cli \
-  --app business \
   --module example.com/business-cli \
-  --auth oidc \
+  --app business \
+  --auth oauth2 \
   --runtime-config ./business.runtime.yaml
 ```
 
-参数职责：
+Go 和 Rust 目标均支持 Authorization Code、PKCE 和 OIDC：
 
-- `--auth oidc`：选择用户级 OIDC + PKCE Provider。
-- `--auth oauth2-pkce`：选择无 OIDC Discovery/ID Token 的存量 OAuth2 PKCE Provider。
-- `--runtime-config`：提供业务 API 和 Public Client 的公开配置。
-- `--input`：提供 operation、Security Scheme、scope 和 `x-ai-access`。
-- `--target`：选择 Go 或 Rust 生成目标；未实现的目标必须明确拒绝，不能生成不完整认证代码。
+```bash
+# Go，默认目标
+opencli generate ... --target go
 
-CLI 不通过 Generate 参数接收授权端点、用户名、密码、Token 或 `client_secret`。
+# Rust
+opencli generate ... --target rust
+```
 
-## 6. Runtime 配置
+CLI 属于 Public Client。Authorization Code 配置不得包含 `client_secret`，用户密码、MFA 和 SSO 只应出现在授权服务器的浏览器页面。
 
-### 6.1 标准 OIDC 模式
-
-新系统优先只配置 issuer：
+## 3. 基础 Authorization Code
 
 ```yaml
 base_url: https://business-api.example.com
 
 auth:
-  type: oidc
-  issuer: https://business-auth.example.com
+  type: oauth2
+  grant_type: authorization_code
   client_id: business-cli
-  audience: business-api
+  authorization_url: https://identity.example.com/authorize
+  token_url: https://identity.example.com/token
+  redirect_uri: http://127.0.0.1:18081/oauth/callback
+  scopes:
+    - profile
+```
+
+`scopes` 可省略。省略时授权 URL 不发送空的 `scope` 参数。
+
+`redirect_uri` 也可省略：CLI 会监听 `127.0.0.1:0`，由操作系统分配空闲端口，并生成 `http://127.0.0.1:<port>/oauth/callback`。只有授权服务器允许原生应用 loopback 动态端口时才能使用这种模式；飞书等要求精确登记完整回调地址的系统必须配置固定地址。
+
+同一次登录中，以下三处必须使用完全相同的实际 redirect URI：
+
+1. Authorization Endpoint 请求。
+2. CLI 本地回调监听。
+3. Authorization Code 换 Token 请求。
+
+## 4. 开启 PKCE
+
+```yaml
+auth:
+  type: oauth2
+  grant_type: authorization_code
+  client_id: business-cli
+  authorization_url: https://identity.example.com/authorize
+  token_url: https://identity.example.com/token
+  pkce:
+    enabled: true
+    method: S256
+```
+
+实现规则：
+
+- 只支持 `S256`，`method` 省略时默认为 `S256`，不允许降级为 `plain`。
+- 每次登录生成新的 32 字节随机 verifier，Base64URL 无填充编码后为 43 个字符。
+- 授权请求发送 `code_challenge` 和 `code_challenge_method=S256`。
+- Code 换 Token 发送原始 `code_verifier`。
+- verifier 只存在于当前登录进程内，不写入授权 URL、日志或 token 文件。
+- Refresh Token 请求不发送 PKCE 参数。
+
+## 5. 开启 OIDC
+
+```yaml
+base_url: https://business-api.example.com
+
+auth:
+  type: oauth2
+  grant_type: authorization_code
+  client_id: business-cli
+  authorization_url: https://identity.example.com/authorize
+  token_url: https://identity.example.com/token
   scopes:
     - openid
     - profile
-    - expense:read:self
-
-  redirect:
-    type: loopback
-    path: /oauth/callback
-
-  token_store: os_keychain
+  pkce:
+    enabled: true
+  oidc:
+    enabled: true
+    issuer: https://identity.example.com
 ```
 
-字段含义：
+OIDC 必须显式开启，不会根据 `openid` scope 自动推断。开启时必须满足：
 
-| 字段 | 含义 |
-| --- | --- |
-| `base_url` | 业务 Resource Server 地址 |
-| `issuer` | OIDC Authorization Server 的稳定标识和 Discovery 基地址 |
-| `client_id` | 已注册的 Public CLI Client |
-| `audience` | Access Token 允许访问的业务 API |
-| `scopes` | CLI 申请的用户权限 |
-| `redirect.path` | loopback 固定回调路径 |
-| `token_store` | OS Keychain/Credential Store |
+- scopes 包含 `openid`。
+- `issuer` 是无 userinfo、query、fragment 的绝对 URL；生产使用 HTTPS，本地验证允许 HTTP loopback。
+- Token 响应包含 `id_token`。
+- `<issuer>/.well-known/openid-configuration` 返回与配置完全一致的 `issuer` 和有效 `jwks_uri`。
+- `jwks_uri` 使用 HTTPS；本地验证允许 `http://127.0.0.1` 或 `http://localhost`。
 
-CLI 根据 issuer 请求：
+当前 ID Token 校验范围：
 
-```text
-<issuer>/.well-known/openid-configuration
+- RS256 签名和匹配的 JWKS key；
+- `iss` 等于配置的 issuer；
+- `aud` 包含当前 `client_id`；
+- 多 audience 或存在 `azp` 时，`azp` 等于当前 `client_id`；
+- `exp` 未过期，允许 60 秒时钟偏差；
+- `iat` 存在且不能超过当前时间 60 秒；
+- `nonce` 与本次授权请求完全一致。
+
+任何 OIDC 校验失败都会终止登录，并且不会保存新返回的 Access/Refresh Token。ID Token 校验后不会持久化，也不会作为业务 API Bearer Token。
+
+当前只支持 RS256，不支持 ES256、UserInfo、`identity current` 或多账号身份展示。
+
+## 6. Token Endpoint 标准契约
+
+默认 Code 交换请求：
+
+```http
+POST /token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=authorization_code
+&client_id=business-cli
+&code=<authorization-code>
+&redirect_uri=<本次实际回调地址>
+&code_verifier=<PKCE开启时发送>
 ```
 
-本 CLI 至少消费 Discovery 中的 issuer、authorization endpoint、token endpoint 和 JWKS 地址。Discovery 文档还必须满足 OIDC Discovery 规范的必填元数据；Revocation、UserInfo 等扩展端点不应假定一定存在。
-
-如果系统确实支持 OIDC，但暂时不能发布 Discovery，可保留 issuer 并显式配置 OIDC 端点：
-
-```yaml
-auth:
-  type: oidc
-  issuer: https://business-auth.example.com
-  client_id: business-cli
-  audience: business-api
-  authorization_endpoint: https://business.example.com/oauth/authorize
-  token_endpoint: https://business.example.com/oauth/token
-  jwks_uri: https://business.example.com/oauth/jwks
-  revocation_endpoint: https://business.example.com/oauth/revoke # 可选
-  userinfo_endpoint: https://business.example.com/oauth/userinfo # 可选
-```
-
-即使不使用 Discovery，CLI 仍必须用 issuer、JWKS、client_id、nonce 和 expiry 校验 ID Token。显式端点是部署兼容方式，不会把普通 OAuth2 自动变成 OIDC。
-
-### 6.2 存量 OAuth2 PKCE 模式
-
-业务只有 authorize/token、没有 OIDC Discovery 和 ID Token 时，必须使用独立兼容类型：
-
-```yaml
-base_url: https://business-api.example.com
-
-auth:
-  type: oauth2_pkce
-  provider_id: business-auth
-  client_id: business-cli
-  audience: business-api
-  scopes:
-    - profile
-    - expense:read:self
-  authorization_endpoint: https://business.example.com/oauth/authorize
-  token_endpoint: https://business.example.com/oauth/token
-  revocation_endpoint: https://business.example.com/oauth/revoke # 可选
-  identity_endpoint: https://business-api.example.com/api/v1/me
-  redirect:
-    type: loopback
-    path: /oauth/callback
-  token_store: os_keychain
-```
-
-- `provider_id` 是本地 Token 存储隔离标识，不是 OIDC issuer，也不参与 ID Token 校验。
-- `identity_endpoint` 在本方案中必选，因为生成 CLI 固定提供 `identity current`，且会话需要按用户隔离。它必须使用 Access Token 返回稳定用户和租户标识。
-- 如果 Access Token 是 JWT，业务 API 必须校验签名、`iss`、audience、expiry 和 scope。
-- 如果 Access Token 是 opaque token，业务 API 必须通过授权服务的 introspection 或等价机制验证。
-- `audience` 是 CLI 和 API 约定的目标资源标识，不应被误认为所有授权服务都支持的标准请求参数。
-
-CLI 不得根据 `base_url` 猜测授权端点，也不得把端点缺失解释为可退化到账号密码登录。
-
-生产配置必须使用 HTTPS。本仓库的 `127.0.0.1` HTTP 服务仅用于本地验证。
-
-## 7. CLI 登录流程
-
-目标命令：
-
-```bash
-business auth login
-```
-
-处理顺序：
-
-1. CLI 按认证类型加载 Discovery，或读取经过校验的显式端点。
-2. CLI 生成 `state` 和 PKCE verifier/challenge；仅 OIDC 模式额外生成 `nonce`。
-3. CLI 监听 `127.0.0.1` 随机端口，回调路径固定。
-4. CLI 使用系统浏览器打开 authorize endpoint。
-5. 用户在业务授权页面完成登录和授权确认。
-6. 授权服务把一次性 code 返回 loopback callback。
-7. CLI 校验 state，并使用 code + verifier 调用 token endpoint。
-8. OIDC 模式校验 ID Token；OAuth2 PKCE 模式通过 Access Token 和 `identity_endpoint` 获取身份。Token 保存到 OS Keychain。
-9. 业务命令使用 Access Token 调用 API，过期前通过 Refresh Token 轮换。
-
-受保护业务命令未登录时返回结构化 `login_required`，不应在后台自动打开浏览器。
-
-账号密码只进入业务授权页面。CLI、Agent、runtime YAML 和命令行参数均不得接触密码。
-
-## 8. 生成 CLI 契约
-
-目标命令：
-
-```bash
-business auth login
-business auth status
-business auth check --operation <operation>
-business auth logout
-business identity current
-```
-
-行为要求：
-
-- `auth status` 不输出 Token。
-- `auth check` 只检查登录状态和 scope，不代替服务端资源授权。
-- `auth logout` 在配置了 revocation endpoint 时先撤销 Token，再删除 Keychain 会话；没有该端点时只能完成本地登出并明确提示。
-- 受保护 operation 不允许调用方覆盖 `Authorization` Header。
-- 用户认证失败后不得切换为应用身份。
-
-Token 存储隔离维度：
-
-```text
-provider identity × client_id × tenant-or-empty × subject
-```
-
-OIDC 的 provider identity 使用 issuer；OAuth2 PKCE 使用 `provider_id`。只有非租户绑定接口允许 tenant 为空，两种模式的会话不得共用存储键。
-
-## 9. 业务授权服务接口
-
-标准 OIDC 模式：
-
-| 接口 | 必选 | 说明 |
-| --- | --- | --- |
-| `GET /.well-known/openid-configuration` | 推荐 | OIDC Discovery；新系统应提供 |
-| `GET /oauth/authorize` | 是 | 浏览器登录与授权 |
-| `POST /oauth/token` | 是 | Code/Refresh Token 交换 |
-| `GET /oauth/jwks` | 是 | ID Token 公钥和轮换 |
-| `POST /oauth/revoke` | 建议 | 登出与撤销 |
-| `GET /oauth/userinfo` | 条件必选 | ID Token 不含业务所需 tenant 时提供主体映射 |
-| `GET /api/v1/me` | 条件必选 | 可代替 UserInfo 完成业务主体映射 |
-
-如果不提供 Discovery，以上必选端点和 issuer 必须显式配置。Discovery 只是端点发布机制，不能替代 ID Token 验证。
-
-存量 OAuth2 PKCE 模式：
-
-| 接口 | 必选 | 说明 |
-| --- | --- | --- |
-| Authorization Endpoint | 是 | 浏览器登录与授权 |
-| Token Endpoint | 是 | Code/Refresh Token 交换 |
-| Revocation Endpoint | 建议 | 登出与撤销 |
-| Introspection Endpoint | opaque token 时由 API 侧需要 | Resource Server 验证 Token |
-| `/api/v1/me` 等 Identity Endpoint | 是 | 返回当前 Access Token 对应用户和租户 |
-
-存量模式不要求 OIDC Discovery、JWKS、UserInfo 或 ID Token。它仍必须使用 Authorization Code + PKCE，不能改为 Resource Owner Password Grant。
-
-### 9.1 身份解析契约
-
-OIDC 模式以验签后的 ID Token `sub` 为用户主体。tenant 优先读取验签后的 `tenant_id` claim；如果 operation 声明 `tenant_bound: true` 且 ID Token 没有该 claim，必须调用 UserInfo 或显式 Identity Endpoint。
-
-OAuth2 PKCE 模式必须调用 Identity Endpoint。两类身份接口统一返回：
+标准响应：
 
 ```json
 {
-  "sub": "user-10086",
-  "tenant_id": "company-a",
-  "name": "Alice"
+  "access_token": "access-token",
+  "refresh_token": "refresh-token",
+  "token_type": "Bearer",
+  "scope": "openid profile",
+  "expires_in": 3600,
+  "refresh_token_expires_in": 604800,
+  "id_token": "OIDC开启时返回"
 }
 ```
 
-- `sub` 必选且必须稳定。
-- `tenant_id` 对 tenant-bound operation 必选；非租户接口可省略。
-- `name` 仅用于展示，不参与授权或存储键。
-- OIDC 的 UserInfo/Identity Endpoint 返回 `sub` 必须与 ID Token `sub` 完全一致，否则登录失败。
-- OAuth2 PKCE 的响应只用于 CLI 识别会话；业务 API 仍以验证后的 Access Token 主体为权限依据。
+`access_token` 必填；非空 `token_type` 必须为 `Bearer`。OIDC 开启时 `id_token` 必填。
 
-OIDC/PKCE Public Client 注册要求：
+业务服务需要使用 `client_secret` 对接上游身份平台时，Secret 必须只保留在业务服务或 broker 中，CLI 的 Token Endpoint 面向 Public Client 提供上述无 Secret 契约。
 
-```yaml
-client_id: business-cli
-client_type: public
-grant_types: [authorization_code, refresh_token]
-redirect:
-  type: loopback
-  path: /oauth/callback
-pkce:
-  required: true
-  methods: [S256]
-```
+## 7. 自定义业务 Token 接口
 
-Token Endpoint 不得要求 Public Client 提供 `client_secret`。
-
-## 10. OpenAPI 规范
-
-Security Scheme：
+已有业务接口参数名、位置或响应 envelope 不标准时，可配置 `token_exchange`：
 
 ```yaml
-components:
-  securitySchemes:
-    userOIDC:
-      type: oauth2
-      flows:
-        authorizationCode:
-          authorizationUrl: https://business.example.com/oauth/authorize
-          tokenUrl: https://business.example.com/oauth/token
-          scopes:
-            expense:read:self: 查询本人费用
+auth:
+  type: oauth2
+  grant_type: authorization_code
+  client_id: business-cli
+  authorization_url: https://identity.example.com/authorize
+  token_url: https://business.example.com/cli-auth/exchange
+  scopes: [openid]
+  pkce: {enabled: true}
+  oidc: {enabled: true, issuer: https://identity.example.com}
+
+  token_exchange:
+    method: POST
+    body_format: json
+    parameters:
+      - {source: code, name: authorizationCode, in: body, required: true}
+      - {source: code_verifier, name: verifier, in: body, required: true}
+      - {source: state, name: loginState, in: header, required: true}
+    response:
+      access_token: {in: body, path: data.accessToken}
+      refresh_token: {in: body, path: data.refreshToken}
+      token_type: {in: body, path: data.tokenType}
+      expires_in: {in: body, path: data.expiresIn}
+      refresh_token_expires_in: {in: body, path: data.refreshExpiresIn}
+      id_token: {in: body, path: data.idToken}
 ```
 
-Operation：
+请求 source 支持：`code`、`code_verifier`、`state`、`client_id`、`redirect_uri`、`scope`、`grant_type`、`literal`。位置支持 `body`、`query`、`header`、`cookie`；Body 支持 `form` 和 `json`。
 
-```yaml
-paths:
-  /api/v1/me/expenses:
-    get:
-      operationId: listMyExpenses
-      security:
-        - userOIDC:
-            - expense:read:self
-      x-ai-access:
-        subject_modes: [user]
-        audience: business-api
-        scopes: [expense:read:self]
-        tenant_bound: true
-        resource_type: expense
-        data_classification: personal
-        risk: read
-        confirmation: never
-```
+响应支持从 body 点路径或 header 映射。PKCE 与自定义交换同时开启时必须显式映射 `code_verifier`。
 
-OpenAPI 只声明所需权限。API 必须从 Token 的 `sub`、tenant 和 scope 派生真实访问范围。
+注意：当前自动刷新固定调用同一个 `token_url`，使用标准 `application/x-www-form-urlencoded` Refresh Grant 和标准顶层响应，不复用自定义 Code 交换映射。需要自动刷新的业务服务应让该地址同时兼容标准 Refresh Grant。
 
-## 11. 本地验证服务
-
-仓库根目录的 `oauth2/` 是 FastAPI 验证服务，与 `sql-mcp-server/` 同级。
-
-启动：
+## 8. 登录、Agent 与超时
 
 ```bash
-cd oauth2
-uv sync
-uv run oauth2-server
+# 默认打印链接并尝试打开浏览器
+business login
+
+# 只打印链接，不自动打开浏览器；仍会等待回调
+business login --no-browser
 ```
 
-固定地址：
+`--no-browser` 适合 Agent 场景：Agent 在可持续轮询的终端会话中启动命令，把 stdout 第一行的授权链接交给用户点击，并继续保持同一个 CLI 进程。用户授权后，本地回调会唤醒该进程，CLI 完成 Token 交换并输出 `login successful`。
+
+CLI 等待回调 120 秒。超过时间仍未收到有效回调时退出并返回 `OAuth login timed out`。
+
+Agent 如果无法维持同一个后台进程或终端会话，就无法接收回调结果；这属于 Agent 执行环境限制，不是 OAuth 协议要求用户必须手动运行 CLI。
+
+## 9. 会话文件、status 和刷新
+
+默认 token 文件：
 
 ```text
-issuer/API: http://127.0.0.1:18080
-client_id:  one-cli-demo
-audience:   demo-api
+$HOME/.opencli/oauth2/<配置哈希>/oauth-token.json
 ```
 
-测试用户：
-
-| 用户 | 密码 | Token subject |
-| --- | --- | --- |
-| Alice | `alice123` | `user-alice` |
-| Bob | `bob123` | `user-bob` |
-
-服务包含：
-
-- Authorization Code + PKCE S256；
-- RS256 Access Token 和 ID Token；
-- Discovery、JWKS、UserInfo；
-- Refresh Token 轮换、重用检测和撤销；
-- Alice/Bob 个人费用隔离；
-- `oauth2/openapi.yaml`；
-- `oauth2/opencli.runtime.yaml`。
-
-服务重启后，内存 code、session、Token 状态和 RSA 密钥全部失效。
-
-## 12. 测试与验收
-
-验证服务：
+配置哈希由 `client_id`、`authorization_url` 和 `token_url` 计算。macOS、Linux 和 Windows 都使用当前用户目录；可通过以下变量覆盖完整文件路径：
 
 ```bash
-cd oauth2
-uv run pytest -q
-uv run ruff check .
-uv run ruff format --check .
+export OPENCLI_OAUTH_TOKEN_FILE=/path/to/oauth-token.json
 ```
 
-业务系统验收至少覆盖：
+Unix 下目录权限为 `0700`，token 文件为 `0600`。当前使用用户目录文件存储，不是 OS Keychain/Credential Store。
 
-- 缺少 PKCE、`plain`、错误 verifier 被拒绝；
-- code 过期和重放被拒绝；
-- redirect URI 不匹配被拒绝；
-- Refresh Token 轮换和旧 Token 重用；
-- revoke 后不能继续刷新；
-- 错误签名、issuer、audience、expiry 和 scope；
-- 普通用户不能读取他人数据；
-- Token、密码和 Authorization Header 不进入日志。
+`status` 只读取本地文件，不访问网络，也不主动刷新：
 
-## 13. 安全红线
+| 输出 | 含义 |
+| --- | --- |
+| `valid` | Access Token 剩余时间超过 5 分钟 |
+| `needs_refresh` | Access Token 即将过期或已过期，但 Refresh Token 仍有效 |
+| `expired` | 当前会话不能继续刷新，需要重新登录 |
+| `not_logged_in` | token 文件不存在 |
 
-- 不使用 Resource Owner Password Grant。
-- 不使用 Implicit Grant。
-- Public Client 不依赖 `client_secret`。
-- 不把 Token 写入 YAML、命令参数、stdout、stderr 或 Skill。
-- 不允许 Agent 指定可信 user、tenant、role 或 Authorization Header。
-- 不用 CLI 参数隐藏代替服务端授权。
-- 不接受其他业务系统 audience 的 Token。
-- 不在认证失败后自动降级为高权限应用身份。
+受保护业务命令发现 `needs_refresh` 时自动刷新并原子替换 Access/Refresh Token。当前不会因为业务 API 返回 401 自动重放请求。
 
-## 14. 后续工作
+`logout` 只删除本地会话文件，当前不调用远程 revocation endpoint。
 
-one-cli 侧下一步按以下顺序实施：
+## 10. 业务系统安全责任
 
-1. 增加独立 `AuthTypeOIDC`，保留 `oauth2=client_credentials`。
-2. 增加独立 `AuthTypeOAuth2PKCE`，不得复用现有 `oauth2`。
-3. 解析 Authorization Code Security Scheme 和 operation scopes。
-4. 支持 Discovery 优先和显式端点两种公开配置，禁止 Secret 字段。
-5. 生成 PKCE、loopback、Keychain 和 `auth`/`identity` 命令。
-6. 把本地验证服务接入生成 CLI 端到端测试。
-7. Go 目标稳定后再完成 Rust 对齐。
+- Authorization Code 必须短时、一次性，并绑定 `client_id` 和实际 redirect URI。
+- 开启 PKCE 时，服务端必须把 Code 绑定到 challenge，并在 Token Endpoint 校验 verifier。
+- 业务 API 必须验证 Access Token 的签名或 introspection 结果、issuer、audience、有效期和 scope。
+- Resource Server 必须从可信 Token 主体派生 user、tenant 和数据范围，不能信任 Agent 传入的 userId、employeeId、tenant 或 role。
+- 不使用 Resource Owner Password Grant 或 Implicit Grant。
+- Token、Code、Cookie、密码和 Secret 不得进入日志、stdout、stderr 或 Skill。
+- 用户授权失败后不得自动降级为 Client Credentials、AK/SK、API Key 或共享 Token。
 
-详细任务参见 `docs/superpowers/plans/2026-07-31-oidc-pkce-generated-cli.md`。
+## 11. 当前边界
 
-## 15. 标准依据
+已实现：
 
-- OIDC 元数据发现：[OpenID Connect Discovery 1.0](https://openid.net/specs/openid-connect-discovery-1_0-errata2.html)
-- OAuth 2.0 Authorization Server Metadata：[RFC 8414](https://www.rfc-editor.org/info/rfc8414/)
-- Authorization Code 的 PKCE 扩展：[RFC 7636](https://www.rfc-editor.org/info/rfc7636/)
-- Native App 浏览器授权与 loopback 回调：[RFC 8252](https://www.rfc-editor.org/info/rfc8252/)
-- OAuth 2.0 安全最佳实践：[RFC 9700](https://www.rfc-editor.org/info/rfc9700/)
+- Go/Rust Authorization Code；
+- 固定或动态 loopback；
+- state；
+- PKCE S256；
+- OIDC Discovery/JWKS 和 RS256 ID Token 校验；
+- Access/Refresh Token 文件存储；
+- `login`、`status`、`logout`；
+- 到期前自动 Refresh；
+- 自定义 Code 交换请求/响应映射。
 
-`/.well-known/openid-configuration` 属于 OIDC Discovery。纯 OAuth 2.0 的标准元数据地址是 `/.well-known/oauth-authorization-server`，但 PKCE 本身不要求授权服务必须提供元数据发现。
+未实现：
+
+- 独立 `--auth oidc` / `--auth oauth2-pkce`；
+- OS Keychain/Credential Store；
+- UserInfo、`identity current`、多账号；
+- `auth check`、operation scope 本地检查；
+- 远程 revoke；
+- Device Flow；
+- PKCE `plain` 或 RS256 之外的 ID Token 算法；
+- 自定义 Refresh Grant 映射和业务 API 401 自动重试。
+
+标准接口细节见 [`../../oauth2/OAUTH2_AUTHORIZATION_CODE_CONTRACT.md`](../../oauth2/OAUTH2_AUTHORIZATION_CODE_CONTRACT.md)。飞书验证流程见 [`../../oauth2/README.md`](../../oauth2/README.md)。

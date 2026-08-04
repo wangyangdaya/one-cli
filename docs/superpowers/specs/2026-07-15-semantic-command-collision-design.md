@@ -50,7 +50,7 @@ After semantic fallbacks are selected, the existing uniqueness mechanism remains
 
 | Group | Operation IDs | Commands |
 | --- | --- | --- |
-| `chery-global` | `getMis`, `getQuality`, `getSale`, `getSend` | `mis`, `quality`, `sale`, `send` |
+| `analytics` | `getMis`, `getQuality`, `getSale`, `getSend` | `mis`, `quality`, `sale`, `send` |
 | `pet` | `getPet` | `get` |
 | `dashboard` | alias `getMis: get`, plus inferred `getQuality` | `get`, `quality` |
 | `report` | `getStatus`, `getStatus_2` | `status`, `status-2` |

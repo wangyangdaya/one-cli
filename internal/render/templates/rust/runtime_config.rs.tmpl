@@ -5,8 +5,17 @@ use aes_gcm::{Aes256Gcm, Nonce};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
+{{- if and (appUsesOAuth2 .App) .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
+use sha2::{Digest, Sha256};
+{{- end }}
 use std::env;
 use std::fs;
+{{- if and (appUsesOAuth2 .App) .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
+use std::fs::OpenOptions;
+use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
+{{- end }}
 use std::path::{Path, PathBuf};
 
 use crate::types::AppResult;
@@ -49,9 +58,29 @@ struct RuntimeAuth {
     client_auth: RuntimeClientAuth,
     #[serde(default)]
     scopes: Vec<String>,
+    pkce: Option<RuntimePkce>,
+    oidc: Option<RuntimeOidc>,
     token_exchange: Option<OAuthTokenExchangeConfig>,
     #[serde(default)]
     encrypted_value: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RuntimePkce {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    method: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RuntimeOidc {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    issuer: String,
 }
 
 #[derive(Deserialize)]
@@ -85,6 +114,7 @@ pub struct OAuthTokenExchangeResponse {
     pub scope: Option<OAuthTokenExchangeResult>,
     pub expires_in: Option<OAuthTokenExchangeResult>,
     pub refresh_token_expires_in: Option<OAuthTokenExchangeResult>,
+    pub id_token: Option<OAuthTokenExchangeResult>,
 }
 
 #[derive(Deserialize)]
@@ -116,6 +146,8 @@ struct OAuthTokenResponse {
     expires_in: u64,
     #[serde(default)]
     refresh_token_expires_in: u64,
+    #[serde(default)]
+    id_token: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -140,6 +172,10 @@ pub struct OAuthAuthorizationConfig {
     pub client_id: String,
     pub redirect_uri: String,
     pub scopes: Vec<String>,
+    pub pkce_enabled: bool,
+    pub pkce_method: String,
+    pub oidc_enabled: bool,
+    pub oidc_issuer: String,
     pub token_exchange: Option<OAuthTokenExchangeConfig>,
 }
 
@@ -299,14 +335,65 @@ pub fn load_oauth_authorization_config(app_name: &str) -> AppResult<OAuthAuthori
     if auth.authorization_url.trim().is_empty() || auth.token_url.trim().is_empty() || auth.client_id.trim().is_empty() {
         return Err("OAuth authorization_code requires authorization_url, token_url, and client_id".to_string());
     }
+    if !auth.redirect_uri.trim().is_empty() {
+        validate_oauth_loopback_redirect_uri(auth.redirect_uri.trim())?;
+    }
+    let pkce_enabled = auth.pkce.as_ref().map(|value| value.enabled).unwrap_or(false);
+    let pkce_method = auth.pkce.as_ref().map(|value| value.method.trim().to_string()).unwrap_or_default();
+    if pkce_enabled && !pkce_method.is_empty() && !pkce_method.eq_ignore_ascii_case("S256") {
+        return Err("OAuth PKCE method must be S256".to_string());
+    }
+    let oidc_enabled = auth.oidc.as_ref().map(|value| value.enabled).unwrap_or(false);
+    let oidc_issuer = auth.oidc.as_ref().map(|value| value.issuer.trim().to_string()).unwrap_or_default();
+    if oidc_enabled {
+        validate_oauth_oidc_issuer(&oidc_issuer, &auth.scopes)?;
+    }
     Ok(OAuthAuthorizationConfig {
         authorization_url: auth.authorization_url.trim().to_string(),
         token_url: auth.token_url.trim().to_string(),
         client_id: auth.client_id.trim().to_string(),
         redirect_uri: auth.redirect_uri.trim().to_string(),
         scopes: auth.scopes,
+        pkce_enabled,
+        pkce_method,
+        oidc_enabled,
+        oidc_issuer,
         token_exchange: auth.token_exchange,
     })
+}
+
+fn validate_oauth_loopback_redirect_uri(value: &str) -> AppResult<()> {
+    let parsed = reqwest::Url::parse(value).map_err(|_| "invalid OAuth redirect_uri".to_string())?;
+    if parsed.scheme() != "http"
+        || parsed.host_str() != Some("127.0.0.1")
+        || parsed.port().is_none()
+        || matches!(parsed.path(), "" | "/")
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err("invalid OAuth redirect_uri: must be HTTP 127.0.0.1 with a port and callback path".to_string());
+    }
+    Ok(())
+}
+
+fn validate_oauth_oidc_issuer(issuer: &str, scopes: &[String]) -> AppResult<()> {
+    let parsed = reqwest::Url::parse(issuer).map_err(|_| "invalid OAuth oidc_issuer".to_string())?;
+    let loopback_http = parsed.scheme() == "http" && matches!(parsed.host_str(), Some("127.0.0.1" | "localhost"));
+    if parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || (parsed.scheme() != "https" && !loopback_http)
+    {
+        return Err("invalid OAuth oidc_issuer: must use HTTPS except for loopback development".to_string());
+    }
+    if !scopes.iter().any(|scope| scope.trim() == "openid") {
+        return Err("OAuth OIDC requires the openid scope".to_string());
+    }
+    Ok(())
 }
 
 pub fn save_oauth_authorization_token(
@@ -345,10 +432,41 @@ pub fn save_oauth_authorization_token(
     }
     let payload = serde_json::to_vec(&token).map_err(|err| format!("encode OAuth session: {err}"))?;
     let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
-    fs::write(&temporary, payload).map_err(|err| format!("write temporary OAuth session: {err}"))?;
-    protect_oauth_token_file(&temporary)?;
-    fs::rename(&temporary, &path).map_err(|err| format!("replace OAuth session: {err}"))?;
+    let mut temporary_file = create_private_oauth_token_file(&temporary)?;
+    if let Err(err) = temporary_file.write_all(&payload) {
+        drop(temporary_file);
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("write temporary OAuth session: {err}"));
+    }
+    drop(temporary_file);
+    if let Err(err) = protect_oauth_token_file(&temporary) {
+        let _ = fs::remove_file(&temporary);
+        return Err(err);
+    }
+    if let Err(err) = fs::rename(&temporary, &path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("replace OAuth session: {err}"));
+    }
     Ok(())
+}
+
+#[cfg(unix)]
+fn create_private_oauth_token_file(path: &Path) -> AppResult<fs::File> {
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|err| format!("create temporary OAuth session: {err}"))
+}
+
+#[cfg(not(unix))]
+fn create_private_oauth_token_file(path: &Path) -> AppResult<fs::File> {
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|err| format!("create temporary OAuth session: {err}"))
 }
 
 pub fn oauth_authorization_status(app_name: &str) -> AppResult<&'static str> {
@@ -431,16 +549,17 @@ fn oauth_authorization_token_path(app_name: &str) -> AppResult<PathBuf> {
     if let Some(path) = env_value("OPENCLI_OAUTH_TOKEN_FILE") {
         return Ok(PathBuf::from(path));
     }
-    if let Some(root) = env_value("XDG_CONFIG_HOME") {
-        return Ok(PathBuf::from(root).join(app_name).join("oauth-token.json"));
-    }
-    if let Some(root) = env_value("APPDATA") {
-        return Ok(PathBuf::from(root).join(app_name).join("oauth-token.json"));
-    }
-    if let Some(home) = env_value("HOME").or_else(|| env_value("USERPROFILE")) {
-        return Ok(PathBuf::from(home).join(".config").join(app_name).join("oauth-token.json"));
-    }
-    Err("resolve OAuth session directory: home directory is unavailable".to_string())
+{{- if and (appUsesOAuth2 .App) .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
+    let auth = load_oauth_authorization_config(app_name)?;
+    let identity = format!("{}\n{}\n{}", auth.client_id, auth.authorization_url, auth.token_url);
+    let namespace = format!("{:x}", Sha256::digest(identity.as_bytes()));
+    let home = dirs::home_dir().ok_or_else(|| "resolve OAuth session directory: home directory is unavailable".to_string())?;
+    Ok(home.join(".opencli").join("oauth2").join(namespace).join("oauth-token.json"))
+{{- else }}
+    let home = env_value("HOME").or_else(|| env_value("USERPROFILE"))
+        .ok_or_else(|| "resolve OAuth session directory: home directory is unavailable".to_string())?;
+    Ok(PathBuf::from(home).join(".config").join(app_name).join("oauth-token.json"))
+{{- end }}
 }
 
 #[cfg(unix)]
