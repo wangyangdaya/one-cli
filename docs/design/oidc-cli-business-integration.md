@@ -240,7 +240,7 @@ $HOME/.opencli/oauth2/<配置哈希>/oauth-token.json
 export OPENCLI_OAUTH_TOKEN_FILE=/path/to/oauth-token.json
 ```
 
-Unix 下目录权限为 `0700`，token 文件为 `0600`。当前使用用户目录文件存储，不是 OS Keychain/Credential Store。
+Unix 下 token 文件最终权限为 `0600`。Go 目标以 `0700` 创建会话目录；Rust 目标的目录权限当前受进程 umask 影响。当前使用用户目录文件存储，不是 OS Keychain/Credential Store。
 
 `status` 只读取本地文件，不访问网络，也不主动刷新：
 
@@ -251,7 +251,7 @@ Unix 下目录权限为 `0700`，token 文件为 `0600`。当前使用用户目�
 | `expired` | 当前会话不能继续刷新，需要重新登录 |
 | `not_logged_in` | token 文件不存在 |
 
-受保护业务命令发现 `needs_refresh` 时自动刷新并原子替换 Access/Refresh Token。当前不会因为业务 API 返回 401 自动重放请求。
+受保护业务命令发现 `needs_refresh` 时自动刷新并原子替换 Access/Refresh Token。当前实现只有在登录响应提供非空 `refresh_token` 且 `refresh_token_expires_in > 0` 时才会进入 `needs_refresh`；刷新响应也必须返回轮换后的非空 Access Token 和 Refresh Token。当前不会因为业务 API 返回 401 自动重放请求。
 
 `logout` 只删除本地会话文件，当前不调用远程 revocation endpoint。
 

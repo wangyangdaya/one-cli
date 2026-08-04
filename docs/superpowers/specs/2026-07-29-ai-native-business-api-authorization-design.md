@@ -983,10 +983,10 @@ auth:
 
 ### 阶段二：OpenCLI 标准化
 
-当前状态：待实施。根目录 `oauth2/` 已提供联调授权服务和个人数据 API，但生成器尚不接受 `--auth oidc` 或 `--auth oauth2-pkce`。
+当前状态：部分实施。生成器通过 `--auth oauth2` + `grant_type: authorization_code` 支持 Go/Rust Authorization Code、可选 PKCE S256、可选 OIDC RS256 校验以及顶层 `login/status/logout`。独立认证类型、Keychain、`x-ai-access`、身份命令、结构化授权错误和 Linter 仍待实施。
 
 - 解析 authorizationCode Security Scheme；
-- 生成 Authorization Code + PKCE 客户端；
+- 生成 Authorization Code + PKCE 客户端；（已实现）
 - 增加 `x-ai-access`；
 - 生成用户身份前置检查；
 - 统一结构化错误；

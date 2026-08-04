@@ -1,6 +1,6 @@
 # OAuth 2.0 Authorization Code 接口契约
 
-本文定义 one-cli 与授权服务器之间的标准 OAuth 2.0 Authorization Code 接口。业务授权服务若使用自定义参数或响应结构，必须先通过适配层转换为本文契约，不能把业务差异下沉到 CLI。
+本文定义 one-cli 与授权服务器之间的标准 OAuth 2.0 Authorization Code 接口。业务授权服务优先通过适配层提供标准契约；仅参数名、位置或 JSON envelope 不同时，也可使用 one-cli 的 `token_exchange` 显式映射，CLI 不会自动猜测或探测业务格式。
 
 规范依据：[RFC 6749](https://www.rfc-editor.org/rfc/rfc6749)、[RFC 7636](https://www.rfc-editor.org/rfc/rfc7636) 和 [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html)。PKCE 与 OIDC 均为可选能力；未配置时保持基础 Authorization Code 流程。
 
@@ -161,7 +161,9 @@ grant_type=refresh_token&refresh_token=refresh-token&client_id=cli_example
 | `client_id` | 是 | 当前 CLI 的客户端标识 |
 | `scope` | 否 | 不得包含原授权范围之外的权限；省略表示沿用原范围 |
 
-成功响应与 Code 换 Token 相同。服务端可以返回新的 `refresh_token`；一旦返回，CLI 必须原子替换旧 Refresh Token。未返回时继续保留原 Refresh Token。
+成功响应与 Code 换 Token 相同。OAuth 标准允许服务端不轮换 Refresh Token；但 one-cli 当前运行时要求刷新响应返回新的非空 `access_token` 和 `refresh_token`，并原子替换旧值。需要兼容当前 CLI 的授权服务必须在每次刷新时轮换并返回 Refresh Token。
+
+当前 CLI 还需要登录或刷新响应提供正数 `refresh_token_expires_in`，才能把会话识别为可刷新。缺少该字段时，Access Token 到期后会要求重新登录。
 
 刷新请求不发送 `code_verifier`、`code_challenge` 或 `nonce`。这些值只属于单次浏览器授权登录。
 
@@ -219,7 +221,7 @@ auth:
     method: S256
 ```
 
-其中 `token_url` 是符合本文定义的标准化 Token Endpoint。业务方原始接口字段不同，应由该 Endpoint 背后的适配层完成转换。
+其中 `token_url` 优先使用符合本文定义的标准化 Token Endpoint。业务方原始接口字段不同时，可由 Endpoint 背后的适配层转换，也可使用下文的显式 `token_exchange` 映射。
 
 允许动态 loopback 端口的业务系统可以省略 `redirect_uri`：
 

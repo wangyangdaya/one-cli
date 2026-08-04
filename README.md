@@ -236,7 +236,7 @@ opencli generate \
 | `--signer` | ❌ | AK/SK 签名 profile；当前支持 `supplier_edi` |
 | `--skill-lang` | ❌ | 生成的 Skill 文档语言：`en` 或 `zh`，默认 `en` |
 | `--config` | ❌ | 配置文件路径（可选） |
-| `--runtime-config` | ❌ | 生成后 CLI 的 Base URL 和认证元数据；凭证从环境变量读取并密封 |
+| `--runtime-config` | ❌ | 生成后 CLI 的 Base URL 和认证元数据；凭证型模式从环境变量读取并密封，Authorization Code 只写公开配置 |
 
 `--input` 和 `--mcp-config` 互斥，必须且只能提供一个。
 
@@ -253,12 +253,12 @@ opencli generate \
 | `token` | 已有 Bearer Token | 直接注入 `Authorization: Bearer <token>` |
 | `api_key` | API Key | 注入运行配置声明的 API Key 请求头 |
 | `ak_sk` | Access Key / Secret Key | 每次请求计算并注入签名 |
-| `oauth2` | OAuth Client ID / Client Secret | 先通过 Client Credentials 获取 Access Token，再注入 Bearer Token |
+| `oauth2` | Runtime 决定；Authorization Code 不使用 Client Secret | 按 `grant_type` 执行 Client Credentials 或用户 Authorization Code，再注入 Bearer Token |
 | `none` | 无 | 不注入认证信息 |
 
 未传 `--auth` 时，先读取 `opencli.yaml` 的 `auth.type`；两者都未配置时使用默认值 `token`。因此无需认证的接口应显式使用 `--auth none` 或配置 `auth.type: none`。
 
-`token` 与 `oauth2` 最终都会发送 Bearer Token，但来源不同：`token` 使用调用方已有的 Token，`oauth2` 由生成后的 CLI 自动请求 Token Endpoint。
+`token` 与 `oauth2` 最终都会发送 Bearer Token，但来源不同：`token` 使用调用方已有的 Token；`oauth2` 按 runtime 配置通过 Client Credentials 或用户浏览器授权取得 Token。
 
 `token` 模式不要求提供 Runtime Config。完全不使用 `runtime.yaml` 时，生成阶段不需要设置 `OPENCLI_AUTH_TOKEN`：
 
@@ -493,7 +493,7 @@ PKCE 只支持 `S256`。OIDC 开启时要求 `openid` scope，通过 Discovery/J
 ./bin/business-cli logout
 ```
 
-默认会话文件位于 `$HOME/.opencli/oauth2/<配置哈希>/oauth-token.json`；可用 `OPENCLI_OAUTH_TOKEN_FILE` 显式覆盖。受保护业务命令会在 Access Token 距离到期不足 5 分钟时使用 Refresh Token 续期，`status` 本身不发起刷新。
+默认会话文件位于 `$HOME/.opencli/oauth2/<配置哈希>/oauth-token.json`；可用 `OPENCLI_OAUTH_TOKEN_FILE` 显式覆盖。登录响应包含非空 Refresh Token 和正数 `refresh_token_expires_in` 时，受保护业务命令会在 Access Token 距离到期不足 5 分钟时续期；`status` 本身不发起刷新。当前刷新响应必须返回轮换后的 Access/Refresh Token。
 
 详细配置、业务 Token 接口映射与安全边界见 [`docs/design/oauth2-authorization-code-runtime.md`](docs/design/oauth2-authorization-code-runtime.md) 和 [`oauth2/OAUTH2_AUTHORIZATION_CODE_CONTRACT.md`](oauth2/OAUTH2_AUTHORIZATION_CODE_CONTRACT.md)。
 
