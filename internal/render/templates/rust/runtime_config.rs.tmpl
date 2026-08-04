@@ -44,6 +44,8 @@ struct RuntimeAuth {
     #[serde(default)]
     client_id: String,
     #[serde(default)]
+    redirect_uri: String,
+    #[serde(default)]
     client_auth: RuntimeClientAuth,
     #[serde(default)]
     scopes: Vec<String>,
@@ -117,6 +119,7 @@ pub struct OAuthAuthorizationConfig {
     pub authorization_url: String,
     pub token_url: String,
     pub client_id: String,
+    pub redirect_uri: String,
     pub scopes: Vec<String>,
     pub token_exchange: Option<OAuthTokenExchangeConfig>,
 }
@@ -276,6 +279,7 @@ pub fn load_oauth_authorization_config(app_name: &str) -> AppResult<OAuthAuthori
         authorization_url: auth.authorization_url.trim().to_string(),
         token_url: auth.token_url.trim().to_string(),
         client_id: auth.client_id.trim().to_string(),
+        redirect_uri: auth.redirect_uri.trim().to_string(),
         scopes: auth.scopes,
         token_exchange: auth.token_exchange,
     })

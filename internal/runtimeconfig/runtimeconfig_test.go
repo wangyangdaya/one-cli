@@ -202,6 +202,7 @@ auth:
   client_id: business-cli
   authorization_url: https://iam.example.com/idp/oauth2/authorize
   token_url: https://business.example.com/cli-auth/login
+  redirect_uri: http://127.0.0.1:18081/oauth/callback
 `)
 
 	bundle, err := LoadAndSeal(path, SealOptions{
@@ -222,10 +223,28 @@ auth:
 		"client_id: business-cli",
 		"authorization_url: https://iam.example.com/idp/oauth2/authorize",
 		"token_url: https://business.example.com/cli-auth/login",
+		"redirect_uri: http://127.0.0.1:18081/oauth/callback",
 	} {
 		if !bytes.Contains(bundle.YAML, []byte(want)) {
 			t.Fatalf("generated YAML is missing %q:\n%s", want, bundle.YAML)
 		}
+	}
+}
+
+func TestLoadAndSealOAuth2AuthorizationCodeRejectsNonLoopbackRedirect(t *testing.T) {
+	path := writeRuntimeSource(t, `
+auth:
+  type: oauth2
+  grant_type: authorization_code
+  client_id: business-cli
+  authorization_url: https://accounts.feishu.cn/open-apis/authen/v1/authorize
+  token_url: http://127.0.0.1:18080/oauth/token
+  redirect_uri: https://example.com/oauth/callback
+`)
+
+	_, err := LoadAndSeal(path, SealOptions{AuthMode: "oauth2"})
+	if err == nil || !strings.Contains(err.Error(), "redirect_uri must be an HTTP 127.0.0.1 URL with a port and callback path") {
+		t.Fatalf("LoadAndSeal error = %v", err)
 	}
 }
 

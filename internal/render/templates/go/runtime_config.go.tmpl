@@ -39,6 +39,7 @@ type runtimeAuth struct {
 	AuthorizationURL string          `yaml:"authorization_url,omitempty"`
 	TokenURL       string            `yaml:"token_url,omitempty"`
 	ClientID       string            `yaml:"client_id,omitempty"`
+	RedirectURI    string            `yaml:"redirect_uri,omitempty"`
 	ClientAuth     runtimeClientAuth `yaml:"client_auth,omitempty"`
 	Scopes         []string          `yaml:"scopes,omitempty"`
 	TokenExchange  *OAuthTokenExchangeConfig `yaml:"token_exchange,omitempty"`
@@ -209,6 +210,7 @@ type OAuthAuthorizationConfig struct {
 	AuthorizationURL string
 	TokenURL         string
 	ClientID         string
+	RedirectURI      string
 	Scopes           []string
 	TokenExchange    *OAuthTokenExchangeConfig
 }
@@ -232,6 +234,7 @@ func LoadOAuthAuthorizationConfig(appName string) (OAuthAuthorizationConfig, err
 		AuthorizationURL: strings.TrimSpace(auth.AuthorizationURL),
 		TokenURL:         strings.TrimSpace(auth.TokenURL),
 		ClientID:         strings.TrimSpace(auth.ClientID),
+		RedirectURI:      strings.TrimSpace(auth.RedirectURI),
 		Scopes:           append([]string(nil), auth.Scopes...),
 		TokenExchange:    auth.TokenExchange,
 	}, nil

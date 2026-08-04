@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strings"
 
@@ -57,6 +58,7 @@ type sourceAuth struct {
 	AuthorizationURL string           `yaml:"authorization_url,omitempty"`
 	TokenURL         string           `yaml:"token_url,omitempty"`
 	ClientID         string           `yaml:"client_id,omitempty"`
+	RedirectURI      string           `yaml:"redirect_uri,omitempty"`
 	ClientAuth       sourceClientAuth `yaml:"client_auth,omitempty"`
 	Scopes           []string         `yaml:"scopes,omitempty"`
 	TokenExchange    *tokenExchange   `yaml:"token_exchange,omitempty"`
@@ -107,6 +109,7 @@ type sealedAuth struct {
 	AuthorizationURL string           `yaml:"authorization_url,omitempty"`
 	TokenURL         string           `yaml:"token_url,omitempty"`
 	ClientID         string           `yaml:"client_id,omitempty"`
+	RedirectURI      string           `yaml:"redirect_uri,omitempty"`
 	ClientAuth       sourceClientAuth `yaml:"client_auth,omitempty"`
 	Scopes           []string         `yaml:"scopes,omitempty"`
 	TokenExchange    *tokenExchange   `yaml:"token_exchange,omitempty"`
@@ -266,6 +269,11 @@ func validateSource(source sourceConfig, authMode string) error {
 			if strings.TrimSpace(source.Auth.ClientID) == "" {
 				return fmt.Errorf("oauth2 authorization_code requires client_id")
 			}
+			if redirectURI := strings.TrimSpace(source.Auth.RedirectURI); redirectURI != "" {
+				if err := validateLoopbackRedirectURI(redirectURI); err != nil {
+					return err
+				}
+			}
 			if strings.TrimSpace(source.Auth.ClientAuth.Method) != "" || strings.TrimSpace(source.Auth.ClientAuth.Placement) != "" {
 				return fmt.Errorf("oauth2 authorization_code must not define client_auth")
 			}
@@ -293,6 +301,14 @@ func validateSource(source sourceConfig, authMode string) error {
 		}
 	default:
 		return fmt.Errorf("unsupported runtime auth type %q", authType)
+	}
+	return nil
+}
+
+func validateLoopbackRedirectURI(value string) error {
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme != "http" || parsed.Hostname() != "127.0.0.1" || parsed.Port() == "" || parsed.Path == "" || parsed.Path == "/" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
+		return fmt.Errorf("oauth2 redirect_uri must be an HTTP 127.0.0.1 URL with a port and callback path")
 	}
 	return nil
 }
@@ -412,6 +428,7 @@ func sealedAuthFromSource(auth sourceAuth) *sealedAuth {
 		AuthorizationURL: strings.TrimSpace(auth.AuthorizationURL),
 		TokenURL:         strings.TrimSpace(auth.TokenURL),
 		ClientID:         strings.TrimSpace(auth.ClientID),
+		RedirectURI:      strings.TrimSpace(auth.RedirectURI),
 		ClientAuth: sourceClientAuth{
 			Method:    strings.TrimSpace(auth.ClientAuth.Method),
 			Placement: strings.TrimSpace(auth.ClientAuth.Placement),
