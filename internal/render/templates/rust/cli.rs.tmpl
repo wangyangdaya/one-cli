@@ -51,6 +51,8 @@ enum GroupCommand {
         #[arg(long = "no-browser")]
         no_browser: bool,
     },
+    #[command(name = "status")]
+    Status,
     #[command(name = "logout")]
     Logout,
 {{- end }}
@@ -101,6 +103,7 @@ pub async fn run() -> AppResult<()> {
     match cli.command {
 {{- if and (appUsesOAuth2 .App) .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
         Some(GroupCommand::Login { no_browser }) => crate::oauth_auth::login("{{ .App.Name }}", no_browser).await,
+        Some(GroupCommand::Status) => crate::oauth_auth::status("{{ .App.Name }}"),
         Some(GroupCommand::Logout) => crate::oauth_auth::logout("{{ .App.Name }}"),
 {{- end }}
         Some(GroupCommand::Skills { skills_dir, command }) => run_skills(command, &skills_dir),

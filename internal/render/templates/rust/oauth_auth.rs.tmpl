@@ -15,15 +15,28 @@ const CALLBACK_PATH: &str = "/oauth/callback";
 
 struct TokenResponse {
     access_token: String,
+    refresh_token: String,
     token_type: String,
+    scope: String,
     expires_in: u64,
+    refresh_token_expires_in: u64,
 }
 
 pub async fn login(app_name: &str, no_browser: bool) -> AppResult<()> {
     let auth = crate::runtime_config::load_oauth_authorization_config(app_name)?;
-    let listener = TcpListener::bind("127.0.0.1:0").map_err(|err| format!("start OAuth callback listener: {err}"))?;
+    let (listen_address, callback_path, configured_redirect) = if auth.redirect_uri.trim().is_empty() {
+        ("127.0.0.1:0".to_string(), CALLBACK_PATH.to_string(), None)
+    } else {
+        let configured = reqwest::Url::parse(&auth.redirect_uri).map_err(|_| "invalid OAuth redirect_uri".to_string())?;
+        let host = configured.host_str().ok_or_else(|| "invalid OAuth redirect_uri".to_string())?;
+        let port = configured.port().ok_or_else(|| "invalid OAuth redirect_uri".to_string())?;
+        (format!("{host}:{port}"), configured.path().to_string(), Some(auth.redirect_uri.clone()))
+    };
+    let listener = TcpListener::bind(&listen_address).map_err(|err| format!("start OAuth callback listener: {err}"))?;
     listener.set_nonblocking(true).map_err(|err| format!("configure OAuth callback listener: {err}"))?;
-    let redirect_uri = format!("http://{}{}", listener.local_addr().map_err(|err| err.to_string())?, CALLBACK_PATH);
+    let redirect_uri = configured_redirect.unwrap_or_else(|| {
+        format!("http://{}{}", listener.local_addr().expect("listener address"), callback_path)
+    });
     let state = random_state()?;
     let authorize_url = build_authorize_url(&auth, &redirect_uri, &state)?;
 
@@ -33,10 +46,23 @@ pub async fn login(app_name: &str, no_browser: bool) -> AppResult<()> {
         open_browser(&authorize_url)?;
     }
 
-    let code = wait_for_callback(&listener, &state)?;
+    let code = wait_for_callback(&listener, &state, &callback_path)?;
     let token = exchange_authorization_code(&auth, &code, &state, &redirect_uri).await?;
-    crate::runtime_config::save_oauth_authorization_token(app_name, &token.access_token, token.expires_in)?;
+    crate::runtime_config::save_oauth_authorization_token(
+        app_name,
+        &token.access_token,
+        &token.refresh_token,
+        &token.token_type,
+        &token.scope,
+        token.expires_in,
+        token.refresh_token_expires_in,
+    )?;
     println!("login successful");
+    Ok(())
+}
+
+pub fn status(app_name: &str) -> AppResult<()> {
+    println!("{}", crate::runtime_config::oauth_authorization_status(app_name)?);
     Ok(())
 }
 
@@ -64,11 +90,11 @@ fn build_authorize_url(auth: &OAuthAuthorizationConfig, redirect_uri: &str, stat
     Ok(endpoint.to_string())
 }
 
-fn wait_for_callback(listener: &TcpListener, expected_state: &str) -> AppResult<String> {
+fn wait_for_callback(listener: &TcpListener, expected_state: &str, callback_path: &str) -> AppResult<String> {
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         match listener.accept() {
-            Ok((mut stream, _)) => return read_callback(&mut stream, expected_state),
+            Ok((mut stream, _)) => return read_callback(&mut stream, expected_state, callback_path),
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                 if Instant::now() >= deadline {
                     return Err("OAuth login timed out".to_string());
@@ -80,7 +106,7 @@ fn wait_for_callback(listener: &TcpListener, expected_state: &str) -> AppResult<
     }
 }
 
-fn read_callback(stream: &mut TcpStream, expected_state: &str) -> AppResult<String> {
+fn read_callback(stream: &mut TcpStream, expected_state: &str, callback_path: &str) -> AppResult<String> {
     stream.set_read_timeout(Some(Duration::from_secs(5))).map_err(|err| err.to_string())?;
     let mut buffer = [0u8; 8192];
     let size = stream.read(&mut buffer).map_err(|err| format!("read OAuth callback: {err}"))?;
@@ -90,7 +116,7 @@ fn read_callback(stream: &mut TcpStream, expected_state: &str) -> AppResult<Stri
         .ok_or_else(|| "invalid OAuth callback request".to_string())?;
     let callback = reqwest::Url::parse(&format!("http://127.0.0.1{target}"))
         .map_err(|_| "invalid OAuth callback request".to_string())?;
-    if callback.path() != CALLBACK_PATH {
+    if callback.path() != callback_path {
         write_callback_response(stream, "404 Not Found", "Not found")?;
         return Err("invalid OAuth callback path".to_string());
     }
@@ -211,9 +237,12 @@ async fn exchange_authorization_code(auth: &OAuthAuthorizationConfig, code: &str
     let response_headers = response.headers().clone();
     let body: Value = response.json().await.map_err(|err| format!("decode business token response: {err}"))?;
     let access_token = token_exchange_response_string(auth, &response_headers, &body, "access_token");
+    let refresh_token = token_exchange_response_string(auth, &response_headers, &body, "refresh_token");
     let token_type = token_exchange_response_string(auth, &response_headers, &body, "token_type");
+    let scope = token_exchange_response_string(auth, &response_headers, &body, "scope");
     let expires_in = token_exchange_response_u64(auth, &response_headers, &body, "expires_in")?;
-    let token = TokenResponse { access_token, token_type, expires_in };
+    let refresh_token_expires_in = token_exchange_response_u64(auth, &response_headers, &body, "refresh_token_expires_in")?;
+    let token = TokenResponse { access_token, refresh_token, token_type, scope, expires_in, refresh_token_expires_in };
     if token.access_token.trim().is_empty() {
         return Err("business token response is missing access_token".to_string());
     }
@@ -247,7 +276,10 @@ fn token_exchange_result(auth: &OAuthAuthorizationConfig, name: &str) -> (String
         .and_then(|exchange| exchange.response.as_ref())
         .and_then(|response| match name {
             "access_token" => response.access_token.as_ref(),
+            "refresh_token" => response.refresh_token.as_ref(),
             "token_type" => response.token_type.as_ref(),
+            "scope" => response.scope.as_ref(),
+            "refresh_token_expires_in" => response.refresh_token_expires_in.as_ref(),
             _ => response.expires_in.as_ref(),
         });
     match configured {

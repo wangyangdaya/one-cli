@@ -80,8 +80,11 @@ pub struct OAuthTokenExchangeParameter {
 #[derive(Deserialize)]
 pub struct OAuthTokenExchangeResponse {
     pub access_token: Option<OAuthTokenExchangeResult>,
+    pub refresh_token: Option<OAuthTokenExchangeResult>,
     pub token_type: Option<OAuthTokenExchangeResult>,
+    pub scope: Option<OAuthTokenExchangeResult>,
     pub expires_in: Option<OAuthTokenExchangeResult>,
+    pub refresh_token_expires_in: Option<OAuthTokenExchangeResult>,
 }
 
 #[derive(Deserialize)]
@@ -104,16 +107,32 @@ struct RuntimeClientAuth {
 struct OAuthTokenResponse {
     access_token: String,
     #[serde(default)]
+    refresh_token: String,
+    #[serde(default)]
     token_type: String,
     #[serde(default)]
+    scope: String,
+    #[serde(default)]
     expires_in: u64,
+    #[serde(default)]
+    refresh_token_expires_in: u64,
 }
 
 #[derive(Serialize, Deserialize)]
 struct OAuthAuthorizationToken {
     access_token: String,
+    #[serde(default)]
+    refresh_token: String,
+    #[serde(default = "default_bearer")]
+    token_type: String,
+    #[serde(default)]
+    scope: String,
     expires_at: u64,
+    #[serde(default)]
+    refresh_expires_at: u64,
 }
+
+fn default_bearer() -> String { "Bearer".to_string() }
 
 pub struct OAuthAuthorizationConfig {
     pub authorization_url: String,
@@ -197,7 +216,12 @@ pub async fn resolve_oauth_token(app_name: &str) -> AppResult<String> {
         return Err("runtime auth must be oauth2".to_string());
     }
     if auth.grant_type.trim() == "authorization_code" {
-        return load_oauth_authorization_token(app_name);
+        let token = load_oauth_authorization_token(app_name)?;
+        return match oauth_authorization_token_status(&token, unix_seconds()) {
+            "valid" => Ok(token.access_token.trim().to_string()),
+            "needs_refresh" => refresh_oauth_authorization_token(app_name, &auth, &token.refresh_token).await,
+            _ => Err(format!("login_required: run {app_name} login")),
+        };
     }
     if auth.grant_type.trim() != "client_credentials" {
         return Err(format!("unsupported OAuth grant_type {:?}", auth.grant_type));
@@ -285,24 +309,67 @@ pub fn load_oauth_authorization_config(app_name: &str) -> AppResult<OAuthAuthori
     })
 }
 
-pub fn save_oauth_authorization_token(app_name: &str, access_token: &str, expires_in: u64) -> AppResult<()> {
+pub fn save_oauth_authorization_token(
+    app_name: &str,
+    access_token: &str,
+    refresh_token: &str,
+    token_type: &str,
+    scope: &str,
+    expires_in: u64,
+    refresh_token_expires_in: u64,
+) -> AppResult<()> {
     let access_token = access_token.trim();
     if access_token.is_empty() {
         return Err("OAuth token response is missing access_token".to_string());
     }
     let lifetime = if expires_in > 0 { expires_in } else { 300 };
+    let token_type = if token_type.trim().is_empty() { "Bearer" } else { token_type.trim() };
+    if !token_type.eq_ignore_ascii_case("bearer") {
+        return Err(format!("unsupported OAuth token_type {token_type:?}"));
+    }
     let token = OAuthAuthorizationToken {
         access_token: access_token.to_string(),
+        refresh_token: refresh_token.trim().to_string(),
+        token_type: "Bearer".to_string(),
+        scope: scope.trim().to_string(),
         expires_at: unix_seconds().saturating_add(lifetime),
+        refresh_expires_at: if refresh_token_expires_in > 0 {
+            unix_seconds().saturating_add(refresh_token_expires_in)
+        } else {
+            0
+        },
     };
     let path = oauth_authorization_token_path(app_name)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| format!("create OAuth session directory: {err}"))?;
     }
     let payload = serde_json::to_vec(&token).map_err(|err| format!("encode OAuth session: {err}"))?;
-    fs::write(&path, payload).map_err(|err| format!("write OAuth session: {err}"))?;
-    protect_oauth_token_file(&path)?;
+    let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+    fs::write(&temporary, payload).map_err(|err| format!("write temporary OAuth session: {err}"))?;
+    protect_oauth_token_file(&temporary)?;
+    fs::rename(&temporary, &path).map_err(|err| format!("replace OAuth session: {err}"))?;
     Ok(())
+}
+
+pub fn oauth_authorization_status(app_name: &str) -> AppResult<&'static str> {
+    let path = oauth_authorization_token_path(app_name)?;
+    let raw = match fs::read(&path) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok("not_logged_in"),
+        Err(err) => return Err(format!("read OAuth session: {err}")),
+    };
+    let token: OAuthAuthorizationToken = serde_json::from_slice(&raw).map_err(|err| format!("decode OAuth session: {err}"))?;
+    Ok(oauth_authorization_token_status(&token, unix_seconds()))
+}
+
+fn oauth_authorization_token_status(token: &OAuthAuthorizationToken, now: u64) -> &'static str {
+    if !token.access_token.trim().is_empty() && token.expires_at > now.saturating_add(300) {
+        "valid"
+    } else if !token.refresh_token.trim().is_empty() && token.refresh_expires_at > now {
+        "needs_refresh"
+    } else {
+        "expired"
+    }
 }
 
 pub fn clear_oauth_authorization_token(app_name: &str) -> AppResult<()> {
@@ -314,7 +381,7 @@ pub fn clear_oauth_authorization_token(app_name: &str) -> AppResult<()> {
     }
 }
 
-fn load_oauth_authorization_token(app_name: &str) -> AppResult<String> {
+fn load_oauth_authorization_token(app_name: &str) -> AppResult<OAuthAuthorizationToken> {
     let path = oauth_authorization_token_path(app_name)?;
     let raw = fs::read(&path).map_err(|err| {
         if err.kind() == std::io::ErrorKind::NotFound {
@@ -324,9 +391,39 @@ fn load_oauth_authorization_token(app_name: &str) -> AppResult<String> {
         }
     })?;
     let token: OAuthAuthorizationToken = serde_json::from_slice(&raw).map_err(|err| format!("decode OAuth session: {err}"))?;
-    if token.access_token.trim().is_empty() || token.expires_at <= unix_seconds() {
-        return Err(format!("login_required: run {app_name} login"));
+    Ok(token)
+}
+
+async fn refresh_oauth_authorization_token(app_name: &str, auth: &RuntimeAuth, refresh_token: &str) -> AppResult<String> {
+    let endpoint = reqwest::Url::parse(auth.token_url.trim()).map_err(|_| "invalid OAuth token_url".to_string())?;
+    let form = [
+        ("grant_type", "refresh_token"),
+        ("client_id", auth.client_id.trim()),
+        ("refresh_token", refresh_token.trim()),
+    ];
+    let response = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|err| err.to_string())?
+        .post(endpoint)
+        .form(&form)
+        .send()
+        .await
+        .map_err(|err| format!("refresh OAuth session: {err}; run {app_name} login"))?;
+    let status = response.status();
+    let token: OAuthTokenResponse = response.json().await.map_err(|err| format!("decode OAuth refresh response: {err}"))?;
+    if !status.is_success() || token.access_token.trim().is_empty() || token.refresh_token.trim().is_empty() {
+        return Err(format!("refresh OAuth session was rejected; run {app_name} login"));
     }
+    save_oauth_authorization_token(
+        app_name,
+        &token.access_token,
+        &token.refresh_token,
+        &token.token_type,
+        &token.scope,
+        token.expires_in,
+        token.refresh_token_expires_in,
+    )?;
     Ok(token.access_token.trim().to_string())
 }
 

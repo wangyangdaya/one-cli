@@ -563,10 +563,11 @@ auth:
 	}
 	cliText := string(cliSource)
 	if !strings.Contains(cliText, `#[command(name = "login")]`) ||
+		!strings.Contains(cliText, `#[command(name = "status")]`) ||
 		!strings.Contains(cliText, `#[command(name = "logout")]`) ||
 		!strings.Contains(cliText, "GroupCommand::Login") ||
 		!strings.Contains(cliText, "GroupCommand::Logout") {
-		t.Fatalf("generated Rust CLI is missing built-in top-level login/logout commands:\n%s", cliSource)
+		t.Fatalf("generated Rust CLI is missing built-in top-level login/status/logout commands:\n%s", cliSource)
 	}
 	if got := strings.Count(cliText, `#[command(name = "auth")]`); got != 1 {
 		t.Fatalf("generated Rust CLI has %d auth root commands, want only the business auth group:\n%s", got, cliSource)
@@ -624,8 +625,11 @@ func testGeneratedRustOAuth2AuthorizationCode(t *testing.T, customExchange bool)
 		t.Skip("cargo not installed")
 	}
 	const (
-		clientID    = "business-cli"
-		accessToken = "rust-business-access-token"
+		clientID             = "business-cli"
+		accessToken          = "rust-business-access-token"
+		refreshToken         = "rust-business-refresh-token"
+		refreshedAccessToken = "rust-refreshed-access-token"
+		refreshedRefresh     = "rust-refreshed-refresh-token"
 	)
 	var loginRequests atomic.Int32
 	var businessRequests atomic.Int32
@@ -658,7 +662,14 @@ func testGeneratedRustOAuth2AuthorizationCode(t *testing.T, customExchange bool)
 				if err := r.ParseForm(); err != nil {
 					t.Errorf("parse login form: %v", err)
 				}
-				if got := r.Form.Get("grant_type"); got != "authorization_code" {
+				if got := r.Form.Get("grant_type"); got == "refresh_token" {
+					if r.Form.Get("refresh_token") != refreshToken {
+						t.Errorf("refresh token form = %v", r.Form)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"access_token":"` + refreshedAccessToken + `","refresh_token":"` + refreshedRefresh + `","token_type":"Bearer","scope":"offline_access","expires_in":3600,"refresh_token_expires_in":604800}`))
+					return
+				} else if got != "authorization_code" {
 					t.Errorf("grant_type = %q, want authorization_code", got)
 				}
 				if got := r.Form.Get("code"); got != "iam-code" {
@@ -673,11 +684,15 @@ func testGeneratedRustOAuth2AuthorizationCode(t *testing.T, customExchange bool)
 				w.Header().Set("X-Token-Type", "bearer")
 				_, _ = w.Write([]byte(`{"data":{"gatewayToken":"` + accessToken + `","expireSeconds":"3600"}}`))
 			} else {
-				_, _ = w.Write([]byte(`{"access_token":"` + accessToken + `","token_type":"bearer","expires_in":3600}`))
+				_, _ = w.Write([]byte(`{"access_token":"` + accessToken + `","refresh_token":"` + refreshToken + `","token_type":"Bearer","scope":"offline_access","expires_in":3600,"refresh_token_expires_in":604800}`))
 			}
 		case "/items":
 			businessRequests.Add(1)
-			if got := r.Header.Get("Authorization"); got != "Bearer "+accessToken {
+			expectedToken := accessToken
+			if !customExchange && loginRequests.Load() > 1 {
+				expectedToken = refreshedAccessToken
+			}
+			if got := r.Header.Get("Authorization"); got != "Bearer "+expectedToken {
 				t.Errorf("business Authorization = %q, want Bearer token", got)
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -806,6 +821,38 @@ auth:
 	} else if info.Mode().Perm() != 0o600 {
 		t.Fatalf("OAuth token file mode = %o, want 600", info.Mode().Perm())
 	}
+	runStatus := func() ([]byte, error) {
+		status := exec.Command("cargo", "run", "--quiet", "--", "status")
+		status.Dir = dir
+		status.Env = append(runtimeTestEnv(dir), "OPENCLI_OAUTH_TOKEN_FILE="+tokenFile)
+		return status.CombinedOutput()
+	}
+	statusOut, err := runStatus()
+	if err != nil || !strings.Contains(string(statusOut), "valid") {
+		t.Fatalf("Rust OAuth status = %s, err=%v", statusOut, err)
+	}
+	if !customExchange {
+		raw, readErr := os.ReadFile(tokenFile)
+		if readErr != nil {
+			t.Fatalf("read Rust OAuth token: %v", readErr)
+		}
+		var stored map[string]any
+		if err := json.Unmarshal(raw, &stored); err != nil {
+			t.Fatalf("decode Rust OAuth token: %v", err)
+		}
+		if stored["refresh_token"] != refreshToken {
+			t.Fatalf("stored Rust OAuth token = %#v", stored)
+		}
+		stored["expires_at"] = time.Now().Add(-time.Minute).Unix()
+		updated, _ := json.Marshal(stored)
+		if err := os.WriteFile(tokenFile, updated, 0o600); err != nil {
+			t.Fatalf("expire Rust OAuth token: %v", err)
+		}
+		statusOut, err = runStatus()
+		if err != nil || !strings.Contains(string(statusOut), "needs_refresh") {
+			t.Fatalf("Rust OAuth refresh status = %s, err=%v", statusOut, err)
+		}
+	}
 
 	call := exec.Command("cargo", "run", "--quiet", "--", "items", "list")
 	call.Dir = dir
@@ -819,8 +866,16 @@ auth:
 	if !strings.Contains(string(out), "ok") {
 		t.Fatalf("generated Rust OAuth CLI output = %s", out)
 	}
-	if loginRequests.Load() != 1 || businessRequests.Load() != 1 {
-		t.Fatalf("requests: login=%d business=%d, want 1 each", loginRequests.Load(), businessRequests.Load())
+	wantLoginRequests := int32(1)
+	if !customExchange {
+		wantLoginRequests = 2
+		raw, readErr := os.ReadFile(tokenFile)
+		if readErr != nil || !bytes.Contains(raw, []byte(refreshedRefresh)) {
+			t.Fatalf("rotated Rust refresh token was not stored: %s, err=%v", raw, readErr)
+		}
+	}
+	if loginRequests.Load() != wantLoginRequests || businessRequests.Load() != 1 {
+		t.Fatalf("requests: login=%d business=%d, want login=%d business=1", loginRequests.Load(), businessRequests.Load(), wantLoginRequests)
 	}
 
 	logout := exec.Command("cargo", "run", "--quiet", "--", "logout")
