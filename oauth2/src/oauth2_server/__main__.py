@@ -5,7 +5,8 @@ import uvicorn
 
 def main() -> None:
     uvicorn.run(
-        "oauth2_server.app:app",
+        "oauth2_server.app:create_app",
+        factory=True,
         host="127.0.0.1",
         port=18080,
         log_level="info",
