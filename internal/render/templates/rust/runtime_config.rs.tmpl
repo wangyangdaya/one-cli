@@ -10,12 +10,10 @@ use sha2::{Digest, Sha256};
 {{- end }}
 use std::env;
 use std::fs;
-{{- if and (appUsesOAuth2 .App) .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
 use std::fs::OpenOptions;
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
-{{- end }}
 use std::path::{Path, PathBuf};
 
 use crate::types::AppResult;
