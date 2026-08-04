@@ -68,7 +68,7 @@ go run ./cmd/opencli generate \
 cd ./tmp/feishu-cli
 go run ./cmd/feishu login
 go run ./cmd/feishu status
-go run ./cmd/feishu identity get-user-info
+go run ./cmd/feishu identity info
 go run ./cmd/feishu logout
 ```
 
