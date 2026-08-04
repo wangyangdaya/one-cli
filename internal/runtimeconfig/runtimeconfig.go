@@ -80,9 +80,12 @@ type tokenExchangeParameter struct {
 }
 
 type tokenExchangeResponse struct {
-	AccessToken *tokenExchangeResult `yaml:"access_token,omitempty"`
-	TokenType   *tokenExchangeResult `yaml:"token_type,omitempty"`
-	ExpiresIn   *tokenExchangeResult `yaml:"expires_in,omitempty"`
+	AccessToken           *tokenExchangeResult `yaml:"access_token,omitempty"`
+	RefreshToken          *tokenExchangeResult `yaml:"refresh_token,omitempty"`
+	TokenType             *tokenExchangeResult `yaml:"token_type,omitempty"`
+	Scope                 *tokenExchangeResult `yaml:"scope,omitempty"`
+	ExpiresIn             *tokenExchangeResult `yaml:"expires_in,omitempty"`
+	RefreshTokenExpiresIn *tokenExchangeResult `yaml:"refresh_token_expires_in,omitempty"`
 }
 
 type tokenExchangeResult struct {
@@ -366,9 +369,12 @@ func validateTokenExchange(exchange *tokenExchange) error {
 	}
 	if exchange.Response != nil {
 		for name, result := range map[string]*tokenExchangeResult{
-			"access_token": exchange.Response.AccessToken,
-			"token_type":   exchange.Response.TokenType,
-			"expires_in":   exchange.Response.ExpiresIn,
+			"access_token":             exchange.Response.AccessToken,
+			"refresh_token":            exchange.Response.RefreshToken,
+			"token_type":               exchange.Response.TokenType,
+			"scope":                    exchange.Response.Scope,
+			"expires_in":               exchange.Response.ExpiresIn,
+			"refresh_token_expires_in": exchange.Response.RefreshTokenExpiresIn,
 		} {
 			if err := validateTokenExchangeResult(name, result); err != nil {
 				return err

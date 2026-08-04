@@ -62,9 +62,12 @@ type OAuthTokenExchangeParameter struct {
 }
 
 type OAuthTokenExchangeResponse struct {
-	AccessToken *OAuthTokenExchangeResult `yaml:"access_token,omitempty"`
-	TokenType   *OAuthTokenExchangeResult `yaml:"token_type,omitempty"`
-	ExpiresIn   *OAuthTokenExchangeResult `yaml:"expires_in,omitempty"`
+	AccessToken           *OAuthTokenExchangeResult `yaml:"access_token,omitempty"`
+	RefreshToken          *OAuthTokenExchangeResult `yaml:"refresh_token,omitempty"`
+	TokenType             *OAuthTokenExchangeResult `yaml:"token_type,omitempty"`
+	Scope                 *OAuthTokenExchangeResult `yaml:"scope,omitempty"`
+	ExpiresIn             *OAuthTokenExchangeResult `yaml:"expires_in,omitempty"`
+	RefreshTokenExpiresIn *OAuthTokenExchangeResult `yaml:"refresh_token_expires_in,omitempty"`
 }
 
 type OAuthTokenExchangeResult struct {
@@ -151,11 +154,12 @@ func ResolveCredential(appName, authMode, defaultHeader string) (string, string,
 
 func ResolveOAuthToken(appName string) (string, error) {
 	oauthTokenCache.Lock()
-	defer oauthTokenCache.Unlock()
-	if oauthTokenCache.value != "" && time.Until(oauthTokenCache.expiresAt) > time.Minute {
-		return oauthTokenCache.value, nil
+	if oauthTokenCache.value != "" && time.Until(oauthTokenCache.expiresAt) > 5*time.Minute {
+		token := oauthTokenCache.value
+		oauthTokenCache.Unlock()
+		return token, nil
 	}
-
+	oauthTokenCache.Unlock()
 	config, path, err := loadRuntimeFile(appName)
 	if err != nil {
 		return "", err
@@ -168,13 +172,29 @@ func ResolveOAuthToken(appName string) (string, error) {
 		return "", fmt.Errorf("runtime auth must be oauth2")
 	}
 	if strings.TrimSpace(auth.GrantType) == "authorization_code" {
-		token, expiresAt, err := loadOAuthAuthorizationToken(appName)
+		stored, err := loadOAuthAuthorizationToken(appName)
 		if err != nil {
 			return "", err
 		}
-		oauthTokenCache.value = token
-		oauthTokenCache.expiresAt = expiresAt
-		return token, nil
+		switch oauthAuthorizationTokenStatus(stored, time.Now()) {
+		case "valid":
+			oauthTokenCache.Lock()
+			oauthTokenCache.value = stored.AccessToken
+			oauthTokenCache.expiresAt = stored.ExpiresAt
+			oauthTokenCache.Unlock()
+			return stored.AccessToken, nil
+		case "needs_refresh":
+			response, err := requestOAuthRefreshToken(*auth, stored.RefreshToken)
+			if err != nil {
+				return "", fmt.Errorf("refresh OAuth session: %w; run %s login", err, appName)
+			}
+			if err := SaveOAuthAuthorizationToken(appName, response); err != nil {
+				return "", err
+			}
+			return strings.TrimSpace(response.AccessToken), nil
+		default:
+			return "", fmt.Errorf("login_required: run %s login", appName)
+		}
 	}
 	if strings.TrimSpace(auth.GrantType) != "client_credentials" {
 		return "", fmt.Errorf("unsupported OAuth grant_type %q", auth.GrantType)
@@ -197,12 +217,14 @@ func ResolveOAuthToken(appName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	oauthTokenCache.Lock()
 	oauthTokenCache.value = token
 	if expiresIn > 0 {
 		oauthTokenCache.expiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second)
 	} else {
 		oauthTokenCache.expiresAt = time.Now().Add(5 * time.Minute)
 	}
+	oauthTokenCache.Unlock()
 	return token, nil
 }
 
@@ -240,21 +262,54 @@ func LoadOAuthAuthorizationConfig(appName string) (OAuthAuthorizationConfig, err
 	}, nil
 }
 
-type oauthAuthorizationToken struct {
-	AccessToken string    `json:"access_token"`
-	ExpiresAt   time.Time `json:"expires_at"`
+type OAuthTokenResponse struct {
+	AccessToken           string
+	RefreshToken          string
+	TokenType             string
+	Scope                 string
+	ExpiresIn             int64
+	RefreshTokenExpiresIn int64
 }
 
-func SaveOAuthAuthorizationToken(appName, accessToken string, expiresIn int64) error {
-	accessToken = strings.TrimSpace(accessToken)
-	if accessToken == "" {
+type OAuthAuthorizationToken struct {
+	AccessToken      string    `json:"access_token"`
+	RefreshToken     string    `json:"refresh_token,omitempty"`
+	TokenType        string    `json:"token_type"`
+	Scope            string    `json:"scope,omitempty"`
+	ExpiresAt        time.Time `json:"expires_at"`
+	RefreshExpiresAt time.Time `json:"refresh_expires_at,omitempty"`
+}
+
+func SaveOAuthAuthorizationToken(appName string, response OAuthTokenResponse) error {
+	response.AccessToken = strings.TrimSpace(response.AccessToken)
+	response.RefreshToken = strings.TrimSpace(response.RefreshToken)
+	response.TokenType = strings.TrimSpace(response.TokenType)
+	if response.AccessToken == "" {
 		return fmt.Errorf("OAuth token response is missing access_token")
 	}
-	expiresAt := time.Now().Add(5 * time.Minute)
-	if expiresIn > 0 {
-		expiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second)
+	if response.TokenType == "" {
+		response.TokenType = "Bearer"
 	}
-	payload, err := json.Marshal(oauthAuthorizationToken{AccessToken: accessToken, ExpiresAt: expiresAt})
+	if !strings.EqualFold(response.TokenType, "Bearer") {
+		return fmt.Errorf("unsupported OAuth token_type %q", response.TokenType)
+	}
+	expiresAt := time.Now().Add(5 * time.Minute)
+	if response.ExpiresIn > 0 {
+		expiresAt = time.Now().Add(time.Duration(response.ExpiresIn) * time.Second)
+	}
+	var refreshExpiresAt time.Time
+	if response.RefreshTokenExpiresIn > 0 {
+		refreshExpiresAt = time.Now().Add(time.Duration(response.RefreshTokenExpiresIn) * time.Second)
+	}
+	token := OAuthAuthorizationToken{
+		AccessToken:      response.AccessToken,
+		RefreshToken:     response.RefreshToken,
+		TokenType:        "Bearer",
+		Scope:            strings.TrimSpace(response.Scope),
+		ExpiresAt:        expiresAt,
+		RefreshExpiresAt: refreshExpiresAt,
+	}
+	payload, err := json.Marshal(token)
 	if err != nil {
 		return fmt.Errorf("encode OAuth session: %w", err)
 	}
@@ -265,14 +320,28 @@ func SaveOAuthAuthorizationToken(appName, accessToken string, expiresIn int64) e
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create OAuth session directory: %w", err)
 	}
-	if err := os.WriteFile(path, payload, 0o600); err != nil {
-		return fmt.Errorf("write OAuth session: %w", err)
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".oauth-token-*")
+	if err != nil {
+		return fmt.Errorf("create temporary OAuth session: %w", err)
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return fmt.Errorf("protect OAuth session: %w", err)
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(0o600); err != nil {
+		_ = temporary.Close()
+		return fmt.Errorf("protect temporary OAuth session: %w", err)
+	}
+	if _, err := temporary.Write(payload); err != nil {
+		_ = temporary.Close()
+		return fmt.Errorf("write temporary OAuth session: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("close temporary OAuth session: %w", err)
+	}
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return fmt.Errorf("replace OAuth session: %w", err)
 	}
 	oauthTokenCache.Lock()
-	oauthTokenCache.value = accessToken
+	oauthTokenCache.value = response.AccessToken
 	oauthTokenCache.expiresAt = expiresAt
 	oauthTokenCache.Unlock()
 	return nil
@@ -294,26 +363,114 @@ func ClearOAuthAuthorizationToken(appName string) error {
 	return nil
 }
 
-func loadOAuthAuthorizationToken(appName string) (string, time.Time, error) {
+func OAuthAuthorizationStatus(appName string) (string, error) {
+	token, err := readOAuthAuthorizationToken(appName)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "not_logged_in", nil
+		}
+		return "", err
+	}
+	return oauthAuthorizationTokenStatus(token, time.Now()), nil
+}
+
+func oauthAuthorizationTokenStatus(token OAuthAuthorizationToken, now time.Time) string {
+	if strings.TrimSpace(token.AccessToken) != "" && token.ExpiresAt.After(now.Add(5*time.Minute)) {
+		return "valid"
+	}
+	if strings.TrimSpace(token.RefreshToken) != "" && token.RefreshExpiresAt.After(now) {
+		return "needs_refresh"
+	}
+	return "expired"
+}
+
+func loadOAuthAuthorizationToken(appName string) (OAuthAuthorizationToken, error) {
+	token, err := readOAuthAuthorizationToken(appName)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return OAuthAuthorizationToken{}, fmt.Errorf("login_required: run %s login", appName)
+		}
+		return OAuthAuthorizationToken{}, err
+	}
+	return token, nil
+}
+
+func readOAuthAuthorizationToken(appName string) (OAuthAuthorizationToken, error) {
 	path, err := oauthAuthorizationTokenPath(appName)
 	if err != nil {
-		return "", time.Time{}, err
+		return OAuthAuthorizationToken{}, err
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", time.Time{}, fmt.Errorf("login_required: run %s login", appName)
-		}
-		return "", time.Time{}, fmt.Errorf("read OAuth session: %w", err)
+		return OAuthAuthorizationToken{}, err
 	}
-	var token oauthAuthorizationToken
+	var token OAuthAuthorizationToken
 	if err := json.Unmarshal(raw, &token); err != nil {
-		return "", time.Time{}, fmt.Errorf("decode OAuth session: %w", err)
+		return OAuthAuthorizationToken{}, fmt.Errorf("decode OAuth session: %w", err)
 	}
-	if strings.TrimSpace(token.AccessToken) == "" || !token.ExpiresAt.After(time.Now()) {
-		return "", time.Time{}, fmt.Errorf("login_required: run %s login", appName)
+	token.AccessToken = strings.TrimSpace(token.AccessToken)
+	token.RefreshToken = strings.TrimSpace(token.RefreshToken)
+	return token, nil
+}
+
+type oauthTokenEndpointResponse struct {
+	Code                  int    `json:"code"`
+	Msg                   string `json:"msg"`
+	Error                 string `json:"error"`
+	ErrorDescription      string `json:"error_description"`
+	AccessToken           string `json:"access_token"`
+	RefreshToken          string `json:"refresh_token"`
+	TokenType             string `json:"token_type"`
+	Scope                 string `json:"scope"`
+	ExpiresIn             int64  `json:"expires_in"`
+	RefreshTokenExpiresIn int64  `json:"refresh_token_expires_in"`
+}
+
+func requestOAuthRefreshToken(auth runtimeAuth, refreshToken string) (OAuthTokenResponse, error) {
+	endpoint, err := url.Parse(strings.TrimSpace(auth.TokenURL))
+	if err != nil || endpoint.Scheme == "" || endpoint.Host == "" {
+		return OAuthTokenResponse{}, fmt.Errorf("invalid OAuth token_url")
 	}
-	return strings.TrimSpace(token.AccessToken), token.ExpiresAt, nil
+	values := url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {strings.TrimSpace(auth.ClientID)},
+		"refresh_token": {strings.TrimSpace(refreshToken)},
+	}
+	req, err := http.NewRequest(http.MethodPost, endpoint.String(), strings.NewReader(values.Encode()))
+	if err != nil {
+		return OAuthTokenResponse{}, fmt.Errorf("build OAuth refresh request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return OAuthTokenResponse{}, fmt.Errorf("request OAuth token endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+	var body oauthTokenEndpointResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
+		return OAuthTokenResponse{}, fmt.Errorf("decode OAuth refresh response: %w", err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices || body.Code != 0 || body.Error != "" {
+		description := strings.TrimSpace(body.ErrorDescription)
+		if description == "" {
+			description = strings.TrimSpace(body.Msg)
+		}
+		if description == "" {
+			description = resp.Status
+		}
+		return OAuthTokenResponse{}, fmt.Errorf("token endpoint rejected refresh: %s", description)
+	}
+	if strings.TrimSpace(body.AccessToken) == "" || strings.TrimSpace(body.RefreshToken) == "" {
+		return OAuthTokenResponse{}, fmt.Errorf("token endpoint response is missing rotated tokens")
+	}
+	return OAuthTokenResponse{
+		AccessToken:           body.AccessToken,
+		RefreshToken:          body.RefreshToken,
+		TokenType:             body.TokenType,
+		Scope:                 body.Scope,
+		ExpiresIn:             body.ExpiresIn,
+		RefreshTokenExpiresIn: body.RefreshTokenExpiresIn,
+	}, nil
 }
 
 func oauthAuthorizationTokenPath(appName string) (string, error) {

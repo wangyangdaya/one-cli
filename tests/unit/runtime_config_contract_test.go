@@ -122,8 +122,8 @@ func TestRenderedGoOAuth2IncludesTopLevelLoginCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read generated root: %v", err)
 	}
-	if !strings.Contains(string(root), "auth.NewOAuth2LoginCommand") || !strings.Contains(string(root), "auth.NewOAuth2LogoutCommand") {
-		t.Fatalf("generated root missing OAuth2 login/logout commands:\n%s", root)
+	if !strings.Contains(string(root), "auth.NewOAuth2LoginCommand") || !strings.Contains(string(root), "auth.NewOAuth2StatusCommand") || !strings.Contains(string(root), "auth.NewOAuth2LogoutCommand") {
+		t.Fatalf("generated root missing OAuth2 login/status/logout commands:\n%s", root)
 	}
 	if got := strings.Count(string(root), `"github.com/acme/businesscli/internal/auth"`); got != 1 {
 		t.Fatalf("generated root imports auth package %d times, want once:\n%s", got, root)

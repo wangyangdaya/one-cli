@@ -22,7 +22,7 @@ func main() {
 	root := cli.NewRootCommand("{{ .App.Name }}", "{{ .App.Name }} CLI", version)
 	cli.BindTrace(httpx.SetTraceEnabled)
 	{{- if $interactiveOAuth }}
-	root.AddCommand(auth.NewOAuth2LoginCommand("{{ .App.Name }}"), auth.NewOAuth2LogoutCommand("{{ .App.Name }}"))
+root.AddCommand(auth.NewOAuth2LoginCommand("{{ .App.Name }}"), auth.NewOAuth2StatusCommand("{{ .App.Name }}"), auth.NewOAuth2LogoutCommand("{{ .App.Name }}"))
 	{{- end }}
 {{- range .App.Groups }}
 	root.AddCommand({{ groupPackageName . }}.NewCommand())

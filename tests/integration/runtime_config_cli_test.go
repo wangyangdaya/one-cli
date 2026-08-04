@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"one-cli/internal/app"
 )
@@ -228,9 +230,18 @@ func TestGeneratedGoOAuth2AuthorizationCode(t *testing.T) {
 
 func testGeneratedGoOAuth2AuthorizationCode(t *testing.T, customExchange bool) {
 	const (
-		clientID    = "business-cli"
-		accessToken = "business-access-token"
+		clientID             = "business-cli"
+		accessToken          = "business-access-token"
+		refreshToken         = "business-refresh-token"
+		refreshedAccessToken = "refreshed-business-access-token"
+		refreshedRefresh     = "refreshed-business-refresh-token"
 	)
+	callbackListener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve callback port: %v", err)
+	}
+	redirectURI := "http://" + callbackListener.Addr().String() + "/oauth/callback"
+	_ = callbackListener.Close()
 	var loginRequests atomic.Int32
 	var businessRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -242,7 +253,9 @@ func testGeneratedGoOAuth2AuthorizationCode(t *testing.T, customExchange bool) {
 			if got := r.URL.Query().Get("response_type"); got != "code" {
 				t.Errorf("response_type = %q, want code", got)
 			}
-			redirectURI := r.URL.Query().Get("redirect_uri")
+			if got := r.URL.Query().Get("redirect_uri"); got != redirectURI {
+				t.Errorf("redirect_uri = %q, want %q", got, redirectURI)
+			}
 			state := r.URL.Query().Get("state")
 			http.Redirect(w, r, redirectURI+"?code=iam-code&state="+url.QueryEscape(state), http.StatusFound)
 		case "/cli-auth/login":
@@ -262,8 +275,19 @@ func testGeneratedGoOAuth2AuthorizationCode(t *testing.T, customExchange bool) {
 				if err := r.ParseForm(); err != nil {
 					t.Errorf("parse login form: %v", err)
 				}
-				if r.Form.Get("grant_type") != "authorization_code" || r.Form.Get("code") != "iam-code" || r.Form.Get("client_id") != clientID {
-					t.Errorf("standard token form = %v", r.Form)
+				if r.Form.Get("client_id") != clientID {
+					t.Errorf("standard token form client_id = %v", r.Form)
+				}
+				if r.Form.Get("grant_type") == "refresh_token" {
+					if r.Form.Get("refresh_token") != refreshToken {
+						t.Errorf("refresh token form = %v", r.Form)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"access_token":"` + refreshedAccessToken + `","refresh_token":"` + refreshedRefresh + `","token_type":"Bearer","scope":"offline_access","expires_in":3600,"refresh_token_expires_in":604800}`))
+					return
+				}
+				if r.Form.Get("grant_type") != "authorization_code" || r.Form.Get("code") != "iam-code" || r.Form.Get("redirect_uri") != redirectURI {
+					t.Errorf("authorization code form = %v", r.Form)
 				}
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -271,11 +295,15 @@ func testGeneratedGoOAuth2AuthorizationCode(t *testing.T, customExchange bool) {
 				w.Header().Set("X-Token-Type", "bearer")
 				_, _ = w.Write([]byte(`{"data":{"gatewayToken":"` + accessToken + `","expireSeconds":"3600"}}`))
 			} else {
-				_, _ = w.Write([]byte(`{"access_token":"` + accessToken + `","token_type":"bearer","expires_in":3600}`))
+				_, _ = w.Write([]byte(`{"access_token":"` + accessToken + `","refresh_token":"` + refreshToken + `","token_type":"Bearer","scope":"offline_access","expires_in":3600,"refresh_token_expires_in":604800}`))
 			}
 		case "/items":
 			businessRequests.Add(1)
-			if got := r.Header.Get("Authorization"); got != "Bearer "+accessToken {
+			expectedToken := accessToken
+			if !customExchange && loginRequests.Load() > 1 {
+				expectedToken = refreshedAccessToken
+			}
+			if got := r.Header.Get("Authorization"); got != "Bearer "+expectedToken {
 				t.Errorf("business Authorization = %q, want Bearer token", got)
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -328,7 +356,8 @@ auth:
   client_id: %s
   authorization_url: %s/idp/oauth2/authorize
   token_url: %s/cli-auth/login
-`, server.URL, clientID, server.URL, server.URL)
+  redirect_uri: %s
+`, server.URL, clientID, server.URL, server.URL, redirectURI)
 	if customExchange {
 		runtimeYAML += `  token_exchange:
     method: POST
@@ -401,6 +430,41 @@ auth:
 	} else if info.Mode().Perm() != 0o600 {
 		t.Fatalf("OAuth token file mode = %o, want 600", info.Mode().Perm())
 	}
+	runStatus := func() ([]byte, error) {
+		status := exec.Command("go", "run", "./cmd/oauthcli", "status")
+		status.Dir = dir
+		status.Env = append(runtimeTestEnv(dir),
+			"OPENCLI_CONFIG="+filepath.Join(dir, "config", "runtime.yaml"),
+			"OPENCLI_OAUTH_TOKEN_FILE="+tokenFile,
+		)
+		return status.CombinedOutput()
+	}
+	statusOut, err := runStatus()
+	if err != nil || !strings.Contains(string(statusOut), "valid") {
+		t.Fatalf("OAuth status = %s, err=%v", statusOut, err)
+	}
+	if !customExchange {
+		raw, readErr := os.ReadFile(tokenFile)
+		if readErr != nil {
+			t.Fatalf("read OAuth token file: %v", readErr)
+		}
+		var stored map[string]any
+		if err := json.Unmarshal(raw, &stored); err != nil {
+			t.Fatalf("decode OAuth token file: %v", err)
+		}
+		if stored["refresh_token"] != refreshToken || stored["scope"] != "offline_access" {
+			t.Fatalf("stored OAuth token = %#v", stored)
+		}
+		stored["expires_at"] = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)
+		updated, _ := json.Marshal(stored)
+		if err := os.WriteFile(tokenFile, updated, 0o600); err != nil {
+			t.Fatalf("expire OAuth token: %v", err)
+		}
+		statusOut, err = runStatus()
+		if err != nil || !strings.Contains(string(statusOut), "needs_refresh") {
+			t.Fatalf("OAuth refresh status = %s, err=%v", statusOut, err)
+		}
+	}
 
 	call := exec.Command("go", "run", "./cmd/oauthcli", "items", "list")
 	call.Dir = dir
@@ -415,8 +479,16 @@ auth:
 	if !strings.Contains(string(out), "ok") {
 		t.Fatalf("generated OAuth CLI output = %s", out)
 	}
-	if loginRequests.Load() != 1 || businessRequests.Load() != 1 {
-		t.Fatalf("requests: login=%d business=%d, want 1 each", loginRequests.Load(), businessRequests.Load())
+	wantLoginRequests := int32(1)
+	if !customExchange {
+		wantLoginRequests = 2
+		raw, readErr := os.ReadFile(tokenFile)
+		if readErr != nil || !bytes.Contains(raw, []byte(refreshedRefresh)) {
+			t.Fatalf("rotated refresh token was not stored: %s, err=%v", raw, readErr)
+		}
+	}
+	if loginRequests.Load() != wantLoginRequests || businessRequests.Load() != 1 {
+		t.Fatalf("requests: login=%d business=%d, want login=%d business=1", loginRequests.Load(), businessRequests.Load(), wantLoginRequests)
 	}
 
 }
