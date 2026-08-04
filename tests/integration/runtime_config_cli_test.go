@@ -576,7 +576,7 @@ auth:
 	if err != nil {
 		t.Fatalf("read generated Rust README.md: %v", err)
 	}
-	for _, want := range []string{"oauthcli login", "oauthcli logout", "authorization_code"} {
+	for _, want := range []string{"oauthcli login", "oauthcli status", "oauthcli logout", "authorization_code"} {
 		if !strings.Contains(string(readmeSource), want) {
 			t.Fatalf("generated Rust README is missing %q:\n%s", want, readmeSource)
 		}
@@ -585,7 +585,7 @@ auth:
 	if err != nil {
 		t.Fatalf("read generated cli-auth skill: %v", err)
 	}
-	for _, want := range []string{"oauthcli login", "oauthcli login --no-browser", "oauthcli logout", "login_required"} {
+	for _, want := range []string{"oauthcli login", "oauthcli login --no-browser", "oauthcli status", "oauthcli logout", "login_required"} {
 		if !strings.Contains(string(loginSkill), want) {
 			t.Fatalf("generated cli-auth skill is missing %q:\n%s", want, loginSkill)
 		}

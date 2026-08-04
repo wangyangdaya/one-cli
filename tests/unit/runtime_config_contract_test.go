@@ -147,7 +147,7 @@ func TestRenderedGoOAuth2IncludesTopLevelLoginCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read generated README: %v", err)
 	}
-	if !strings.Contains(string(readme), "businesscli login") || !strings.Contains(string(readme), "businesscli logout") || strings.Contains(string(readme), "sealed client secret") {
+	if !strings.Contains(string(readme), "businesscli login") || !strings.Contains(string(readme), "businesscli status") || !strings.Contains(string(readme), "businesscli logout") || strings.Contains(string(readme), "sealed client secret") {
 		t.Fatalf("generated authorization-code README has incorrect OAuth guidance:\n%s", readme)
 	}
 }

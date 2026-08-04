@@ -17,6 +17,7 @@ These are built-in CLI authentication commands, not operations from the business
 - Run `{{ .App.Name }} login` when a protected business command requires a session.
 - In a headless or remote terminal, run `{{ .App.Name }} login --no-browser` and give the printed authorization URL to the user.
 - On `login_required`, log in once and retry the original business command.
+- Run `{{ .App.Name }} status` to inspect the local session without making a network request. Protected commands refresh `needs_refresh` sessions automatically.
 - On HTTP 401, check the session and retry at most once after login; never create a login loop.
 - Run `{{ .App.Name }} logout` only when the user explicitly asks to sign out or clear the local session.
 - Do not substitute the business command `{{ .App.Name }} auth login`; that command is generated from the OpenAPI business interface.
@@ -26,7 +27,8 @@ These are built-in CLI authentication commands, not operations from the business
 ```bash
 {{ .App.Name }} login
 {{ .App.Name }} login --no-browser
+{{ .App.Name }} status
 {{ .App.Name }} logout
 ```
 
-CLI login opens the IAM authorization page, receives the authorization code, exchanges it with the business login endpoint for a business token, and injects that token into later protected requests. Credentials are entered only on the IAM page and are never stored in CLI configuration or this Skill.
+CLI login opens the authorization page, receives the authorization code, exchanges it through the configured token endpoint, and stores access and refresh tokens for later protected requests. Credentials are entered only on the authorization page and are never stored in CLI configuration or this Skill.

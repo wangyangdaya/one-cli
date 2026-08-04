@@ -17,6 +17,7 @@ metadata:
 - 调用受保护业务命令前若没有登录态，执行 `{{ .App.Name }} login`。
 - 无浏览器或远程终端环境执行 `{{ .App.Name }} login --no-browser`，把输出的授权链接交给用户打开并确认。
 - 命令返回 `login_required` 时，执行一次登录后重试原业务命令。
+- 使用 `{{ .App.Name }} status` 离线查看本地会话状态；业务命令会自动刷新 `needs_refresh` 会话。
 - 收到 HTTP 401 时可以先检查登录态；重新登录后最多重试一次，避免循环登录。
 - `{{ .App.Name }} logout` 会删除本地业务 Token，只能在用户明确要求退出或清除会话时执行。
 - 不要使用业务命令 `{{ .App.Name }} auth login` 代替 CLI 登录；它属于 OpenAPI 业务接口。
@@ -26,6 +27,7 @@ metadata:
 ```bash
 {{ .App.Name }} login
 {{ .App.Name }} login --no-browser
+{{ .App.Name }} status
 {{ .App.Name }} logout
 ```
 
