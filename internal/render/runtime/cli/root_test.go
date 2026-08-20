@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 func TestNewRootCommandVersionFlagSupportsJSON(t *testing.T) {
@@ -11,7 +13,7 @@ func TestNewRootCommandVersionFlagSupportsJSON(t *testing.T) {
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stdout)
-	cmd.SetArgs([]string{"--version", "--json"})
+	cmd.SetArgs([]string{"-v", "--json"})
 
 	if code := ExecuteRoot(cmd); code != 0 {
 		t.Fatalf("ExecuteRoot() = %d, want 0", code)
@@ -32,12 +34,34 @@ func TestRootHelpRendersFlagsOnce(t *testing.T) {
 		t.Fatalf("ExecuteRoot() = %d, want 0", code)
 	}
 	help := stdout.String()
-	if strings.Contains(help, "-v, --version") {
-		t.Fatalf("help output unexpectedly contains short version flag:\n%s", help)
-	}
-	for _, want := range []string{"-H, --header", "--json", "--trace", "--version"} {
+	for _, want := range []string{"-H, --header", "--json", "--trace", "-v, --version"} {
 		if count := strings.Count(help, want); count != 1 {
 			t.Fatalf("%q appears %d times in help output:\n%s", want, count, help)
 		}
+	}
+}
+
+func TestApplyRootHelpExamplesSkipSkillsCommand(t *testing.T) {
+	originalSorting := cobra.EnableCommandSorting
+	cobra.EnableCommandSorting = false
+	defer func() { cobra.EnableCommandSorting = originalSorting }()
+
+	cmd := NewRootCommand("petcli", "petcli CLI", "0.1.0")
+	pet := &cobra.Command{Use: "pet", Short: "Pet operations"}
+	pet.AddCommand(&cobra.Command{Use: "list", Short: "GET /pets", Run: func(cmd *cobra.Command, args []string) {}})
+	cmd.AddCommand(&cobra.Command{Use: "login", Short: "OAuth login", Run: func(cmd *cobra.Command, args []string) {}})
+	cmd.AddCommand(pet)
+	cmd.AddCommand(NewSkillsCommand())
+
+	ApplyRootHelp(cmd)
+
+	if got := cmd.Example; strings.Contains(got, "skills") {
+		t.Fatalf("root examples should skip skills command, got:\n%s", got)
+	}
+	if got := cmd.Example; strings.Contains(got, "login") {
+		t.Fatalf("root examples should skip top-level non-group commands, got:\n%s", got)
+	}
+	if got := strings.TrimSpace(cmd.Example); got != "petcli pet list" {
+		t.Fatalf("root examples = %q, want petcli pet list", got)
 	}
 }

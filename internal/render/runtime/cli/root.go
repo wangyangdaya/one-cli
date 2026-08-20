@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"one-cli/internal/output"
-
 	"github.com/spf13/cobra"
 )
 
@@ -46,7 +44,7 @@ func NewRootCommand(use, short, version string) *cobra.Command {
 	cmd.CompletionOptions.DisableDefaultCmd = true
 	cmd.PersistentFlags().StringArrayVarP(&requestHeaders, "header", "H", nil, "Request header in 'Name: Value' or 'Name=Value' format; repeatable")
 	cmd.PersistentFlags().BoolVar(&trace, "trace", false, "Print HTTP request and response trace logs")
-	cmd.PersistentFlags().BoolVar(&showVersion, "version", false, "Print version information")
+	cmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "Print version information")
 	cmd.PersistentFlags().Bool("json", false, "Print command output as JSON")
 	return cmd
 }
@@ -80,6 +78,9 @@ func rootExamples(cmd *cobra.Command) string {
 		if command == "" {
 			command = child.Name()
 		}
+		if command == "skills" {
+			continue
+		}
 
 		subcommand := ""
 		for _, grandchild := range child.Commands() {
@@ -93,11 +94,10 @@ func rootExamples(cmd *cobra.Command) string {
 			break
 		}
 
-		if subcommand != "" {
-			examples = append(examples, "  "+root+" "+command+" "+subcommand)
-		} else {
-			examples = append(examples, "  "+root+" "+command)
+		if subcommand == "" {
+			continue
 		}
+		examples = append(examples, "  "+root+" "+command+" "+subcommand)
 		if len(examples) == 3 {
 			break
 		}
@@ -130,13 +130,14 @@ const rootHelpTemplate = `{{with (or .Long .Short)}}{{.}}
 {{end}}{{end}}
 {{end}}Options:
 {{if .HasAvailableLocalFlags}}{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}
+{{end}}{{if and .HasParent .HasAvailableInheritedFlags}}{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}
 {{end}}
 More help: {{.CommandPath}} <command> --help
 `
 
 func printVersion(cmd *cobra.Command, version string) error {
 	if JSONEnabled(cmd) {
-		rendered, err := output.JSONSuccess(cmd.Root().Name()+" version", "ok", map[string]string{
+		rendered, err := JSONSuccess(cmd.Root().Name()+" version", "ok", map[string]string{
 			"version": version,
 		})
 		if err != nil {

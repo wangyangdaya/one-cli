@@ -12,7 +12,7 @@ use crate::types::AppResult;
 #[derive(Subcommand)]
 pub enum Command {
 {{- range .Group.Operations }}
-    #[command(name = "{{ .CommandName }}")]
+    #[command(name = "{{ .CommandName }}", about = "{{ .Method }} {{ .Path }}")]
     {{ rustTypeName .CommandName }}({{ rustTypeName .CommandName }}Args),
 {{- end }}
 }
@@ -33,29 +33,29 @@ impl Command {
 pub struct {{ rustTypeName .CommandName }}Args {
 {{- range .Parameters }}
 {{- if eq .In "path" }}
-    #[arg(long = "{{ rustParamFlagName . }}")]
+    #[arg(long = "{{ rustParamFlagName . }}", help = "Path parameter: {{ .Name }}")]
     pub {{ rustParamFieldName . }}: {{ if .Required }}{{ rustType .Type }}{{ else }}Option<{{ rustType .Type }}>{{ end }},
 {{- end }}
 {{- if eq .In "query" }}
-    #[arg(long = "{{ rustParamFlagName . }}")]
+    #[arg(long = "{{ rustParamFlagName . }}", help = "Query parameter: {{ .Name }}")]
     pub {{ rustParamFieldName . }}: {{ if .Required }}{{ rustType .Type }}{{ else }}Option<{{ rustType .Type }}>{{ end }},
 {{- end }}
 {{- end }}
 {{- if operationHasHeaderParams . }}
-    #[arg(short = 'H', long = "header")]
+    #[arg(short = 'H', long = "header", help = "Request header in 'Name: Value' format; repeatable")]
     pub header: Vec<String>,
 {{- end }}
 {{- if and .BodyMode (ne .BodyMode "form-urlencoded") }}
-    #[arg(long = "data")]
+    #[arg(long = "data", help = "JSON request body; use @file or - for stdin")]
     pub body_data: Option<String>,
 {{- end }}
 {{- if .FileFields }}
-    #[arg(long = "file")]
+    #[arg(long = "file", help = "File upload [field=]path")]
     pub upload_file: Option<String>,
 {{- end }}
 {{- range .BodyFields }}
 {{- if rustBodyFieldHasFlag . }}
-    #[arg(long = "{{ rustBodyFlagName . }}")]
+    #[arg(long = "{{ rustBodyFlagName . }}", help = "{{ if eq $operation.BodyMode "form-urlencoded" }}Form{{ else }}JSON body{{ end }} field: {{ .Name }}")]
     pub {{ rustBodyFieldName . }}: {{ if and (eq $operation.BodyMode "form-urlencoded") .Required }}{{ rustType .Type }}{{ else }}Option<{{ rustType .Type }}>{{ end }},
 {{- end }}
 {{- end }}

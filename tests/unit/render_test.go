@@ -53,6 +53,9 @@ func TestRenderProject(t *testing.T) {
 	if !strings.Contains(string(rootContent), `StringArrayVarP(&requestHeaders, "header", "H", nil`) {
 		t.Fatalf("generated root.go should bind -H as shorthand for --header:\n%s", rootContent)
 	}
+	if strings.Contains(string(rootContent), `"one-cli/internal/output"`) {
+		t.Fatalf("generated root.go should not import host module paths:\n%s", rootContent)
+	}
 	if _, err := os.Stat(filepath.Join(dir, "bin", "one")); err != nil {
 		t.Fatalf("missing launcher: %v", err)
 	}
@@ -62,6 +65,9 @@ func TestRenderProject(t *testing.T) {
 	}
 	if !strings.Contains(string(mainContent), `var version = "0.0.1"`) {
 		t.Fatalf("generated main.go missing app version:\n%s", mainContent)
+	}
+	if !strings.Contains(string(mainContent), `cobra.EnableCommandSorting = false`) {
+		t.Fatalf("generated main.go should keep command help in source order:\n%s", mainContent)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "skills", "leave", "SKILL.md")); err != nil {
 		t.Fatalf("missing generated skill markdown: %v", err)
@@ -240,6 +246,9 @@ func TestApplyHeadersAcceptsEqualsSyntax(t *testing.T) {
 			t.Fatalf("generated project --help missing %q:\n%s", want, helpText)
 		}
 	}
+	if strings.Contains(helpText, "one skills list") {
+		t.Fatalf("generated project root examples should not include skills command:\n%s", helpText)
+	}
 
 	commandHelp := exec.Command(binary, "leave", "list", "--help")
 	out, err = commandHelp.CombinedOutput()
@@ -386,6 +395,58 @@ func TestRenderGoProjectCompilesBodyAndFileNameCollisions(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("generated collision project should compile: %v\n%s", err, out)
+	}
+}
+
+func TestRenderGoProjectKeepsCommandHelpInSourceOrder(t *testing.T) {
+	dir := t.TempDir()
+	app := model.App{
+		Name: "petcli",
+		Groups: []model.Group{{
+			Name: "pet",
+			Operations: []model.Operation{
+				{CommandName: "list", Method: "GET", Path: "/pets"},
+				{CommandName: "create", Method: "POST", Path: "/pets"},
+				{CommandName: "get", Method: "GET", Path: "/pets/{petId}"},
+			},
+		}},
+	}
+	if err := render.Project(dir, "github.com/acme/petcli", app); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+
+	binary := filepath.Join(dir, "petcli")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/petcli")
+	build.Dir = dir
+	build.Env = append(build.Environ(),
+		"GOCACHE="+filepath.Join(t.TempDir(), "gocache"),
+		"GOTOOLCHAIN=local",
+	)
+	out, err := build.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated petcli should build, got %v, output: %s", err, string(out))
+	}
+
+	rootHelp := exec.Command(binary, "--help")
+	out, err = rootHelp.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated root --help should succeed, got %v, output: %s", err, string(out))
+	}
+	if help := string(out); !strings.Contains(help, "petcli pet list") || strings.Contains(help, "petcli skills list") {
+		t.Fatalf("root examples should use first API operation only:\n%s", help)
+	}
+
+	petHelp := exec.Command(binary, "pet", "--help")
+	out, err = petHelp.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated pet --help should succeed, got %v, output: %s", err, string(out))
+	}
+	help := string(out)
+	listIndex := strings.Index(help, "list")
+	createIndex := strings.Index(help, "create")
+	getIndex := strings.Index(help, "get")
+	if listIndex < 0 || createIndex < 0 || getIndex < 0 || !(listIndex < createIndex && createIndex < getIndex) {
+		t.Fatalf("pet commands should appear in source order list/create/get:\n%s", help)
 	}
 }
 
@@ -830,9 +891,9 @@ func TestRenderRustDisambiguatesIdentifiers(t *testing.T) {
 	}
 	commandText := string(commandContent)
 	for _, want := range []string{
-		`#[arg(long = "id")]`,
+		`#[arg(long = "id", help = "Path parameter: id")]`,
 		"pub id: String,",
-		`#[arg(long = "body-id")]`,
+		`#[arg(long = "body-id", help = "JSON body field: id")]`,
 		"pub body_id: Option<String>,",
 		`parts.push(format!("\"id\":{value}"));`,
 	} {
@@ -867,8 +928,8 @@ func TestRenderRustUsesDataSourcesAndReservesFileForUploads(t *testing.T) {
 	}
 	text := string(command)
 	for _, want := range []string{
-		`#[arg(long = "data")]`,
-		`#[arg(long = "file")]`,
+		`#[arg(long = "data", help = "JSON request body; use @file or - for stdin")]`,
+		`#[arg(long = "file", help = "File upload [field=]path")]`,
 		`client::resolve_input(data)?`,
 		`client::request_multipart(`,
 	} {
@@ -1168,7 +1229,14 @@ func TestRenderProjectsHonorGETFormRequestBodyAndDocumentFlags(t *testing.T) {
 		t.Fatalf("render Rust: %v", err)
 	}
 	rustCommand := mustReadFile(t, filepath.Join(rustDir, "src", "commands", "bpm.rs"))
-	for _, want := range []string{`long = "tqm"`, `long = "first-row"`, `long = "row-count"`, `serde_urlencoded::to_string`, `request_form_text`} {
+	for _, want := range []string{
+		`#[command(name = "task-query", about = "GET /tasks")`,
+		`long = "tqm", help = "Form field: tqm"`,
+		`long = "first-row", help = "Form field: firstRow"`,
+		`long = "row-count", help = "Form field: rowCount"`,
+		`serde_urlencoded::to_string`,
+		`request_form_text`,
+	} {
 		if !strings.Contains(rustCommand, want) {
 			t.Fatalf("generated Rust command missing %q:\n%s", want, rustCommand)
 		}
@@ -1209,7 +1277,7 @@ func TestRenderProjectsKeepPOSTFormFieldsInRequestBody(t *testing.T) {
 		t.Fatalf("render Rust: %v", err)
 	}
 	rustCommand := mustReadFile(t, filepath.Join(rustDir, "src", "commands", "forms.rs"))
-	for _, want := range []string{`serde_urlencoded::to_string`, `request_form_text("POST"`} {
+	for _, want := range []string{`#[command(name = "submit", about = "POST /forms")`, `long = "name", help = "Form field: name"`, `serde_urlencoded::to_string`, `request_form_text("POST"`} {
 		if !strings.Contains(rustCommand, want) {
 			t.Fatalf("generated Rust POST form command missing %q:\n%s", want, rustCommand)
 		}
@@ -1316,6 +1384,15 @@ func TestRenderRustProjectSkillFlagNamesMatchCodeForUnderscoreNames(t *testing.T
 		}
 		if !strings.Contains(string(codeText), `long = "`+strings.TrimPrefix(flag, "--")+`"`) {
 			t.Fatalf("generated Rust code missing flag %q:\n%s", flag, codeText)
+		}
+	}
+	for _, want := range []string{
+		`long = "user-id", help = "Query parameter: user_id"`,
+		`long = "delivery-rec", help = "Query parameter: delivery-rec"`,
+		`#[command(name = "create", about = "POST /orders")`,
+	} {
+		if !strings.Contains(string(codeText), want) {
+			t.Fatalf("generated Rust code missing help metadata %q:\n%s", want, codeText)
 		}
 	}
 

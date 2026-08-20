@@ -4,6 +4,8 @@ package main
 import (
 	"os"
 
+	"github.com/spf13/cobra"
+
 	{{- if $interactiveOAuth }}
 	"{{ .Module }}/internal/auth"
 	{{- end }}
@@ -19,6 +21,7 @@ import (
 var version = {{ printf "%q" (goAppVersion .App) }}
 
 func main() {
+	cobra.EnableCommandSorting = false
 	root := cli.NewRootCommand("{{ .App.Name }}", "{{ .App.Name }} CLI", version)
 	cli.BindTrace(httpx.SetTraceEnabled)
 	{{- if $interactiveOAuth }}

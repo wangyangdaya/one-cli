@@ -1062,6 +1062,7 @@ auth:
 	login := exec.Command("cargo", "run", "--quiet", "--", "--trace", "login", "--no-browser")
 	login.Dir = dir
 	login.Env = append(runtimeTestEnv(dir),
+		"OPENCLI_CONFIG="+filepath.Join(dir, "config", "runtime.yaml"),
 		"OPENCLI_OAUTH_TOKEN_FILE="+tokenFile,
 	)
 	stdout, err := login.StdoutPipe()
@@ -1107,7 +1108,10 @@ auth:
 	runStatus := func() ([]byte, error) {
 		status := exec.Command("cargo", "run", "--quiet", "--", "status")
 		status.Dir = dir
-		status.Env = append(runtimeTestEnv(dir), "OPENCLI_OAUTH_TOKEN_FILE="+tokenFile)
+		status.Env = append(runtimeTestEnv(dir),
+			"OPENCLI_CONFIG="+filepath.Join(dir, "config", "runtime.yaml"),
+			"OPENCLI_OAUTH_TOKEN_FILE="+tokenFile,
+		)
 		return status.CombinedOutput()
 	}
 	statusOut, err := runStatus()
@@ -1140,6 +1144,7 @@ auth:
 	call := exec.Command("cargo", "run", "--quiet", "--", "items", "list")
 	call.Dir = dir
 	call.Env = append(runtimeTestEnv(dir),
+		"OPENCLI_CONFIG="+filepath.Join(dir, "config", "runtime.yaml"),
 		"OPENCLI_OAUTH_TOKEN_FILE="+tokenFile,
 	)
 	out, err := call.CombinedOutput()
