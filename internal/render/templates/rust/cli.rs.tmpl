@@ -23,19 +23,19 @@ EXAMPLES:
 )]
 struct Cli {
     /// Print version information
-    #[arg(long)]
+    #[arg(long, global = true)]
     version: bool,
 
     /// Print HTTP request and response trace logs
-    #[arg(long)]
+    #[arg(long, global = true)]
     trace: bool,
 
     /// Print command output as JSON
-    #[arg(long)]
+    #[arg(long, global = true)]
     json: bool,
 
     /// Request header in 'Name: Value' or 'Name=Value' format; repeatable
-    #[arg(short = 'H', long = "header")]
+    #[arg(short = 'H', long = "header", global = true)]
     header: Vec<String>,
 
     #[command(subcommand)]
@@ -56,20 +56,20 @@ enum GroupCommand {
     #[command(name = "logout")]
     Logout,
 {{- end }}
-    #[command(name = "skills")]
+{{- range .App.Groups }}
+    #[command(name = "{{ .Name }}", about = "{{ .Name }} operations")]
+    {{ rustTypeName (rustModuleName .) }} {
+        #[command(subcommand)]
+        command: commands::{{ rustModuleName . }}::Command,
+    },
+{{- end }}
+    #[command(name = "skills", about = "List or read generated skill files from disk")]
     Skills {
         #[arg(long = "skills-dir", default_value = "skills")]
         skills_dir: String,
         #[command(subcommand)]
         command: SkillsCommand,
     },
-{{- range .App.Groups }}
-    #[command(name = "{{ .Name }}")]
-    {{ rustTypeName (rustModuleName .) }} {
-        #[command(subcommand)]
-        command: commands::{{ rustModuleName . }}::Command,
-    },
-{{- end }}
 }
 
 #[derive(Subcommand)]

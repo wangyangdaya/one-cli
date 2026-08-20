@@ -598,7 +598,7 @@ func TestRenderProjectCanGenerateChineseSkillPackage(t *testing.T) {
 		"## 前置条件",
 		"## 命令",
 		"**参数：**",
-		"| `--userId` | 是 | userId（查询参数；string） |",
+		"| `--user-id` | 是 | userId（查询参数；string） |",
 		"| `one leave request` | request | 写入 |",
 		"generation-report.md",
 		"OPENCLI_BASE_URL",
@@ -842,7 +842,7 @@ func TestRenderRustDisambiguatesIdentifiers(t *testing.T) {
 	}
 	cliText := string(cliContent)
 	for _, want := range []string{
-		`#[command(name = "过点车辆定时任务(线边、sps)")]`,
+		`#[command(name = "过点车辆定时任务(线边、sps)", about = "过点车辆定时任务(线边、sps) operations")]`,
 		"Default {",
 		"Default2 {",
 	} {
@@ -1230,7 +1230,7 @@ func TestRenderProjectsHonorGETFormRequestBodyAndDocumentFlags(t *testing.T) {
 	}
 	rustCommand := mustReadFile(t, filepath.Join(rustDir, "src", "commands", "bpm.rs"))
 	for _, want := range []string{
-		`#[command(name = "task-query", about = "GET /tasks")`,
+		`#[command(name = "task-query", about = "GET /tasks", long_about = "GET /tasks\n\nBody input: application/x-www-form-urlencoded fields exposed as flags")]`,
 		`long = "tqm", help = "Form field: tqm"`,
 		`long = "first-row", help = "Form field: firstRow"`,
 		`long = "row-count", help = "Form field: rowCount"`,
@@ -1277,7 +1277,7 @@ func TestRenderProjectsKeepPOSTFormFieldsInRequestBody(t *testing.T) {
 		t.Fatalf("render Rust: %v", err)
 	}
 	rustCommand := mustReadFile(t, filepath.Join(rustDir, "src", "commands", "forms.rs"))
-	for _, want := range []string{`#[command(name = "submit", about = "POST /forms")`, `long = "name", help = "Form field: name"`, `serde_urlencoded::to_string`, `request_form_text("POST"`} {
+	for _, want := range []string{`#[command(name = "submit", about = "POST /forms", long_about = "POST /forms\n\nBody input: application/x-www-form-urlencoded fields exposed as flags")]`, `long = "name", help = "Form field: name"`, `serde_urlencoded::to_string`, `request_form_text("POST"`} {
 		if !strings.Contains(rustCommand, want) {
 			t.Fatalf("generated Rust POST form command missing %q:\n%s", want, rustCommand)
 		}
@@ -1327,15 +1327,15 @@ func TestRenderRustProjectSkillUsesActualCliFlagNames(t *testing.T) {
 	skillText := string(skillContent)
 	for _, want := range []string{
 		`--current "1"`,
-		`--pagesize "25"`,
-		"| `--pagesize` | yes | 页码 (query parameter; integer) |",
+		`--page-size "25"`,
+		"| `--page-size` | yes | 页码 (query parameter; integer) |",
 	} {
 		if !strings.Contains(skillText, want) {
 			t.Fatalf("generated Rust SKILL.md missing %q:\n%s", want, skillText)
 		}
 	}
-	if strings.Contains(skillText, "--pageSize") {
-		t.Fatalf("generated Rust SKILL.md contains non-existent --pageSize flag:\n%s", skillText)
+	if strings.Contains(skillText, "--pageSize") || strings.Contains(skillText, "--pagesize") {
+		t.Fatalf("generated Rust SKILL.md contains a non-kebab page-size flag:\n%s", skillText)
 	}
 }
 
@@ -1389,7 +1389,8 @@ func TestRenderRustProjectSkillFlagNamesMatchCodeForUnderscoreNames(t *testing.T
 	for _, want := range []string{
 		`long = "user-id", help = "Query parameter: user_id"`,
 		`long = "delivery-rec", help = "Query parameter: delivery-rec"`,
-		`#[command(name = "create", about = "POST /orders")`,
+		`#[command(name = "create", about = "POST /orders", long_about =`,
+		`long_about = "POST /orders\n\nBody input: --ref-no, or --data (inline JSON, @file, or - for stdin)"`,
 	} {
 		if !strings.Contains(string(codeText), want) {
 			t.Fatalf("generated Rust code missing help metadata %q:\n%s", want, codeText)

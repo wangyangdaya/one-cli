@@ -12,7 +12,7 @@ use crate::types::AppResult;
 #[derive(Subcommand)]
 pub enum Command {
 {{- range .Group.Operations }}
-    #[command(name = "{{ .CommandName }}", about = "{{ .Method }} {{ .Path }}")]
+    #[command(name = "{{ .CommandName }}", about = "{{ .Method }} {{ .Path }}"{{ if eq .BodyMode "simple-json" }}, long_about = "{{ .Method }} {{ .Path }}\n\nBody input: {{ if bodyFlagHelp .BodyFields }}{{ bodyFlagHelp .BodyFields }}, or {{ end }}--data (inline JSON, @file, or - for stdin){{ if .FileFields }}; file upload: --file [field=]path{{ end }}"{{ else if eq .BodyMode "file-or-data" }}, long_about = "{{ .Method }} {{ .Path }}\n\nBody input: --data (inline JSON, @file, or - for stdin){{ if .FileFields }}; file upload: --file [field=]path{{ end }}"{{ else if eq .BodyMode "form-urlencoded" }}, long_about = "{{ .Method }} {{ .Path }}\n\nBody input: application/x-www-form-urlencoded fields exposed as flags"{{ end }})]
     {{ rustTypeName .CommandName }}({{ rustTypeName .CommandName }}Args),
 {{- end }}
 }

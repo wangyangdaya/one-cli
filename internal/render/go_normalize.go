@@ -97,35 +97,6 @@ func normalizeGoOperationArgs(operation *model.Operation) {
 	}
 }
 
-func formFlagName(value string) string {
-	value = strings.TrimSpace(value)
-	var builder strings.Builder
-	lastDash := false
-	for index, r := range value {
-		switch {
-		case unicode.IsUpper(r):
-			if index > 0 && !lastDash {
-				builder.WriteByte('-')
-			}
-			builder.WriteRune(unicode.ToLower(r))
-			lastDash = false
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
-			builder.WriteRune(unicode.ToLower(r))
-			lastDash = false
-		default:
-			if builder.Len() > 0 && !lastDash {
-				builder.WriteByte('-')
-				lastDash = true
-			}
-		}
-	}
-	result := strings.Trim(builder.String(), "-")
-	if result == "" {
-		return "value"
-	}
-	return result
-}
-
 func goIdentifier(value string) string {
 	result := pascal(value)
 	if result == "" {
@@ -143,26 +114,7 @@ func goIdentifier(value string) string {
 }
 
 func normalizedFlagName(value string) string {
-	value = strings.TrimSpace(value)
-	var builder strings.Builder
-	lastDash := false
-	for _, r := range value {
-		switch {
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
-			builder.WriteRune(r)
-			lastDash = false
-		default:
-			if builder.Len() > 0 && !lastDash {
-				builder.WriteByte('-')
-				lastDash = true
-			}
-		}
-	}
-	result := strings.Trim(builder.String(), "-")
-	if result == "" {
-		return "value"
-	}
-	return result
+	return kebabFlagName(value)
 }
 
 func uniqueGoIdentifier(base string, counts map[string]int) string {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -54,11 +55,11 @@ func TestGenerateRustOpenAPISmoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read generated cli.rs: %v", err)
 	}
-	if !strings.Contains(string(cliContent), `#[arg(short = 'H', long = "header")]`) {
+	if !strings.Contains(string(cliContent), `#[arg(short = 'H', long = "header", global = true)]`) {
 		t.Fatalf("generated Rust cli.rs should bind -H as shorthand for --header:\n%s", cliContent)
 	}
 	for _, want := range []string{
-		`#[command(name = "skills")]`,
+		`#[command(name = "skills", about = "List or read generated skill files from disk")]`,
 		`#[arg(long = "skills-dir", default_value = "skills")]`,
 		"enum SkillsCommand",
 		"fn run_skills(command: SkillsCommand, skills_dir: &str) -> AppResult<()>",
@@ -133,6 +134,41 @@ func TestGenerateRustOpenAPISmoke(t *testing.T) {
 	}
 
 	tryCargoBuild(t, dir)
+
+	binaryName := "petcli"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	binaryPath := filepath.Join(dir, "target", "debug", binaryName)
+
+	version := exec.Command(binaryPath, "pet", "list", "--version", "--json")
+	version.Dir = dir
+	versionOutput, err := version.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated Rust CLI should accept version flags after a leaf command: %v\n%s", err, versionOutput)
+	}
+	if got, want := strings.TrimSpace(string(versionOutput)), `{"ok":true,"command":"petcli version","message":"ok","data":{"version":"0.1.0"}}`; got != want {
+		t.Fatalf("generated Rust CLI version JSON = %s, want %s", got, want)
+	}
+
+	skills := exec.Command(binaryPath, "skills", "list", "--trace", "--header", "X-Test: 1", "--json")
+	skills.Dir = dir
+	if output, err := skills.CombinedOutput(); err != nil {
+		t.Fatalf("generated Rust CLI should accept global flags after a nested command: %v\n%s", err, output)
+	}
+
+	help := exec.Command(binaryPath, "--help")
+	help.Dir = dir
+	helpOutput, err := help.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated Rust CLI root help failed: %v\n%s", err, helpOutput)
+	}
+	helpText := string(helpOutput)
+	petIndex := strings.Index(helpText, "pet     pet operations")
+	skillsIndex := strings.Index(helpText, "skills  List or read generated skill files from disk")
+	if petIndex < 0 || skillsIndex < 0 || petIndex > skillsIndex {
+		t.Fatalf("generated Rust CLI should describe API groups before skills:\n%s", helpText)
+	}
 }
 
 func TestGenerateRustHTTPTraceIncludesQueryAndHeaders(t *testing.T) {

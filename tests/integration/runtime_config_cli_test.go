@@ -849,7 +849,7 @@ auth:
 		!strings.Contains(cliText, "GroupCommand::Logout") {
 		t.Fatalf("generated Rust CLI is missing built-in top-level login/status/logout commands:\n%s", cliSource)
 	}
-	if got := strings.Count(cliText, `#[command(name = "auth")]`); got != 1 {
+	if got := strings.Count(cliText, `#[command(name = "auth", about = "auth operations")]`); got != 1 {
 		t.Fatalf("generated Rust CLI has %d auth root commands, want only the business auth group:\n%s", got, cliSource)
 	}
 	readmeSource, err := os.ReadFile(filepath.Join(dir, "README.md"))

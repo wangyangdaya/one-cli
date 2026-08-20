@@ -82,6 +82,10 @@ func TestRenderRustProjectWithMCPStdioGroup(t *testing.T) {
 	for _, want := range []string{
 		`env!("CARGO_PKG_VERSION")`,
 		`println!("testcli version {}", version())`,
+		`#[arg(long, global = true)]`,
+		`#[arg(short = 'H', long = "header", global = true)]`,
+		`#[command(name = "deepwiki", about = "deepwiki operations")]`,
+		`#[command(name = "skills", about = "List or read generated skill files from disk")]`,
 		`testcli CLI`,
 		`USAGE:`,
 		`testcli [options] [command]`,
@@ -95,5 +99,13 @@ func TestRenderRustProjectWithMCPStdioGroup(t *testing.T) {
 	}
 	if strings.Contains(string(cli), "OPENCLI_VERSION") {
 		t.Fatalf("generated Rust CLI should not support OPENCLI_VERSION override:\n%s", string(cli))
+	}
+	if got := strings.Count(string(cli), `#[arg(long, global = true)]`); got != 3 {
+		t.Fatalf("generated Rust CLI global boolean flags = %d, want 3:\n%s", got, string(cli))
+	}
+	groupIndex := strings.Index(string(cli), `#[command(name = "deepwiki", about = "deepwiki operations")]`)
+	skillsIndex := strings.Index(string(cli), `#[command(name = "skills", about = "List or read generated skill files from disk")]`)
+	if groupIndex < 0 || skillsIndex < 0 || groupIndex > skillsIndex {
+		t.Fatalf("generated Rust CLI should list API groups before skills:\n%s", string(cli))
 	}
 }

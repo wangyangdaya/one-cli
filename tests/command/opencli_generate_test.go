@@ -411,7 +411,7 @@ func TestGenerateCommandSupplierAKSKSkillDocumentsBodyExampleFields(t *testing.T
 		t.Fatalf("read generated skill: %v", err)
 	}
 	skillText := string(skillContent)
-	for _, want := range []string{"--date", "--pageSize", "--pageNum", "--isForce"} {
+	for _, want := range []string{"--date", "--page-size", "--page-num", "--is-force"} {
 		if !strings.Contains(skillText, want) {
 			t.Fatalf("generated supplier skill missing body flag %q:\n%s", want, skillText)
 		}
@@ -573,7 +573,7 @@ func TestGenerateCommandSupplierRustAKSKPreservesBodyOrder(t *testing.T) {
 	}
 	commandText := string(commandContent)
 	for _, want := range []string{
-		`#[arg(short = 'H', long = "header")]`,
+		`#[arg(short = 'H', long = "header", help = "Request header in 'Name: Value' format; repeatable")]`,
 		`let body = build_kanban_delivery_http_body(&args)?;`,
 		`client::request_json_text("POST", &path, query, headers, body, false).await?;`,
 		`parts.push(format!("\"date\":{value}"));`,
