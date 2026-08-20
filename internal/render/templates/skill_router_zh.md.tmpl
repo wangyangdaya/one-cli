@@ -1,7 +1,7 @@
 ---
 name: {{ .App.Name }}-skills
 version: 1.0.0
-description: "{{ .App.Name }} 的 Skill 路由入口。执行任务前，用它选择正确的命令组 Skill。"
+description: "{{ .App.Name }} 的 Skill 路由入口。执行任务前，用它选择正确的命令组 Skill。{{ if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}执行受保护业务命令前检查 CLI 登录状态；需要登录时先读取 cli-auth/SKILL.md。{{ end }}"
 metadata:
   requires:
     bins: ["{{ .App.Name }}"]
@@ -11,15 +11,25 @@ metadata:
 # {{ .App.Name }} Skills Router
 
 本目录包含 OpenCLI 生成的 Skill 包。这个路由入口用于兼容要求所选文件夹根目录必须有 `SKILL.md` 的 agent loader。
+{{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
+
+## OAuth 登录前置
+
+执行任何受保护业务命令前，先执行 `{{ .App.Name }} status`，并严格按状态处理：
+
+- `valid`：继续原业务任务。
+- `needs_refresh`：继续原业务任务，由 CLI 在请求前自动刷新。
+- `expired` 或 `not_logged_in`：读取并执行 [`cli-auth/SKILL.md`](cli-auth/SKILL.md)，仅在 `status` 确认 `valid` 后继续原任务。
+- `status` 执行失败：停止业务调用并返回错误摘要。
+
+不得使用业务命令 `{{ .App.Name }} auth login` 代替 CLI 根命令 `login`。
+{{- end }}
 
 执行任务前：
 
 1. 从索引中选择匹配的命令组 Skill。
 2. 阅读该命令组的 `SKILL.md`。
 3. 只把本文件当作导航入口，不要当作完整操作手册。
-{{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
-4. 受保护命令缺少登录态或返回 `login_required` 时，先读取 `cli-auth/SKILL.md`；不要把业务 `auth login` 当作 CLI 登录。
-{{- end }}
 
 ```bash
 {{ .App.Name }} skills list

@@ -16,6 +16,7 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
+use crate::trace::trace_log;
 use crate::types::AppResult;
 
 const HAS_SEALED_RUNTIME_KEY: bool = {{ if and .RuntimeBundle .RuntimeBundle.HasSecret }}true{{ else }}false{{ end }};
@@ -413,10 +414,7 @@ pub fn save_oauth_authorization_token(
         return Err("OAuth token response is missing access_token".to_string());
     }
     let lifetime = if expires_in > 0 { expires_in } else { 300 };
-    let token_type = token_type.trim();
-    if token_type.is_empty() {
-        return Err("OAuth token response is missing token_type".to_string());
-    }
+    let token_type = if token_type.trim().is_empty() { "Bearer" } else { token_type.trim() };
     if !token_type.eq_ignore_ascii_case("bearer") {
         return Err(format!("unsupported OAuth token_type {token_type:?}"));
     }
@@ -549,14 +547,17 @@ async fn refresh_oauth_authorization_token(app_name: &str, auth: &RuntimeAuth, r
     if token.access_token.trim().is_empty() || token.refresh_token.trim().is_empty() {
         return Err("refresh_failed: token endpoint response is missing rotated tokens".to_string());
     }
-    if token.token_type.trim().is_empty() {
-        return Err("refresh_failed: OAuth token response is missing token_type".to_string());
-    }
+    let token_type = if token.token_type.trim().is_empty() {
+        trace_log!("[opencli][oauth] token_type missing; defaulting to Bearer");
+        "Bearer"
+    } else {
+        token.token_type.trim()
+    };
     save_oauth_authorization_token(
         app_name,
         &token.access_token,
         &token.refresh_token,
-        &token.token_type,
+        token_type,
         &token.scope,
         token.expires_in,
         token.refresh_token_expires_in,

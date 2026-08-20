@@ -1,7 +1,7 @@
 ---
 name: {{ skillName .Group }}
 version: 1.0.0
-description: "{{- if .Group.Description }}{{ .Group.Description }}{{- else }}{{ .Group.Name }} 是 {{ .App.Name }} 的命令组。{{ range $i, $op := .Group.Operations }}{{ if $i }}、{{ end }}{{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}{{ end }}。{{- end }}"
+description: "{{- if .Group.Description }}{{ .Group.Description }}{{- else }}{{ .Group.Name }} 是 {{ .App.Name }} 的命令组。{{ range $i, $op := .Group.Operations }}{{ if $i }}、{{ end }}{{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}{{ end }}。{{- end }}{{ if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}执行受保护命令前检查 CLI 登录状态；需要登录时读取 ../cli-auth/SKILL.md。{{ end }}"
 metadata:
   requires:
     bins: ["{{ .App.Name }}"]
@@ -15,6 +15,16 @@ metadata:
 {{- end }}
 
 这是由 OpenCLI 生成的 Skill 包，包含从 API/MCP 描述提取的命令事实和需要人工补全的业务位置。请把它当作生产化脚手架，而不是已经完成的业务流程。
+{{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
+
+## 登录前置
+
+执行受保护命令前，先执行 `{{ .App.Name }} status`：
+
+- 状态为 `valid` 或 `needs_refresh` 时继续；需要刷新时由 CLI 在请求前自动完成。
+- 状态为 `expired` 或 `not_logged_in` 时，读取并执行 [`../cli-auth/SKILL.md`](../cli-auth/SKILL.md)，仅在 `status` 确认 `valid` 后继续原任务。
+- `status` 执行失败时，停止业务调用并返回错误摘要。
+{{- end }}
 
 ## 第一步
 
@@ -76,7 +86,8 @@ metadata:
 {{- else if appUsesOAuth2 .App }}
 {{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
 - 受保护操作使用 OAuth 2.0 Authorization Code
-- 调用受保护业务命令前执行 `{{ .App.Name }} login`
+- 调用受保护业务命令前执行 `{{ .App.Name }} status`
+- 需要登录时读取 [`../cli-auth/SKILL.md`](../cli-auth/SKILL.md)
 - CLI 只保存并注入业务 Access Token，不配置 IAM 凭据
 {{- else }}
 - 受保护操作由 CLI 自动执行 OAuth 2.0 Client Credentials

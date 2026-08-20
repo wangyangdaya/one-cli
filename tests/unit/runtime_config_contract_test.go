@@ -147,10 +147,13 @@ func TestRenderedGoOAuth2IncludesTopLevelLoginCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read generated OAuth2 login skill: %v", err)
 	}
-	for _, want := range []string{"terminal", "terminal_id", "login --no-browser", "same terminal session"} {
+	for _, want := range []string{"terminal", "terminal_id", "businesscli login", "same terminal session", "only when automatic browser launch is unavailable or unwanted"} {
 		if !strings.Contains(string(loginSkill), want) {
 			t.Fatalf("generated OAuth2 login skill lacks persistent-terminal guidance %q:\n%s", want, loginSkill)
 		}
+	}
+	if strings.Contains(string(loginSkill), "Agents always use `--no-browser`") {
+		t.Fatalf("generated OAuth2 login skill still mandates --no-browser for agents:\n%s", loginSkill)
 	}
 	readme, err := os.ReadFile(filepath.Join(dir, "README.md"))
 	if err != nil {
@@ -255,15 +258,27 @@ func TestRenderedOAuth2RefreshClassifiesFailures(t *testing.T) {
 	}
 }
 
-func TestRenderedOAuth2RequiresTokenType(t *testing.T) {
+func TestRenderedOAuth2DefaultsMissingTokenTypeToBearer(t *testing.T) {
 	for _, target := range []string{"go", "rust"} {
 		t.Run(target, func(t *testing.T) {
 			auth, runtime := renderOAuthAuthorizationCodeSources(t, target)
-			if !strings.Contains(auth, "business token response is missing token_type") {
-				t.Errorf("generated %s OAuth login accepts a response without token_type", target)
+			if !strings.Contains(auth, "token_type missing; defaulting to Bearer") {
+				t.Errorf("generated %s OAuth login does not trace the Bearer default", target)
 			}
-			if !strings.Contains(runtime, "OAuth token response is missing token_type") {
-				t.Errorf("generated %s OAuth runtime accepts a response without token_type", target)
+			if !strings.Contains(runtime, "token_type missing; defaulting to Bearer") {
+				t.Errorf("generated %s OAuth runtime does not trace the Bearer default", target)
+			}
+			if strings.Contains(auth, "business token response is missing token_type") {
+				t.Errorf("generated %s OAuth login still rejects a missing token_type", target)
+			}
+			if strings.Contains(runtime, "OAuth token response is missing token_type") {
+				t.Errorf("generated %s OAuth runtime still rejects a missing token_type", target)
+			}
+			if !strings.Contains(auth, "unsupported business token_type") {
+				t.Errorf("generated %s OAuth login no longer rejects an explicit unsupported token_type", target)
+			}
+			if !strings.Contains(runtime, "unsupported OAuth token_type") {
+				t.Errorf("generated %s OAuth runtime no longer rejects an explicit unsupported token_type", target)
 			}
 		})
 	}
@@ -362,6 +377,18 @@ func TestRenderedOAuth2SkillReportsThreeCommands(t *testing.T) {
 				}
 				if !strings.Contains(string(content), "| `cli-auth` | 3 |") {
 					t.Errorf("generated %s %s has stale cli-auth command count:\n%s", lang, rel, content)
+				}
+			}
+			loginSkill, err := os.ReadFile(filepath.Join(dir, "skills", "cli-auth", "SKILL.md"))
+			if err != nil {
+				t.Fatalf("read generated %s cli-auth skill: %v", lang, err)
+			}
+			if got := strings.Count(string(loginSkill), "--no-browser"); got != 1 {
+				t.Errorf("generated %s cli-auth skill mentions --no-browser %d times, want one optional note:\n%s", lang, got, loginSkill)
+			}
+			for _, forbidden := range []string{"Agents always use `--no-browser`", "Agent 始终使用 `--no-browser`"} {
+				if strings.Contains(string(loginSkill), forbidden) {
+					t.Errorf("generated %s cli-auth skill mandates --no-browser:\n%s", lang, loginSkill)
 				}
 			}
 		})

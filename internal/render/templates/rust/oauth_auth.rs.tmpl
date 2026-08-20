@@ -263,18 +263,19 @@ async fn exchange_authorization_code(auth: &OAuthAuthorizationConfig, code: &str
     let body: Value = response.json().await.map_err(|err| format!("decode business token response: {err}"))?;
     let access_token = token_exchange_response_string(auth, &response_headers, &body, "access_token");
     let refresh_token = token_exchange_response_string(auth, &response_headers, &body, "refresh_token");
-    let token_type = token_exchange_response_string(auth, &response_headers, &body, "token_type");
+    let mut token_type = token_exchange_response_string(auth, &response_headers, &body, "token_type");
     let scope = token_exchange_response_string(auth, &response_headers, &body, "scope");
     let id_token = token_exchange_response_string(auth, &response_headers, &body, "id_token");
     let expires_in = token_exchange_response_u64(auth, &response_headers, &body, "expires_in")?;
     let refresh_token_expires_in = token_exchange_response_u64(auth, &response_headers, &body, "refresh_token_expires_in")?;
-    let token = TokenResponse { access_token, refresh_token, token_type, scope, expires_in, refresh_token_expires_in, id_token };
-    if token.access_token.trim().is_empty() {
+    if access_token.trim().is_empty() {
         return Err("business token response is missing access_token".to_string());
     }
-    if token.token_type.trim().is_empty() {
-        return Err("business token response is missing token_type".to_string());
+    if token_type.trim().is_empty() {
+        trace_log!("[opencli][oauth] token_type missing; defaulting to Bearer");
+        token_type = "Bearer".to_string();
     }
+    let token = TokenResponse { access_token, refresh_token, token_type, scope, expires_in, refresh_token_expires_in, id_token };
     if !token.token_type.eq_ignore_ascii_case("bearer") {
         return Err(format!("unsupported business token_type {:?}", token.token_type));
     }

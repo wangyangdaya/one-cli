@@ -1,6 +1,9 @@
 """Minimal confidential-client broker for Feishu OAuth token grants."""
 
-from collections.abc import Mapping
+import logging
+import time
+from collections.abc import Mapping, Sequence
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, Request
@@ -10,6 +13,7 @@ from .config import Settings
 
 SAFE_ERROR_FIELDS = ("code", "error", "error_description", "msg")
 NO_STORE_HEADERS = {"Cache-Control": "no-store", "Pragma": "no-cache"}
+LOGGER = logging.getLogger("uvicorn.error.oauth2")
 
 
 def create_broker_router(
@@ -22,23 +26,72 @@ def create_broker_router(
     @router.post("/oauth/token")
     async def token(request: Request) -> JSONResponse:
         form = {key: str(value) for key, value in (await request.form()).items()}
+        grant_type = form.get("grant_type") or "<missing>"
+        LOGGER.info("oauth_token_request_received grant_type=%s", grant_type)
         error = _validate_request(form, settings)
         if error is not None:
+            LOGGER.warning(
+                "oauth_token_request_rejected grant_type=%s reason=%s",
+                grant_type,
+                error,
+            )
             return _oauth_error("invalid_request", error)
 
         payload = _upstream_payload(form, settings)
+        upstream = urlsplit(settings.feishu_token_url)
+        upstream_host = upstream.hostname or "<unknown>"
+        upstream_path = upstream.path or "/"
+        LOGGER.info(
+            "feishu_token_request_started grant_type=%s method=POST "
+            "upstream_host=%s upstream_path=%s",
+            grant_type,
+            upstream_host,
+            upstream_path,
+        )
+        started_at = time.monotonic()
         try:
             async with httpx.AsyncClient(
                 transport=upstream_transport,
                 timeout=settings.upstream_timeout_seconds,
             ) as client:
                 response = await client.post(settings.feishu_token_url, json=payload)
-        except httpx.HTTPError:
+        except httpx.HTTPError as exc:
+            duration_ms = round((time.monotonic() - started_at) * 1000)
+            detail = _sanitized_error_detail(
+                exc,
+                (
+                    settings.app_secret,
+                    settings.feishu_token_url,
+                    form.get("code", ""),
+                    form.get("refresh_token", ""),
+                ),
+            )
+            LOGGER.error(
+                "feishu_token_request_failed grant_type=%s upstream_host=%s "
+                "upstream_path=%s duration_ms=%d error_type=%s error_detail=%s",
+                grant_type,
+                upstream_host,
+                upstream_path,
+                duration_ms,
+                type(exc).__name__,
+                detail,
+            )
             return _oauth_error(
                 "temporarily_unavailable",
                 "Feishu token endpoint request failed",
                 status=502,
             )
+
+        duration_ms = round((time.monotonic() - started_at) * 1000)
+        LOGGER.info(
+            "feishu_token_response_received grant_type=%s upstream_host=%s "
+            "upstream_path=%s status_code=%d duration_ms=%d",
+            grant_type,
+            upstream_host,
+            upstream_path,
+            response.status_code,
+            duration_ms,
+        )
 
         try:
             body = response.json()
@@ -105,3 +158,11 @@ def _oauth_error(error: str, description: str, *, status: int = 400) -> JSONResp
         status_code=status,
         headers=NO_STORE_HEADERS,
     )
+
+
+def _sanitized_error_detail(error: httpx.HTTPError, secrets: Sequence[str]) -> str:
+    detail = " ".join(str(error).split()) or "<empty>"
+    for secret in secrets:
+        if secret:
+            detail = detail.replace(secret, "<redacted>")
+    return detail[:500]

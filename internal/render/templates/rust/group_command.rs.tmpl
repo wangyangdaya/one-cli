@@ -131,15 +131,15 @@ async fn run_{{ rustFieldName .CommandName }}(args: {{ rustTypeName .CommandName
 {{- end }}
     let body = build_{{ rustFieldName .CommandName }}_http_body(&args{{ if .FileFields }}, args.upload_file.is_some(){{ end }})?;
 {{- if eq .BodyMode "form-urlencoded" }}
-    let response = client::request_form_text("{{ .Method }}", &path, query, headers, body, {{ if .AuthRequired }}true{{ else }}false{{ end }}).await?;
+    let response = client::request_form_text("{{ .Method }}", &path, query, headers, body, {{ if appUsesOAuth2 $.App }}true{{ else }}false{{ end }}).await?;
 {{- else if .FileFields }}
     let response = if let Some(file) = &args.upload_file {
-        client::request_multipart("{{ .Method }}", &path, query, headers, file, "{{ defaultFileField . }}", body, {{ if .AuthRequired }}true{{ else }}false{{ end }}).await?
+        client::request_multipart("{{ .Method }}", &path, query, headers, file, "{{ defaultFileField . }}", body, {{ if appUsesOAuth2 $.App }}true{{ else }}false{{ end }}).await?
     } else {
-        client::request_json_text("{{ .Method }}", &path, query, headers, body, {{ if .AuthRequired }}true{{ else }}false{{ end }}).await?
+        client::request_json_text("{{ .Method }}", &path, query, headers, body, {{ if appUsesOAuth2 $.App }}true{{ else }}false{{ end }}).await?
     };
 {{- else }}
-    let response = client::request_json_text("{{ .Method }}", &path, query, headers, body, {{ if .AuthRequired }}true{{ else }}false{{ end }}).await?;
+    let response = client::request_json_text("{{ .Method }}", &path, query, headers, body, {{ if appUsesOAuth2 $.App }}true{{ else }}false{{ end }}).await?;
 {{- end }}
 {{- end }}
     output::print_output("{{ $.App.Name }} {{ $.Group.Name }} {{ .CommandName }}", &response)

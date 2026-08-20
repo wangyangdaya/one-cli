@@ -1,7 +1,7 @@
 ---
 name: {{ skillName .Group }}
 version: 1.0.0
-description: "{{- if .Group.Description }}{{ .Group.Description }}{{- else }}{{ .Group.Name }} commands for {{ .App.Name }}. {{ range $i, $op := .Group.Operations }}{{ if $i }}, {{ end }}{{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}{{ end }}.{{- end }}"
+description: "{{- if .Group.Description }}{{ .Group.Description }}{{- else }}{{ .Group.Name }} commands for {{ .App.Name }}. {{ range $i, $op := .Group.Operations }}{{ if $i }}, {{ end }}{{ if .Summary }}{{ .Summary }}{{ else }}{{ .CommandName }}{{ end }}{{ end }}.{{- end }}{{ if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }} Before protected commands, check CLI login status and read ../cli-auth/SKILL.md when login is required.{{ end }}"
 metadata:
   requires:
     bins: ["{{ .App.Name }}"]
@@ -15,6 +15,16 @@ metadata:
 {{- end }}
 
 This is a generated OpenCLI skill package. It contains API-derived facts and manual completion points; treat it as a productionization scaffold, not a finished business workflow.
+{{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
+
+## Login prerequisite
+
+Before a protected command, run `{{ .App.Name }} status`:
+
+- Continue when the status is `valid` or `needs_refresh`; the CLI refreshes before the request when needed.
+- For `expired` or `not_logged_in`, read and follow [`../cli-auth/SKILL.md`](../cli-auth/SKILL.md), then continue only after `status` reports `valid`.
+- If `status` fails, stop the business call and report the error summary.
+{{- end }}
 
 ## First Steps
 
@@ -76,7 +86,8 @@ This is a generated OpenCLI skill package. It contains API-derived facts and man
 {{- else if appUsesOAuth2 .App }}
 {{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
 - OAuth 2.0 Authorization Code is used for protected operations
-- Run `{{ .App.Name }} login` before invoking protected business commands
+- Run `{{ .App.Name }} status` before invoking protected business commands
+- When login is required, read [`../cli-auth/SKILL.md`](../cli-auth/SKILL.md)
 - The CLI stores and injects the business access token; IAM credentials are not configured in the CLI
 {{- else }}
 - OAuth 2.0 Client Credentials is handled automatically for protected operations

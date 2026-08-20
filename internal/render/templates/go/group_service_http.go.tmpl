@@ -97,7 +97,7 @@ func Invoke{{ .CommandName | pascal }}(input {{ .CommandName | pascal }}Input) (
 	if err := applyAPIKey(req); err != nil {
 		return Result{}, err
 	}
-{{- else if and (appUsesOAuth2 $.App) .AuthRequired }}
+{{- else if appUsesOAuth2 $.App }}
 	if err := applyOAuth2(req); err != nil {
 		return Result{}, err
 	}

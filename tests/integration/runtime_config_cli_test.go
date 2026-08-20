@@ -533,7 +533,7 @@ func testGeneratedGoOAuth2AuthorizationCode(t *testing.T, customExchange bool) {
 						t.Errorf("refresh token form = %v", r.Form)
 					}
 					w.Header().Set("Content-Type", "application/json")
-					_, _ = w.Write([]byte(`{"access_token":"` + refreshedAccessToken + `","refresh_token":"` + refreshedRefresh + `","token_type":"Bearer","scope":"offline_access","expires_in":3600,"refresh_token_expires_in":604800}`))
+					_, _ = w.Write([]byte(`{"access_token":"` + refreshedAccessToken + `","refresh_token":"` + refreshedRefresh + `","scope":"offline_access","expires_in":3600,"refresh_token_expires_in":604800}`))
 					return
 				}
 				if r.Form.Get("grant_type") != "authorization_code" || r.Form.Get("code") != "iam-code" || r.Form.Get("redirect_uri") != redirectURI {
@@ -545,7 +545,7 @@ func testGeneratedGoOAuth2AuthorizationCode(t *testing.T, customExchange bool) {
 				w.Header().Set("X-Token-Type", "bearer")
 				_, _ = w.Write([]byte(`{"data":{"gatewayToken":"` + accessToken + `","expireSeconds":"3600"}}`))
 			} else {
-				_, _ = w.Write([]byte(`{"access_token":"` + accessToken + `","refresh_token":"` + refreshToken + `","token_type":"Bearer","scope":"offline_access","expires_in":3600,"refresh_token_expires_in":604800}`))
+				_, _ = w.Write([]byte(`{"access_token":"` + accessToken + `","refresh_token":"` + refreshToken + `","scope":"offline_access","expires_in":3600,"refresh_token_expires_in":604800}`))
 			}
 		case "/items":
 			businessRequests.Add(1)
@@ -835,10 +835,13 @@ auth:
 	if err != nil {
 		t.Fatalf("read generated cli-auth skill: %v", err)
 	}
-	for _, want := range []string{"oauthcli login", "oauthcli login --no-browser", "oauthcli status", "oauthcli logout", "login_required"} {
+	for _, want := range []string{"oauthcli login", "oauthcli status", "oauthcli logout", "login_required"} {
 		if !strings.Contains(string(loginSkill), want) {
 			t.Fatalf("generated cli-auth skill is missing %q:\n%s", want, loginSkill)
 		}
+	}
+	if strings.Contains(string(loginSkill), "Agents always use `--no-browser`") {
+		t.Fatalf("generated cli-auth skill still mandates --no-browser for agents:\n%s", loginSkill)
 	}
 	businessSkill, err := os.ReadFile(filepath.Join(dir, "skills", "auth", "SKILL.md"))
 	if err != nil {
@@ -917,7 +920,7 @@ func testGeneratedRustOAuth2AuthorizationCode(t *testing.T, customExchange bool)
 						t.Errorf("refresh token form = %v", r.Form)
 					}
 					w.Header().Set("Content-Type", "application/json")
-					_, _ = w.Write([]byte(`{"access_token":"` + refreshedAccessToken + `","refresh_token":"` + refreshedRefresh + `","token_type":"Bearer","scope":"offline_access","expires_in":3600,"refresh_token_expires_in":604800}`))
+					_, _ = w.Write([]byte(`{"access_token":"` + refreshedAccessToken + `","refresh_token":"` + refreshedRefresh + `","scope":"offline_access","expires_in":3600,"refresh_token_expires_in":604800}`))
 					return
 				} else if got != "authorization_code" {
 					t.Errorf("grant_type = %q, want authorization_code", got)
@@ -934,7 +937,7 @@ func testGeneratedRustOAuth2AuthorizationCode(t *testing.T, customExchange bool)
 				w.Header().Set("X-Token-Type", "bearer")
 				_, _ = w.Write([]byte(`{"data":{"gatewayToken":"` + accessToken + `","expireSeconds":"3600"}}`))
 			} else {
-				_, _ = w.Write([]byte(`{"access_token":"` + accessToken + `","refresh_token":"` + refreshToken + `","token_type":"Bearer","scope":"offline_access","expires_in":3600,"refresh_token_expires_in":604800}`))
+				_, _ = w.Write([]byte(`{"access_token":"` + accessToken + `","refresh_token":"` + refreshToken + `","scope":"offline_access","expires_in":3600,"refresh_token_expires_in":604800}`))
 			}
 		case "/items":
 			businessRequests.Add(1)

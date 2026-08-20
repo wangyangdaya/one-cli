@@ -348,7 +348,8 @@ func exchangeAuthorizationCode(auth config.OAuthAuthorizationConfig, code, state
 		return config.OAuthTokenResponse{}, fmt.Errorf("business token response is missing access_token")
 	}
 	if tokenType == "" {
-		return config.OAuthTokenResponse{}, fmt.Errorf("business token response is missing token_type")
+		httpx.Tracef("[opencli][oauth] token_type missing; defaulting to Bearer")
+		tokenType = "Bearer"
 	}
 	if !strings.EqualFold(tokenType, "bearer") {
 		return config.OAuthTokenResponse{}, fmt.Errorf("unsupported business token_type %q", tokenType)

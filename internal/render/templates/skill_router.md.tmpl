@@ -1,7 +1,7 @@
 ---
 name: {{ .App.Name }}-skills
 version: 1.0.0
-description: "Router skill for {{ .App.Name }}. Use this to select the correct generated command-group skill before acting."
+description: "Router skill for {{ .App.Name }}. Use this to select the correct generated command-group skill before acting.{{ if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }} Before protected business commands, check CLI login status and use cli-auth/SKILL.md when login is required.{{ end }}"
 metadata:
   requires:
     bins: ["{{ .App.Name }}"]
@@ -11,15 +11,25 @@ metadata:
 # {{ .App.Name }} Skills Router
 
 This directory contains generated OpenCLI skill packages. This router exists for agent loaders that require a `SKILL.md` at the selected folder root.
+{{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
+
+## OAuth login prerequisite
+
+Before any protected business command, run `{{ .App.Name }} status` and handle the result as follows:
+
+- `valid`: continue the original business task.
+- `needs_refresh`: continue the original business task; the CLI refreshes before the request.
+- `expired` or `not_logged_in`: read and follow [`cli-auth/SKILL.md`](cli-auth/SKILL.md), then continue only after `status` reports `valid`.
+- If `status` fails: stop the business call and report the error summary.
+
+Never substitute a business `{{ .App.Name }} auth login` command for the CLI root `login` command.
+{{- end }}
 
 Before acting:
 
 1. Pick the matching command-group skill from the index.
 2. Read that group's `SKILL.md`.
 3. Use this router only for navigation; do not treat it as the complete operating guide.
-{{- if and .RuntimeBundle (eq .RuntimeBundle.OAuth2GrantType "authorization_code") }}
-4. When a protected command lacks a session or returns `login_required`, read `cli-auth/SKILL.md` first; do not confuse a business `auth login` command with CLI login.
-{{- end }}
 
 ```bash
 {{ .App.Name }} skills list

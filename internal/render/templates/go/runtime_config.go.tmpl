@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"{{ .Module }}/internal/httpx"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -356,7 +358,7 @@ func SaveOAuthAuthorizationToken(appName string, response OAuthTokenResponse) er
 		return fmt.Errorf("OAuth token response is missing access_token")
 	}
 	if response.TokenType == "" {
-		return fmt.Errorf("OAuth token response is missing token_type")
+		response.TokenType = "Bearer"
 	}
 	if !strings.EqualFold(response.TokenType, "Bearer") {
 		return fmt.Errorf("unsupported OAuth token_type %q", response.TokenType)
@@ -535,13 +537,15 @@ func requestOAuthRefreshToken(appName string, auth runtimeAuth, refreshToken str
 	if strings.TrimSpace(body.AccessToken) == "" || strings.TrimSpace(body.RefreshToken) == "" {
 		return OAuthTokenResponse{}, fmt.Errorf("refresh_failed: token endpoint response is missing rotated tokens")
 	}
-	if strings.TrimSpace(body.TokenType) == "" {
-		return OAuthTokenResponse{}, fmt.Errorf("refresh_failed: OAuth token response is missing token_type")
+	tokenType := strings.TrimSpace(body.TokenType)
+	if tokenType == "" {
+		httpx.Tracef("[opencli][oauth] token_type missing; defaulting to Bearer")
+		tokenType = "Bearer"
 	}
 	return OAuthTokenResponse{
 		AccessToken:           body.AccessToken,
 		RefreshToken:          body.RefreshToken,
-		TokenType:             body.TokenType,
+		TokenType:             tokenType,
 		Scope:                 body.Scope,
 		ExpiresIn:             body.ExpiresIn,
 		RefreshTokenExpiresIn: body.RefreshTokenExpiresIn,

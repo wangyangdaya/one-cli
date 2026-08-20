@@ -1,4 +1,5 @@
 import json
+import logging
 
 import httpx
 import pytest
@@ -171,6 +172,86 @@ def test_upstream_error_is_forwarded_without_credentials() -> None:
     assert "must-not-leak" not in response.text
     assert "used-code" not in response.text
     assert "server-secret" not in response.text
+
+
+def test_broker_logs_successful_upstream_call_without_credentials(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def upstream(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "code": 0,
+                "access_token": "logged-access-token",
+                "refresh_token": "logged-refresh-token",
+                "token_type": "Bearer",
+                "expires_in": 7200,
+            },
+        )
+
+    with caplog.at_level(logging.INFO, logger="uvicorn.error.oauth2"):
+        response = make_client(upstream).post(
+            "/oauth/token",
+            data={
+                "grant_type": "authorization_code",
+                "client_id": "cli_test",
+                "code": "logged-authorization-code",
+                "redirect_uri": REDIRECT_URI,
+            },
+        )
+
+    assert response.status_code == 200
+    for expected in (
+        "oauth_token_request_received",
+        "feishu_token_request_started",
+        "feishu_token_response_received",
+        "grant_type=authorization_code",
+        "upstream_host=open.feishu.cn",
+        "upstream_path=/open-apis/authen/v2/oauth/token",
+        "status_code=200",
+        "duration_ms=",
+    ):
+        assert expected in caplog.text
+    for secret in (
+        "server-secret",
+        "logged-authorization-code",
+        "logged-access-token",
+        "logged-refresh-token",
+    ):
+        assert secret not in caplog.text
+
+
+def test_broker_logs_sanitized_upstream_transport_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def upstream(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(
+            "connection refused for failed-authorization-code and server-secret",
+            request=request,
+        )
+
+    with caplog.at_level(logging.INFO, logger="uvicorn.error.oauth2"):
+        response = make_client(upstream).post(
+            "/oauth/token",
+            data={
+                "grant_type": "authorization_code",
+                "client_id": "cli_test",
+                "code": "failed-authorization-code",
+                "redirect_uri": REDIRECT_URI,
+            },
+        )
+
+    assert response.status_code == 502
+    for expected in (
+        "feishu_token_request_started",
+        "feishu_token_request_failed",
+        "error_type=ConnectError",
+        "error_detail=connection refused for <redacted> and <redacted>",
+        "duration_ms=",
+    ):
+        assert expected in caplog.text
+    assert "failed-authorization-code" not in caplog.text
+    assert "server-secret" not in caplog.text
 
 
 def test_settings_require_feishu_credentials(monkeypatch: pytest.MonkeyPatch) -> None:

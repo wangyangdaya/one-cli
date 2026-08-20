@@ -30,7 +30,7 @@ If `status` fails, report the error summary. Do not inspect, repair, or print th
 ## Agent Login Flow
 
 1. Resolve `{{ .App.Name }}` from the Skill root to an absolute path.
-2. When the Agent has a persistent terminal capability that keeps a process alive across tool calls, start `<absolute-cli-path> login --no-browser` with the Skill root as `cwd`. Save the returned terminal session identifier (for example, `terminal_id`).
+2. When the Agent has a persistent terminal capability that keeps a process alive across tool calls, start `<absolute-cli-path> login` with the Skill root as `cwd`. Save the returned terminal session identifier (for example, `terminal_id`).
 3. Use that terminal's read operation on the same session until the CLI prints the authorization URL. Relay the URL immediately and say authorization is still being awaited. Do not ask the user to reply after approving.
 4. Keep the current task active and, after short waits, continue reading the same terminal session for at most 120 seconds. Do not call `close` and do not start a second `login`; only one process can own a fixed callback port.
 5. The URL must be opened on the same machine that runs the CLI. A `127.0.0.1` callback opened on a phone or another computer reaches the wrong device.
@@ -39,7 +39,7 @@ If `status` fails, report the error summary. Do not inspect, repair, or print th
 
 If the runtime has no persistent `terminal`, use a regular shell only when it both exposes live output before command completion and keeps the process alive while the user authorizes. If either capability is missing, do not generate repeated dead links: ask the user to run the absolute-path `login` command once in a local terminal, then let the Agent verify with `status`.
 
-A human in an interactive terminal may run `{{ .App.Name }} login` to open the system browser. Agents always use `--no-browser`.
+Use `--no-browser` only when automatic browser launch is unavailable or unwanted; the authorization URL is still printed for the user to open.
 
 ## Recovery and Logout
 
@@ -60,7 +60,6 @@ A human in an interactive terminal may run `{{ .App.Name }} login` to open the s
 
 ```bash
 {{ .App.Name }} login
-{{ .App.Name }} login --no-browser
 {{ .App.Name }} status
 {{ .App.Name }} logout
 ```
