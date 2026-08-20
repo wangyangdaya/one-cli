@@ -34,7 +34,7 @@ func TestRenderedRuntimeRequiresConfiguredCredentialsAndIgnoresCWDConfig(t *test
 				"missing API key: set OPENCLI_API_KEY or configure runtime auth",
 				"missing bearer token: set OPENCLI_AUTH_TOKEN or configure runtime auth",
 			},
-			avoids: []string{"os.Getwd()", `filepath.Join(cwd, "config", "runtime.yaml")`},
+			avoids: []string{"os.Getwd()", `filepath.Join(cwd, "config", "runtime.yaml")`, `filepath.Dir(bundleRoot)`, `filepath.Base(binDir) == "debug"`},
 		},
 		{
 			target: "rust",
@@ -43,7 +43,7 @@ func TestRenderedRuntimeRequiresConfiguredCredentialsAndIgnoresCWDConfig(t *test
 				"missing API key: set OPENCLI_API_KEY or configure runtime auth",
 				"missing bearer token: set OPENCLI_AUTH_TOKEN or configure runtime auth",
 			},
-			avoids: []string{"env::current_dir()", `cwd.join("config").join("runtime.yaml")`},
+			avoids: []string{"env::current_dir()", `cwd.join("config").join("runtime.yaml")`, `target_dir.parent()`, `profile = bin_dir.file_name()`},
 		},
 	}
 

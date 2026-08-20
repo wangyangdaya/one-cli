@@ -266,7 +266,7 @@ func goAppVersion(app model.App) string {
 	if version := strings.TrimSpace(app.Version); version != "" {
 		return version
 	}
-	return "dev"
+	return "0.1.0"
 }
 
 func rustAppVersion(app model.App) string {

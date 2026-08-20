@@ -643,16 +643,6 @@ fn load_runtime_file(app_name: &str) -> AppResult<Option<(RuntimeFile, PathBuf)>
 			if let Some(bundle_root) = bin_dir.parent() {
 				candidates.push(bundle_root.join("config").join("runtime.yaml"));
 			}
-			let profile = bin_dir.file_name().and_then(|value| value.to_str());
-			if matches!(profile, Some("debug" | "release")) {
-				if let Some(target_dir) = bin_dir.parent() {
-					if target_dir.file_name().and_then(|value| value.to_str()) == Some("target") {
-						if let Some(project_root) = target_dir.parent() {
-							candidates.push(project_root.join("config").join("runtime.yaml"));
-						}
-					}
-				}
-			}
 		}
 	}
     if let Some(root) = env_value("XDG_CONFIG_HOME") {

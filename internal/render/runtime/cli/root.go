@@ -1,7 +1,11 @@
 package cli
 
 import (
+	"errors"
+	"fmt"
 	"strings"
+
+	"one-cli/internal/output"
 
 	"github.com/spf13/cobra"
 )
@@ -9,24 +13,30 @@ import (
 var traceSetter func(bool)
 var requestHeaders []string
 
+var errVersionPrinted = errors.New("version printed")
+
 func BindTrace(setter func(bool)) {
 	traceSetter = setter
 }
 
 func NewRootCommand(use, short, version string) *cobra.Command {
 	var trace bool
+	var showVersion bool
 	requestHeaders = nil
 
 	cmd := &cobra.Command{
 		Use:           use,
 		Short:         short,
-		Version:       version,
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if showVersion {
+				return printVersion(cmd, version)
+			}
 			if traceSetter != nil {
 				traceSetter(trace)
 			}
+			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -36,6 +46,7 @@ func NewRootCommand(use, short, version string) *cobra.Command {
 	cmd.CompletionOptions.DisableDefaultCmd = true
 	cmd.PersistentFlags().StringArrayVarP(&requestHeaders, "header", "H", nil, "Request header in 'Name: Value' or 'Name=Value' format; repeatable")
 	cmd.PersistentFlags().BoolVar(&trace, "trace", false, "Print HTTP request and response trace logs")
+	cmd.PersistentFlags().BoolVar(&showVersion, "version", false, "Print version information")
 	cmd.PersistentFlags().Bool("json", false, "Print command output as JSON")
 	return cmd
 }
@@ -119,8 +130,28 @@ const rootHelpTemplate = `{{with (or .Long .Short)}}{{.}}
 {{end}}{{end}}
 {{end}}Options:
 {{if .HasAvailableLocalFlags}}{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}
-{{end}}{{if .HasAvailablePersistentFlags}}{{.PersistentFlags.FlagUsages | trimTrailingWhitespaces}}
-{{end}}{{if .HasAvailableInheritedFlags}}{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}
 {{end}}
 More help: {{.CommandPath}} <command> --help
 `
+
+func printVersion(cmd *cobra.Command, version string) error {
+	if JSONEnabled(cmd) {
+		rendered, err := output.JSONSuccess(cmd.Root().Name()+" version", "ok", map[string]string{
+			"version": version,
+		})
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), rendered)
+		if err != nil {
+			return err
+		}
+		return errVersionPrinted
+	}
+
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s version %s\n", cmd.Root().Name(), version)
+	if err != nil {
+		return err
+	}
+	return errVersionPrinted
+}

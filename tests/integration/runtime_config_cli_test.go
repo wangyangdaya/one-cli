@@ -72,6 +72,36 @@ func TestGeneratedGoRuntimeConfig(t *testing.T) {
 	}
 }
 
+func TestPackagedGoRuntimeConfigLoadsRelativeToExecutable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer packaged-go-token" {
+			t.Errorf("Authorization = %q, want packaged Go token", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":"ok"}`))
+	}))
+	defer server.Close()
+
+	project := generateRuntimeConfigCLI(t, "go", "token", "bearer", "", server.URL, "packaged-go-token")
+	output := filepath.Join(t.TempDir(), "pet-skills")
+	packageCommand := app.NewRootCommand()
+	packageCommand.SetArgs([]string{"package", "--project", project, "--output", output})
+	if err := packageCommand.Execute(); err != nil {
+		t.Fatalf("package generated Go project: %v", err)
+	}
+
+	run := exec.Command(filepath.Join(output, "bin", "petcli"), "pet", "list", "--limit", "10")
+	run.Dir = t.TempDir()
+	run.Env = runtimeTestEnv(run.Dir)
+	result, err := run.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run packaged Go CLI outside bundle directory: %v\n%s", err, result)
+	}
+	if !strings.Contains(string(result), "ok") {
+		t.Fatalf("packaged Go CLI output = %s", result)
+	}
+}
+
 func TestGeneratedGoAPIKeyRuntimeConfig(t *testing.T) {
 	tests := []struct {
 		name       string

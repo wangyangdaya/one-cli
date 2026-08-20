@@ -670,7 +670,11 @@ func loadRuntimeFile(appName string) (*runtimeFile, string, error) {
 		if resolved, resolveErr := filepath.EvalSymlinks(executable); resolveErr == nil {
 			executable = resolved
 		}
-		candidates = append(candidates, filepath.Clean(filepath.Join(filepath.Dir(executable), "..", "config", "runtime.yaml")))
+		if binDir := filepath.Dir(executable); binDir != "" {
+			if bundleRoot := filepath.Dir(binDir); bundleRoot != "" {
+				candidates = append(candidates, filepath.Clean(filepath.Join(bundleRoot, "config", "runtime.yaml")))
+			}
+		}
 	}
 	if root := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); root != "" {
 		candidates = append(candidates, filepath.Join(root, appName, "config.yaml"))
